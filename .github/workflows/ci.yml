@@ -1,0 +1,42 @@
+# N360 analytics: synthetic end-to-end test on every push and pull request. See code/ci.sh.
+name: n360-ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  chdb:
+    name: Embedded engine (chdb)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install chdb==4.5.1 clickhouse-connect==1.13.0
+      - run: bash code/ci.sh chdb
+
+  server:
+    name: ClickHouse server 25.8 (the pinned version)
+    runs-on: ubuntu-24.04
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8
+        ports: ['8123:8123']
+        env:
+          CLICKHOUSE_USER: n360
+          CLICKHOUSE_PASSWORD: ci-loader
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+        options: >-
+          --health-cmd "wget -qO- http://localhost:8123/ping"
+          --health-interval 5s --health-retries 30
+    env:
+      CH_USER: n360
+      CH_PASSWORD: ci-loader
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install clickhouse-connect==1.13.0
+      - run: bash code/ci.sh server
