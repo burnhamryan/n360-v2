@@ -648,6 +648,127 @@
       "n360MayBeEmpty": "no cross-account event in the range"
     },
     {
+      "id": 9,
+      "title": "Other signals: containment, measure, pace, freshness",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Anomaly detection v2 (05): a VA's weekly containment more than 10 points below its 8-week median (on 200+ engaged); a rule line's measure share of engaged more than 20 points from its usual level; a crossing date moved more than 14 days earlier overnight; a source 2+ days behind. Value and Usual are % (days for pace change). Thresholds in n360.settings. Complete weeks only.\n\n**Source:** n360.v_anomaly_v2 (v_containment_week, v_measure_gap_week, v_forecast_change, v_source_freshness)  \n**Filter:** Customer  \n**Window:** the 60 days to the data-through day",
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 24,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT v2.signal AS Signal, ifNull(ac.display_name, '') AS Customer, v2.subject AS Subject, concat(toString(toDayOfMonth(v2.period)), ' ', formatDateTime(v2.period, '%b %Y')) AS `When`,\n               v2.value AS Value, v2.usual AS Usual, v2.detail AS Detail\n        FROM n360.v_anomaly_v2 AS v2 LEFT JOIN n360.account AS ac ON ac.account = v2.account\n        WHERE (v2.account = '' OR v2.account IN (${account:singlequote})) AND v2.period > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 60\n        ORDER BY v2.period DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No other signals in the last 60 days"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Signal"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 140
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 140
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "When"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Usual"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Usual"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "n360MayBeEmpty": "no v2 signal in the last 60 days"
+    },
+    {
       "id": 8,
       "title": "Flag quality per week",
       "type": "table",

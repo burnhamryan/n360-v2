@@ -1099,6 +1099,23 @@ def anomalies():
                  'dashboard time range, settled days'),
         field=field_config([width('Day', 110), width('Direction', 120), width('Customers', 90), width('VAs', 60)],
                            noValue='No cross-account events'), may_be_empty='no cross-account event in the range'))
+    p.append(panel(9, 'Other signals: containment, measure, pace, freshness', 'table', f"""
+        SELECT v2.signal AS Signal, ifNull(ac.display_name, '') AS Customer, v2.subject AS Subject, {date_sql('v2.period')} AS `When`,
+               v2.value AS Value, v2.usual AS Usual, v2.detail AS Detail
+        FROM n360.v_anomaly_v2 AS v2 LEFT JOIN n360.account AS ac ON ac.account = v2.account
+        WHERE (v2.account = '' OR v2.{ACCT}) AND v2.period > {DATA_THROUGH_SQL} - 60
+        ORDER BY v2.period DESC""", 0, 35, 24, 7,
+        describe('Anomaly detection v2 (05): a VA\'s weekly containment more than 10 points below its 8-week median '
+                 '(on 200+ engaged); a rule line\'s measure share of engaged more than 20 points from its usual level; '
+                 'a crossing date moved more than 14 days earlier overnight; a source 2+ days behind. Value and Usual '
+                 'are % (days for pace change). Thresholds in n360.settings. Complete weeks only.',
+                 'n360.v_anomaly_v2 (v_containment_week, v_measure_gap_week, v_forecast_change, v_source_freshness)',
+                 'Customer', 'the 60 days to the data-through day'),
+        field=field_config([width('Signal', 140), width('Customer', 140), width('When', 110), width('Value', 70),
+                            width('Usual', 70), override('Usual', ('mappings', [{'type': 'special', 'options': {
+                                'match': 'null', 'result': {'text': '', 'index': 0}}}]))],
+                           noValue='No other signals in the last 60 days'),
+        may_be_empty='no v2 signal in the last 60 days'))
     p.append(panel(8, 'Flag quality per week', 'table', f"""
         SELECT toString(week) AS `Week of`, flags AS Flags, reviewed AS Reviewed, real AS Real, expected AS Expected,
                data_issue AS `Data issue`, pct_real_of_reviewed AS `Real, of reviewed`

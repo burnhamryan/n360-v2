@@ -23,6 +23,8 @@ Edge cases deliberately present (and what each one tests):
   Northwind Outfitters a normal account; joins a cross-account spike with Bluebird and Harbor
   Cedar Logistics     an unbilled VA (no contract line)
   Kestrel Travel      a line running ahead of its term but under billed (pace amber: gap > 10 points)
+  Orchid Health       anomaly v2 cases on one VA and line: containment drop and measure gap over the last 2 weeks,
+                      and a one-day surge 2 days before the last day that pulls the crossing date > 14 days earlier
 A same-day spike hits Northwind, Bluebird and Harbor 6 days before the last day (cross-account event).
 Phase 2 tables (proposed design) are generated too; see phase2() for what is planted.
 
@@ -65,6 +67,7 @@ def daily_series(base, start, last, weekend=0.55, growth=0.0, noise=0.12, rng=R)
 
 
 STALE = {}            # --stale SOURCE=DAYS
+ORCHID_BILLED = 100000
 SETTLING = [0.97, 0.90]   # multi-night: share of the final count read on the second-newest and newest day
 
 
@@ -112,6 +115,9 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
                                  counts='Counts: the AI performs substantive processing of a customer message.'),
         'atlas-msa-a': dict(kind='all_conversations', status='active', label='Conversations (Atlas MSA, Exhibit A)',
                             contract_text='[SYNTHETIC] Every conversation counts.', counts='Counts: every conversation a user starts.'),
+        'orchid-sow-4b': dict(kind='meaningful_engagement', status='active', label='Meaningful engagement (Orchid SOW, section 4B)',
+                              contract_text='[SYNTHETIC] Contacts with meaningful engagement count toward volume.',
+                              counts='Counts: the AI resolves or substantively handles the contact.'),
         'bluebird-sow-3c': dict(kind='contained', status='pending_probe', label='Contained conversations (Bluebird SOW, section 3C)',
                                 contract_text='[SYNTHETIC] Contained conversations only.', counts='Not live: probe pending.'),
     }
@@ -136,6 +142,8 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
         ('Summit Games', [dict(ch='Chat', start='2026-09-05', months=12, billed=900000, vas=[('Summit NCW', 'Chat', 2400, dict(cm=True))])]),
         ('Lakeside Insurance', [dict(ch='Email', start='2025-11-30', months=12, billed=60000, vas=[('Lakeside Email', 'Email', 32, dict(silent_days=9))])]),
         ('Kestrel Travel', [dict(ch='Chat', start='2026-03-01', months=12, billed=125000, vas=[('Kestrel Chat', 'Chat', 540, {})])]),
+        ('Orchid Health', [dict(ch='Chat', start='2026-03-15', months=12, billed=ORCHID_BILLED, rule='orchid-sow-4b', ratio_drop=True,
+                                vas=[('Orchid Chat', 'Chat', 500, dict(handoff_up=True, pace_jump=True))])]),
     ]
     pool_def = dict(account='Bluebird Air', pool=0, name='Bluebird Air: 3 lines, pooled entitlement', billed=3000000, start='2026-01-29')
 
@@ -160,10 +168,14 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
                         c = 0
                     if ex.get('spike') and d == spike_day:
                         c = int(c * 2.6)
+                    if ex.get('pace_jump') and d == anchor - dt.timedelta(2):
+                        c = c * 14                                    # anomaly v2: crossing date jumps earlier
                     if multi and (last - d).days < len(SETTLING):
                         c = int(c * SETTLING[-1 - (last - d).days])
                     e = int(round(c * rr.uniform(0.82, 0.9)))
                     h = None if ex.get('cm') else int(round(e * rr.uniform(0.4, 0.6)))
+                    if ex.get('handoff_up') and d > anchor - dt.timedelta(14):
+                        h = int(round(e * 0.78))                      # anomaly v2: containment drop
                     rows[d] = (c, e, h)
                 va_daily[vname] = (acct, vch, ex, rows)
 
@@ -206,7 +218,8 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
                     conv[d] += c; eng[d] += e
             billable = None
             if kind == 'meaningful_engagement':
-                billable = {d: int(eng[d] * 0.86) for d in line_days}
+                billable = {d: int(eng[d] * (0.55 if L.get('ratio_drop') and d > anchor - dt.timedelta(14) else 0.86))
+                            for d in line_days}                       # ratio_drop: anomaly v2 measure gap
                 for d in line_days:
                     T['line_day_billable'].append(dict(day=d.isoformat(), account=acct, line_key=lk, rule_id=rule, rule_hash=rule_hash[rule],
                                                        conversations=conv[d], engaged_flag=eng[d], billable=billable[d], run_id=run_id))

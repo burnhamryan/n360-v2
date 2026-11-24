@@ -676,3 +676,57 @@ SELECT toMonday(day) AS week, count() AS flags, countIf(outcome IS NOT NULL) AS 
        if(reviewed = 0, NULL, round(100 * real / reviewed, 1)) AS pct_real_of_reviewed
 FROM n360.v_anomaly_review WHERE NOT provisional
 GROUP BY week;
+
+-- ───────────────────────── anomaly detection v2 (B20) ───────────────────────────────────────────
+-- Complete weeks only (Monday to Sunday, every day read). Each week is compared with the median of the same series'
+-- previous 8 complete weeks; thresholds in n360.settings.
+
+CREATE OR REPLACE VIEW n360.v_containment_week AS
+WITH (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') AS data_through,
+     w AS (SELECT d.bot_id AS bot_id, d.account AS account, toMonday(d.day) AS week, sum(d.engaged) AS week_engaged,
+                  1 - sum(d.handoffs) / week_engaged AS containment
+           FROM n360.va_day AS d WHERE d.handoffs IS NOT NULL AND d.engaged IS NOT NULL
+           GROUP BY bot_id, account, week HAVING week + 6 <= data_through AND count() = 7 AND week_engaged > 0)
+SELECT bot_id, account, week, week_engaged AS engaged, containment,
+       quantileExact(0.5)(containment) OVER (PARTITION BY bot_id ORDER BY week ROWS BETWEEN 8 PRECEDING AND 1 PRECEDING) AS usual,
+       count() OVER (PARTITION BY bot_id ORDER BY week ROWS BETWEEN 8 PRECEDING AND 1 PRECEDING) AS weeks_before
+FROM w;
+
+CREATE OR REPLACE VIEW n360.v_measure_gap_week AS
+-- Lines with a contract rule: weekly contract measure / platform engaged flag.
+WITH (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') AS data_through,
+     w AS (SELECT l.account AS account, l.line_key AS line_key, toMonday(d.day) AS week,
+                  sum(d.measured) AS measured, sum(d.engaged) AS engaged, measured / engaged AS ratio
+           FROM n360.line_day AS d INNER JOIN n360.contract_line AS l ON l.series_key = d.series_key
+           WHERE d.kind = 'line' AND l.rule_id IS NOT NULL AND d.measured IS NOT NULL AND d.engaged IS NOT NULL
+           GROUP BY account, line_key, week HAVING week + 6 <= data_through AND count() = 7 AND engaged > 0)
+SELECT account, line_key, week, measured, engaged, ratio,
+       quantileExact(0.5)(ratio) OVER (PARTITION BY line_key ORDER BY week ROWS BETWEEN 8 PRECEDING AND 1 PRECEDING) AS usual,
+       count() OVER (PARTITION BY line_key ORDER BY week ROWS BETWEEN 8 PRECEDING AND 1 PRECEDING) AS weeks_before
+FROM w;
+
+CREATE OR REPLACE VIEW n360.v_anomaly_v2 AS
+-- Anomaly detection v2 (05): one row per signal raised. value / usual in % (containment, measure share) or days
+-- (pace change: how far the crossing date moved). Cross-account events are in v_anomaly_events.
+WITH (SELECT containment_drop_pts FROM n360.settings) AS drop_pts,
+     (SELECT containment_min_engaged FROM n360.settings) AS min_engaged,
+     (SELECT measure_gap_pts FROM n360.settings) AS gap_pts
+SELECT 'containment drop' AS signal, toString(c.account) AS account,
+       concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')') AS subject, c.week AS period,
+       round(100 * c.containment, 1) AS value, toNullable(round(100 * c.usual, 1)) AS usual,
+       concat('week of ', toString(c.week), ', ', toString(c.engaged), ' engaged') AS detail
+FROM n360.v_containment_week AS c INNER JOIN n360.va AS v ON v.bot_id = c.bot_id
+WHERE c.weeks_before = 8 AND c.engaged >= min_engaged AND 100 * (c.usual - c.containment) > drop_pts
+UNION ALL
+SELECT 'measure gap', toString(g.account), g.line_key, g.week, round(100 * g.ratio, 1), toNullable(round(100 * g.usual, 1)),
+       concat('contract measure as % of engaged, week of ', toString(g.week))
+FROM n360.v_measure_gap_week AS g
+WHERE g.weeks_before = 8 AND abs(100 * (g.ratio - g.usual)) > gap_pts
+UNION ALL
+SELECT 'pace change', toString(f.account), f.series_key, f.data_date, toFloat64(f.moved_days), CAST(NULL, 'Nullable(Float64)'),
+       concat('crossing date ', toString(f.cross_date_before), ' -> ', toString(f.cross_date))
+FROM n360.v_forecast_change AS f WHERE f.moved_earlier
+UNION ALL
+SELECT 'freshness', '', toString(s.source_id), s.data_through, toFloat64(s.days_behind), CAST(NULL, 'Nullable(Float64)'),
+       concat(toString(s.days_behind), ' days behind (', s.status, ')')
+FROM n360.v_source_freshness AS s WHERE s.status != 'green';

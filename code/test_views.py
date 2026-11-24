@@ -124,6 +124,12 @@ def main():
         check('B19: weekly flag quality for the week of 9 Nov: 3 reviewed, 1 real, 1 expected, 1 data issue',
               wk and [int(wk[0][k]) for k in ('reviewed', 'real', 'expected', 'data_issue')] == [3, 1, 1, 1], wk)
 
+    # Anomaly v2 (B20): the three planted Orchid Health cases, and nothing else (no false positives)
+    if int(q("SELECT count() AS n FROM n360.runs WHERE status = 'loaded'")[0]['n']) > 1:   # needs several nights
+        sig = sorted((r['signal'], r['account']) for r in q('SELECT signal, account FROM n360.v_anomaly_v2'))
+        check('B20: containment drop, measure gap and pace change on Orchid Health only',
+              sig == [('containment drop', 'Orchid Health'), ('measure gap', 'Orchid Health'), ('pace change', 'Orchid Health')], sig)
+
     # Phase 2 (proposed design): skipped when the export carried no Phase 2 files
     if int(q('SELECT count() AS n FROM n360.va_config_snapshot')[0]['n']):
         cur = {r['va_name']: r for r in q('SELECT v.va_name AS va_name, c.engine_version AS engine_version, '
