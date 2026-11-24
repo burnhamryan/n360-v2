@@ -11,6 +11,7 @@ metric is added to `02_DATA_CONTRACT.md` / `03_METRICS.md`.
 | B1 | **First `docker compose up`.** Start the stack, load synthetic rows through the ClickHouse server (not chdb), open Grafana. Fix whatever breaks (ClickHouse plugin install, `$GRAFANA_CH_PASSWORD` interpolation in provisioning, the init script creating the read-only `grafana` user) | Grafana shows the N360 folder; Contracts dashboard renders all 6 panels with synthetic data; Grafana user cannot read `n360_next` |
 | B2 | **Multi-night synthetic.** Add `--nights N` to the generator: N consecutive nights, small realistic drift, one night that fails a check on purpose (`--bad-night k`) | Loading 14 nights in order leaves 13 loaded + 1 failed_checks in `runs`; `line_totals_history` has 13 nights; live tables hold the last good night |
 | B3 | **CI.** A GitHub Actions workflow: generate synthetic → load with chdb → 8 checks pass → build dashboards → JSON is valid → every panel's SQL executes with macros substituted | Workflow passes; breaking a check or a panel query fails it |
+| B3a | **Chat with the data** through Grafana's MCP server (`docs/09_CHAT.md`): Viewer service account, write tools off, chat instructions file | Fresh Claude answers 10 trap questions correctly through Grafana; every write refused |
 
 ## Tier 2: the Phase 1 dashboards (specs in `04_DASHBOARDS.md`)
 

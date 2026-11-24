@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "n360": {
+      "command": "uvx",
+      "args": [
+        "mcp-grafana@2.2.0",
+        "--enabled-tools", "search,datasource,dashboard,folder,navigation,sql,runpanelquery",
+        "--disable-write",
+        "--enable-query"
+      ],
+      "env": {
+        "GRAFANA_URL": "http://localhost:3000",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN": "<token printed by code/grafana/mcp_service_account.sh>"
+      }
+    }
+  }
+}

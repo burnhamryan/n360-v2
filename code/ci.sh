@@ -34,7 +34,10 @@ else
   sql() { curl -sfS -u "${CH_USER:-default}:${CH_PASSWORD:-}" "$URL" --data-binary "$1"; }
   sql "DROP DATABASE IF EXISTS n360" && sql "DROP DATABASE IF EXISTS n360_next"
   GRAFANA_CH_PASSWORD=${GRAFANA_CH_PASSWORD:-ci-grafana}
-  sql "CREATE USER IF NOT EXISTS grafana IDENTIFIED WITH sha256_password BY '$GRAFANA_CH_PASSWORD' SETTINGS readonly = 1"
+  # the same SQL as init/grafana_user.sh (the one definition of Grafana's user)
+  sed -n '/<<SQL$/,/^SQL$/p' "$ROOT/code/init/grafana_user.sh" | sed '1d;$d' |
+    sed "s/\${GRAFANA_CH_PASSWORD}/$GRAFANA_CH_PASSWORD/" | tr '\n' ' ' | tr ';' '\n' |
+    while read -r st; do [ -n "$st" ] && sql "$st"; done
   PANEL_CONN=(--url "$URL" --user grafana --password "$GRAFANA_CH_PASSWORD")
 fi
 
@@ -45,7 +48,6 @@ for dir in $(ls -d "$WORK"/nights/*/ | sort); do
   echo "night $i $(basename "$dir"): exit $got (want $want)"
   if [ $got -ne $want ]; then cat "$WORK/load_$i.log"; echo "FAIL: night $i"; exit 1; fi
 done
-[ "$MODE" = server ] && sql "GRANT SELECT ON n360.* TO grafana"
 
 loaded=$(sql "SELECT countIf(status = 'loaded') FROM n360.runs")
 failed=$(sql "SELECT countIf(status = 'failed_checks') FROM n360.runs")

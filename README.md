@@ -33,9 +33,12 @@ anomaly detection and forecasting built in.
 | ClickHouse schema: 13 tables, 4 views (incl. anomaly detection) | `code/schema.sql` | Done, tested |
 | Data checks run before every load (8) | `code/checks.sql` | Done, all pass on synthetic |
 | Loader: stage → check → atomic swap | `code/load.py` | Done (server or embedded `chdb`) |
-| Local stack: ClickHouse 25.8 + Grafana 13.3.1, localhost only | `code/docker-compose.yml`, `code/init/`, `code/grafana/provisioning/` | Written, **never started** (first `docker compose up` is untested) |
-| Dashboard generator (1 of 11 dashboards: Contracts) | `code/grafana/build_dashboards.py` | Done; SQL tested |
-| Synthetic night of data | `sample_data/generate_synthetic.py` | Done; loads with all checks passing |
+| Local stack: ClickHouse 25.8 + Grafana 13.3.1, localhost only | `code/docker-compose.yml`, `code/init/`, `code/grafana/provisioning/` | Started and tested in Linux Docker 24 Nov 2026 (B1); not yet on the Mac |
+| Dashboard generator (1 of 11 dashboards: Contracts) | `code/grafana/build_dashboards.py` | Done; renders in Grafana with plugin 4.23.5 |
+| Panel query test | `code/grafana/test_panels.py` | Runs every panel and variable query with macros expanded |
+| Synthetic data, one night or N nights | `sample_data/generate_synthetic.py` (`--nights`, `--bad-night`) | Done; 14 nights → 13 loaded, 1 refused |
+| CI | `.github/workflows/ci.yml`, `code/ci.sh` | Steps pass locally (chdb and server 25.8); not yet run on GitHub |
+| Chat with the data | `docs/09_CHAT.md`, `chat/`, `code/grafana/mcp_service_account.sh` | Tested on synthetic through Grafana; real data is an open question |
 
 ## The docs
 
@@ -49,6 +52,7 @@ anomaly detection and forecasting built in.
 | `docs/06_BACKLOG.md` | What to build next, in order, with acceptance criteria |
 | `docs/07_WORKING_RULES.md` | How Ryan wants work done. Non-negotiable |
 | `docs/08_DECISIONS.md` | Decided, proposed, and open questions |
+| `docs/09_CHAT.md` | Chatting with the data through Grafana's MCP server: setup, locks, test |
 
 ## First 15 minutes
 
