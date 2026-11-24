@@ -267,6 +267,18 @@ ENGINE = MergeTree
 PARTITION BY toYYYYMM(data_date)
 ORDER BY (source_id, data_date);
 
+CREATE TABLE IF NOT EXISTS n360.anomaly_log              -- B19: review outcome per flagged VA-day. Written only by
+(                                                           -- code/review_anomaly.py; the nightly load never touches it
+    bot_id        UUID,
+    day           Date,
+    kind          LowCardinality(String),                   -- the flag as it was when reviewed
+    outcome       Enum8('real' = 1, 'expected' = 2, 'data issue' = 3),
+    note          String,
+    reviewed_by   LowCardinality(String),
+    reviewed_at   DateTime('UTC') DEFAULT now()
+)
+ENGINE = MergeTree ORDER BY (bot_id, day, reviewed_at);
+
 -- ───────────────────────── views (one definition per ratio) ─────────────────────────────────────
 
 CREATE OR REPLACE VIEW n360.settings AS
@@ -641,3 +653,26 @@ SELECT account, series_key,
 FROM n360.forecast_history
 GROUP BY account, series_key
 HAVING cross_now IS NOT NULL OR cross_7_nights_ago IS NOT NULL OR cross_30_nights_ago IS NOT NULL;
+
+-- ───────────────────────── anomaly review (B19) ────────────────────────────────────────────────
+
+CREATE OR REPLACE VIEW n360.v_anomaly_review AS
+-- Every flag with its newest review (a later review replaces an earlier one). outcome NULL = not reviewed yet.
+SELECT a.day AS day, a.account AS account, a.bot_id AS bot_id, a.va_name AS va_name, a.kind AS kind, a.provisional AS provisional,
+       a.actual AS actual, a.expected AS expected, a.z AS z,
+       r.last_outcome AS outcome, r.last_note AS note, r.last_by AS reviewed_by, r.last_at AS reviewed_at
+FROM n360.v_va_day_anomaly AS a
+LEFT JOIN (SELECT bot_id, day, argMax(toNullable(outcome), reviewed_at) AS last_outcome,
+                  toNullable(argMax(note, reviewed_at)) AS last_note, toNullable(argMax(reviewed_by, reviewed_at)) AS last_by,
+                  toNullable(max(reviewed_at)) AS last_at
+           FROM n360.anomaly_log GROUP BY bot_id, day) AS r ON r.bot_id = a.bot_id AND r.day = a.day
+WHERE a.kind != 'normal';   -- Nullable columns: a flag with no review gets NULL (no join_use_nulls: it would leak into the inner view)
+
+CREATE OR REPLACE VIEW n360.v_flag_quality AS
+-- Weekly flag quality (settled flags only): how many were reviewed, and how many were real. Tunes the thresholds.
+SELECT toMonday(day) AS week, count() AS flags, countIf(outcome IS NOT NULL) AS reviewed,
+       countIf(outcome = 'real') AS real, countIf(outcome = 'expected') AS expected,
+       countIf(outcome = 'data issue') AS data_issue,
+       if(reviewed = 0, NULL, round(100 * real / reviewed, 1)) AS pct_real_of_reviewed
+FROM n360.v_anomaly_review WHERE NOT provisional
+GROUP BY week;

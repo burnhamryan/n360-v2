@@ -62,6 +62,12 @@ echo "runs loaded=$loaded failed_checks=$failed history_nights=$hist live_last_d
   || { echo "FAIL: runs/history do not match"; exit 1; }
 
 # B5 views: the synthetic edge cases (Atlas red, Harbor crossing red, pool once, Lakeside silent, the grouped spike)
+# anomaly reviews (B19), as the loader user; a second review of the same flag replaces the first
+R=(python3 "$ROOT/code/review_anomaly.py" "${CONN[@]}" --by ci)
+"${R[@]}" --va "Lakeside Email" --day 2026-11-11 --outcome real --note "inbox outage"
+"${R[@]}" --va "Lakeside Email" --day 2026-11-12 --outcome real
+"${R[@]}" --va "Lakeside Email" --day 2026-11-12 --outcome "data issue" --note "re-read: export gap"
+"${R[@]}" --va "Bluebird Web" --day 2026-11-13 --outcome expected --note "industry-wide spike"
 python3 "$ROOT/code/test_views.py" "${PANEL_CONN[@]}"
 
 # Dashboards and alert rules: regenerate into a scratch copy and require the committed JSON to match exactly

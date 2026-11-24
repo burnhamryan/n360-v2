@@ -362,7 +362,7 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Every flagged VA-day of the chosen kind in the time range. Review outcomes (real / expected / data issue) come with the anomaly log (backlog B19): \"Not reported yet\" until then. Click a VA to open it.\n\n**Source:** n360.v_va_day_anomaly  \n**Filter:** Customer; Kind; Include provisional  \n**Window:** dashboard time range",
+      "description": "Every flagged VA-day of the chosen kind in the time range, with its review outcome (real / expected / data issue; \"Not reported yet\" = not reviewed). Reviews are recorded with code/review_anomaly.py. Click a VA to open it.\n\n**Source:** n360.v_anomaly_review (n360.v_va_day_anomaly, n360.anomaly_log)  \n**Filter:** Customer; Kind; Include provisional  \n**Window:** dashboard time range",
       "gridPos": {
         "x": 0,
         "y": 12,
@@ -378,7 +378,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT concat(toString(toDayOfMonth(f.day)), ' ', formatDateTime(f.day, '%b %Y')) AS Day, ac.display_name AS Customer, concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')') AS VA, f.actual AS Actual,\n               f.expected AS Expected, f.z AS z, f.kind AS Kind, if(f.provisional, 'Provisional', 'Settled') AS Status,\n               CAST(NULL, 'Nullable(String)') AS Review,\n               concat('/d/n360-va?var-account=', f.account, '&var-va=', toString(f.bot_id)) AS drill\n        FROM n360.v_va_day_anomaly AS f INNER JOIN n360.va AS v ON v.bot_id = f.bot_id\n        INNER JOIN n360.account AS ac ON ac.account = f.account\n        WHERE f.account IN (${account:singlequote}) AND if(${kind:singlequote} = 'spikes', f.kind = 'spike', f.kind IN ('drop', 'went silent')) AND (NOT f.provisional OR ${provisional:singlequote} = 'yes') AND $__dateFilter(f.day)\n        ORDER BY f.day DESC",
+          "rawSql": "SELECT concat(toString(toDayOfMonth(f.day)), ' ', formatDateTime(f.day, '%b %Y')) AS Day, ac.display_name AS Customer, concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')') AS VA, f.actual AS Actual,\n               f.expected AS Expected, f.z AS z, f.kind AS Kind, if(f.provisional, 'Provisional', 'Settled') AS Status,\n               CAST(f.outcome, 'Nullable(String)') AS Review, f.note AS Note,\n               concat('/d/n360-va?var-account=', f.account, '&var-va=', toString(f.bot_id)) AS drill\n        FROM n360.v_anomaly_review AS f INNER JOIN n360.va AS v ON v.bot_id = f.bot_id\n        INNER JOIN n360.account AS ac ON ac.account = f.account\n        WHERE f.account IN (${account:singlequote}) AND if(${kind:singlequote} = 'spikes', f.kind = 'spike', f.kind IN ('drop', 'went silent')) AND (NOT f.provisional OR ${provisional:singlequote} = 'yes') AND $__dateFilter(f.day)\n        ORDER BY f.day DESC",
           "refId": "A"
         }
       ],
@@ -453,6 +453,26 @@
                 "id": "mappings",
                 "value": [
                   {
+                    "type": "value",
+                    "options": {
+                      "real": {
+                        "text": "Real",
+                        "color": "red",
+                        "index": 0
+                      },
+                      "expected": {
+                        "text": "Expected",
+                        "color": "green",
+                        "index": 1
+                      },
+                      "data issue": {
+                        "text": "Data issue",
+                        "color": "orange",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
                     "type": "special",
                     "options": {
                       "match": "null",
@@ -464,6 +484,24 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Review"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
               }
             ]
           },
@@ -608,6 +646,84 @@
       },
       "options": {},
       "n360MayBeEmpty": "no cross-account event in the range"
+    },
+    {
+      "id": 8,
+      "title": "Flag quality per week",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Settled flags per week and what reviews found. A low share of real flags means the thresholds (n360.settings) flag too much; tuned monthly from these outcomes (05). All customers.\n\n**Source:** n360.v_flag_quality (n360.v_anomaly_review)  \n**Filter:** settled flags  \n**Window:** dashboard time range, by week",
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 24,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT toString(week) AS `Week of`, flags AS Flags, reviewed AS Reviewed, real AS Real, expected AS Expected,\n               data_issue AS `Data issue`, pct_real_of_reviewed AS `Real, of reviewed`\n        FROM n360.v_flag_quality WHERE $__dateFilter(week) ORDER BY week DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Real, of reviewed"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Real, of reviewed"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "None reviewed",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "n360MayBeEmpty": "no settled flags in the range"
     },
     {
       "id": 7,

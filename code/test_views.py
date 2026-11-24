@@ -112,6 +112,18 @@ def main():
     ch_rows = q("SELECT count() AS n FROM n360.v_forecast_change WHERE series_key = 'Harbor Telecom|0' AND newly_crossing_soon")
     check('B16: Harbor Chat flagged once as newly crossing billed soon', int(ch_rows[0]['n']) == 1 or not acc, ch_rows)
 
+    # Anomaly review log (B19): ci.sh records 3 outcomes (one flag reviewed twice) before this runs
+    if int(q('SELECT count() AS n FROM n360.anomaly_log')[0]['n']):
+        rev = {(r['va_name'], r['d']): r['outcome'] for r in q(
+            "SELECT va_name, toString(day) AS d, toString(outcome) AS outcome FROM n360.v_anomaly_review WHERE outcome IS NOT NULL")}
+        check('B19: outcomes join back to their flags; the newest review wins',
+              rev == {('Lakeside Email', '2026-11-11'): 'real', ('Lakeside Email', '2026-11-12'): 'data issue',
+                      ('Bluebird Web', '2026-11-13'): 'expected'}, rev)
+        wk = q("SELECT reviewed, real, expected, data_issue, pct_real_of_reviewed AS pct FROM n360.v_flag_quality "
+               "WHERE week = toDate('2026-11-09')")
+        check('B19: weekly flag quality for the week of 9 Nov: 3 reviewed, 1 real, 1 expected, 1 data issue',
+              wk and [int(wk[0][k]) for k in ('reviewed', 'real', 'expected', 'data_issue')] == [3, 1, 1, 1], wk)
+
     # Phase 2 (proposed design): skipped when the export carried no Phase 2 files
     if int(q('SELECT count() AS n FROM n360.va_config_snapshot')[0]['n']):
         cur = {r['va_name']: r for r in q('SELECT v.va_name AS va_name, c.engine_version AS engine_version, '

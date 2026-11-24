@@ -55,6 +55,7 @@ RUNWAY_LABEL = {'above billed': ('Already above billed', 'red'), 'crosses soon':
                 'no use in the last 30 days': ('No use in the last 30 days', 'grey'),
                 'not measurable': ('Not measurable', 'grey'), 'not implemented': ('Not implemented', 'grey'),
                 'not read': (NOT_READ, 'grey')}
+REVIEW_LABEL = {'real': ('Real', 'red'), 'expected': ('Expected', 'green'), 'data issue': ('Data issue', 'amber')}
 FRESH_LABEL = {'green': ('On time', 'green'), 'amber': ('Behind', 'amber'), 'red': ('Late', 'red')}
 HEAT_BANDS = [(-2, 'Drop or silent', 'red'), (-1, 'Low (z -4 to -2)', 'dark_red'), (0, 'Normal', 'normal'),
               (1, 'High (z 2 to 4)', 'dark_blue'), (2, 'Spike', 'blue')]
@@ -1069,17 +1070,19 @@ def anomalies():
     p.append(panel(5, 'Anomaly feed', 'table', f"""
         SELECT {date_sql('f.day')} AS Day, ac.display_name AS Customer, {VA_LABEL} AS VA, f.actual AS Actual,
                f.expected AS Expected, f.z AS z, f.kind AS Kind, if(f.provisional, 'Provisional', 'Settled') AS Status,
-               CAST(NULL, 'Nullable(String)') AS Review,
+               CAST(f.outcome, 'Nullable(String)') AS Review, f.note AS Note,
                concat('/d/n360-va?var-account=', f.account, '&var-va=', toString(f.bot_id)) AS drill
-        FROM n360.v_va_day_anomaly AS f INNER JOIN n360.va AS v ON v.bot_id = f.bot_id
+        FROM n360.v_anomaly_review AS f INNER JOIN n360.va AS v ON v.bot_id = f.bot_id
         INNER JOIN n360.account AS ac ON ac.account = f.account
         WHERE f.{ACCT} AND {kind_sql.replace('kind', 'f.kind').replace('${f.kind', '${kind')} AND {prov_sql.replace('provisional OR', 'f.provisional OR')} AND $__dateFilter(f.day)
         ORDER BY f.day DESC""", 0, 12, 24, 9,
-        describe('Every flagged VA-day of the chosen kind in the time range. Review outcomes (real / expected / data '
-                 'issue) come with the anomaly log (backlog B19): "Not reported yet" until then. Click a VA to open it.',
-                 'n360.v_va_day_anomaly', 'Customer; Kind; Include provisional', 'dashboard time range'),
+        describe('Every flagged VA-day of the chosen kind in the time range, with its review outcome (real / expected / '
+                 'data issue; "Not reported yet" = not reviewed). Reviews are recorded with code/review_anomaly.py. '
+                 'Click a VA to open it.', 'n360.v_anomaly_review (n360.v_va_day_anomaly, n360.anomaly_log)',
+                 'Customer; Kind; Include provisional', 'dashboard time range'),
         field=field_config([hidden('drill'), count_col('Actual'), count_col('Expected'), override('z', ('decimals', 1)),
-                            override('Review', ('mappings', [empty_grey()])),
+                            override('Review', ('mappings', label_colours(REVIEW_LABEL) + [empty_grey()]),
+                                     ('custom.cellOptions', {'type': 'color-text'})), width('Review', 110),
                             override('Status', ('mappings', label_colours({'Provisional': ('Provisional', 'amber'),
                                                                           'Settled': ('Settled', 'red')})),
                                      ('custom.cellOptions', {'type': 'color-text'})),
@@ -1096,6 +1099,16 @@ def anomalies():
                  'dashboard time range, settled days'),
         field=field_config([width('Day', 110), width('Direction', 120), width('Customers', 90), width('VAs', 60)],
                            noValue='No cross-account events'), may_be_empty='no cross-account event in the range'))
+    p.append(panel(8, 'Flag quality per week', 'table', f"""
+        SELECT toString(week) AS `Week of`, flags AS Flags, reviewed AS Reviewed, real AS Real, expected AS Expected,
+               data_issue AS `Data issue`, pct_real_of_reviewed AS `Real, of reviewed`
+        FROM n360.v_flag_quality WHERE $__dateFilter(week) ORDER BY week DESC""", 0, 28, 24, 7,
+        describe('Settled flags per week and what reviews found. A low share of real flags means the thresholds '
+                 '(n360.settings) flag too much; tuned monthly from these outcomes (05). All customers.',
+                 'n360.v_flag_quality (n360.v_anomaly_review)', 'settled flags', 'dashboard time range, by week'),
+        field=field_config([pct('Real, of reviewed')]), may_be_empty='no settled flags in the range'))
+    p[-1]['fieldConfig']['overrides'].append(override('Real, of reviewed', ('mappings', [{'type': 'special', 'options': {
+        'match': 'null', 'result': {'text': 'None reviewed', 'color': COLOUR['grey'], 'index': 0}}}])))
     p.append(panel(7, 'Settled flags per week', 'timeseries', f"""
         SELECT toDateTime(toMonday(day)) AS time, countIf(kind IN ('drop', 'went silent')) AS `Drops and silences`,
                countIf(kind = 'spike') AS Spikes
