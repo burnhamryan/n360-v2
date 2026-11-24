@@ -1,6 +1,7 @@
 # 06 · Backlog
 
-**Status 24 Nov 2026:** B1–B14, B3a done on synthetic data; B22–B23 built on a proposed design (field meanings open in `08`). Next: B15–B21. See `CHANGES.md`.
+**Status 24 Nov 2026:** every item B1–B23 (and B3a) done on synthetic data. What remains is company-side (below) and the
+open questions in `08`. See `CHANGES.md`.
 
 **Work top to bottom.** Every item is buildable and testable on synthetic data. "Done" means it
 meets its acceptance criteria on synthetic data, is listed in `CHANGES.md`, and any new table or

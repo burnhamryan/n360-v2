@@ -1,0 +1,196 @@
+{
+  "apiVersion": 1,
+  "contactPoints": [
+    {
+      "orgId": 1,
+      "name": "N360 day-to-day owner (placeholder)",
+      "receivers": [
+        {
+          "uid": "n360-owner",
+          "type": "email",
+          "disableResolveMessage": false,
+          "settings": {
+            "addresses": "n360-owner@example.invalid",
+            "singleEmail": true
+          }
+        }
+      ]
+    },
+    {
+      "orgId": 1,
+      "name": "CS leadership and CSM (placeholder)",
+      "receivers": [
+        {
+          "uid": "n360-cs",
+          "type": "email",
+          "disableResolveMessage": false,
+          "settings": {
+            "addresses": "n360-cs@example.invalid",
+            "singleEmail": true
+          }
+        }
+      ]
+    }
+  ],
+  "policies": [
+    {
+      "orgId": 1,
+      "receiver": "N360 day-to-day owner (placeholder)",
+      "group_by": [
+        "alertname"
+      ],
+      "routes": [
+        {
+          "receiver": "N360 day-to-day owner (placeholder)",
+          "group_by": [
+            "alertname"
+          ],
+          "repeat_interval": "4h",
+          "group_wait": "30s",
+          "object_matchers": [
+            [
+              "team",
+              "=",
+              "n360"
+            ],
+            [
+              "audience",
+              "=",
+              "owner"
+            ],
+            [
+              "cadence",
+              "=",
+              "immediately"
+            ]
+          ]
+        },
+        {
+          "receiver": "N360 day-to-day owner (placeholder)",
+          "group_by": [
+            "alertname"
+          ],
+          "repeat_interval": "24h",
+          "group_wait": "30s",
+          "object_matchers": [
+            [
+              "team",
+              "=",
+              "n360"
+            ],
+            [
+              "audience",
+              "=",
+              "owner"
+            ],
+            [
+              "cadence",
+              "=",
+              "daily"
+            ]
+          ]
+        },
+        {
+          "receiver": "N360 day-to-day owner (placeholder)",
+          "group_by": [
+            "alertname"
+          ],
+          "repeat_interval": "168h",
+          "group_wait": "30s",
+          "object_matchers": [
+            [
+              "team",
+              "=",
+              "n360"
+            ],
+            [
+              "audience",
+              "=",
+              "owner"
+            ],
+            [
+              "cadence",
+              "=",
+              "weekly"
+            ]
+          ]
+        },
+        {
+          "receiver": "CS leadership and CSM (placeholder)",
+          "group_by": [
+            "alertname"
+          ],
+          "repeat_interval": "4h",
+          "group_wait": "30s",
+          "object_matchers": [
+            [
+              "team",
+              "=",
+              "n360"
+            ],
+            [
+              "audience",
+              "=",
+              "cs"
+            ],
+            [
+              "cadence",
+              "=",
+              "immediately"
+            ]
+          ]
+        },
+        {
+          "receiver": "CS leadership and CSM (placeholder)",
+          "group_by": [
+            "alertname"
+          ],
+          "repeat_interval": "24h",
+          "group_wait": "30s",
+          "object_matchers": [
+            [
+              "team",
+              "=",
+              "n360"
+            ],
+            [
+              "audience",
+              "=",
+              "cs"
+            ],
+            [
+              "cadence",
+              "=",
+              "daily"
+            ]
+          ]
+        },
+        {
+          "receiver": "CS leadership and CSM (placeholder)",
+          "group_by": [
+            "alertname"
+          ],
+          "repeat_interval": "168h",
+          "group_wait": "30s",
+          "object_matchers": [
+            [
+              "team",
+              "=",
+              "n360"
+            ],
+            [
+              "audience",
+              "=",
+              "cs"
+            ],
+            [
+              "cadence",
+              "=",
+              "weekly"
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

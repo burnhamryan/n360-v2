@@ -88,6 +88,48 @@ def main():
     check('customers with no entitlement have no pace (not read), not a colour',
           all(att[a]['pace'] is None for a in none), {a: att[a]['pace'] for a in none})
 
+    # Forecast history (B15) and accuracy (B16)
+    nights = int(q("SELECT countIf(status = 'loaded') AS n FROM n360.runs")[0]['n'])
+    first = q("SELECT toString(min(data_date)) AS d FROM n360.runs")[0]['d']
+    per = q(f"SELECT series_key, count() AS n FROM n360.forecast_history WHERE data_date >= '{first}' GROUP BY series_key")
+    n_fc = int(q('SELECT count() AS n FROM n360.forecast')[0]['n'])
+    check('B15: one forecast_history row per line or pool per loaded night',
+          len(per) == n_fc and all(int(r['n']) == nights for r in per), (nights, per))
+    acc = q("SELECT mape, forecasts FROM n360.v_forecast_accuracy WHERE series_key = 'Harbor Telecom|0' AND horizon_days = 30")
+    if acc:   # hand check: recompute MAPE at 30 days for Harbor Chat in Python from the stored rows
+        rows = q("SELECT toString(data_date) AS d, consumed, rate_per_day FROM n360.forecast_history "
+                 "WHERE series_key = 'Harbor Telecom|0'")
+        import datetime as _d
+        by = {_d.date.fromisoformat(r['d']): r for r in rows}
+        apes = [abs(float(by[m + _d.timedelta(30)]['consumed']) - (float(r['consumed']) + float(r['rate_per_day']) * 30))
+                / float(by[m + _d.timedelta(30)]['consumed'])
+                for m, r in by.items() if m + _d.timedelta(30) in by and float(by[m + _d.timedelta(30)]['consumed']) > 0]
+        hand = round(100 * sum(apes) / len(apes), 1)
+        check('B16: Harbor Chat MAPE at 30 days matches a hand calculation',
+              abs(hand - float(acc[0]['mape'])) < 0.05 and len(apes) == int(acc[0]['forecasts']), (hand, acc))
+    else:
+        print('SKIP B16 hand check: fewer than 30 nights of stored forecasts')
+    ch_rows = q("SELECT count() AS n FROM n360.v_forecast_change WHERE series_key = 'Harbor Telecom|0' AND newly_crossing_soon")
+    check('B16: Harbor Chat flagged once as newly crossing billed soon', int(ch_rows[0]['n']) == 1 or not acc, ch_rows)
+
+    # Anomaly review log (B19): ci.sh records 3 outcomes (one flag reviewed twice) before this runs
+    if int(q('SELECT count() AS n FROM n360.anomaly_log')[0]['n']):
+        rev = {(r['va_name'], r['d']): r['outcome'] for r in q(
+            "SELECT va_name, toString(day) AS d, toString(outcome) AS outcome FROM n360.v_anomaly_review WHERE outcome IS NOT NULL")}
+        check('B19: outcomes join back to their flags; the newest review wins',
+              rev == {('Lakeside Email', '2026-11-11'): 'real', ('Lakeside Email', '2026-11-12'): 'data issue',
+                      ('Bluebird Web', '2026-11-13'): 'expected'}, rev)
+        wk = q("SELECT reviewed, real, expected, data_issue, pct_real_of_reviewed AS pct FROM n360.v_flag_quality "
+               "WHERE week = toDate('2026-11-09')")
+        check('B19: weekly flag quality for the week of 9 Nov: 3 reviewed, 1 real, 1 expected, 1 data issue',
+              wk and [int(wk[0][k]) for k in ('reviewed', 'real', 'expected', 'data_issue')] == [3, 1, 1, 1], wk)
+
+    # Anomaly v2 (B20): the three planted Orchid Health cases, and nothing else (no false positives)
+    if int(q("SELECT count() AS n FROM n360.runs WHERE status = 'loaded'")[0]['n']) > 1:   # needs several nights
+        sig = sorted((r['signal'], r['account']) for r in q('SELECT signal, account FROM n360.v_anomaly_v2'))
+        check('B20: containment drop, measure gap and pace change on Orchid Health only',
+              sig == [('containment drop', 'Orchid Health'), ('measure gap', 'Orchid Health'), ('pace change', 'Orchid Health')], sig)
+
     # Phase 2 (proposed design): skipped when the export carried no Phase 2 files
     if int(q('SELECT count() AS n FROM n360.va_config_snapshot')[0]['n']):
         cur = {r['va_name']: r for r in q('SELECT v.va_name AS va_name, c.engine_version AS engine_version, '

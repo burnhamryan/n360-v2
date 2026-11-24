@@ -2,7 +2,7 @@
 """Generate a SYNTHETIC night of N360 data in the exact row format the loader expects.
 
     python3 sample_data/generate_synthetic.py --out sample_data/rows --last-day 2026-11-19
-    python3 sample_data/generate_synthetic.py --out sample_data/nights --nights 14 --bad-night 9
+    python3 sample_data/generate_synthetic.py --out sample_data/nights --nights 14 --bad-night 9 --forecast-backfill 150
         # 14 consecutive nights ending on --last-day, one folder each: <out>/<data_date>/rows/
         # Night 9 (1-based) is broken on purpose so load.py refuses it (line_measured_reconciles fails).
 
@@ -23,6 +23,8 @@ Edge cases deliberately present (and what each one tests):
   Northwind Outfitters a normal account; joins a cross-account spike with Bluebird and Harbor
   Cedar Logistics     an unbilled VA (no contract line)
   Kestrel Travel      a line running ahead of its term but under billed (pace amber: gap > 10 points)
+  Orchid Health       anomaly v2 cases on one VA and line: containment drop and measure gap over the last 2 weeks,
+                      and a one-day surge 2 days before the last day that pulls the crossing date > 14 days earlier
 A same-day spike hits Northwind, Bluebird and Harbor 6 days before the last day (cross-account event).
 Phase 2 tables (proposed design) are generated too; see phase2() for what is planted.
 
@@ -64,6 +66,8 @@ def daily_series(base, start, last, weekend=0.55, growth=0.0, noise=0.12, rng=R)
     return out
 
 
+STALE = {}            # --stale SOURCE=DAYS
+ORCHID_BILLED = 100000
 SETTLING = [0.97, 0.90]   # multi-night: share of the final count read on the second-newest and newest day
 
 
@@ -73,20 +77,30 @@ def main():
     ap.add_argument('--last-day', default='2026-11-19', help='last data day (the window ends 23:59 UTC that day)')
     ap.add_argument('--nights', type=int, default=1, help='N consecutive nights ending on --last-day, one folder each')
     ap.add_argument('--bad-night', type=int, help='1-based night to break on purpose (multi-night only)')
+    ap.add_argument('--forecast-backfill', type=int, default=0, metavar='DAYS',
+                    help='also write forecast_history.ndjson: the forecast each of the DAYS nights before the first '
+                         'generated night would have stored (so accuracy can be tested without DAYS loads)')
+    ap.add_argument('--stale', action='append', default=[], metavar='SOURCE=DAYS',
+                    help='make a source stale: its last day is DAYS before the data-through day (repeatable), '
+                         'e.g. --stale containment_days=3')
     a = ap.parse_args()
+    global STALE
+    STALE = {k: int(v) for k, v in (x.split('=') for x in a.stale)}
     final = dt.date.fromisoformat(a.last_day)
     if a.nights == 1 and not a.bad_night:
-        generate(final, final, a.out, multi=False)
+        generate(final, final, a.out, multi=False, backfill_days=a.forecast_backfill, backfill_until=final)
         return
     if a.bad_night and not 1 <= a.bad_night <= a.nights:
         ap.error('--bad-night must be between 1 and --nights')
     for i in range(1, a.nights + 1):
         last = final - dt.timedelta(a.nights - i)
         out = os.path.join(a.out, (last + dt.timedelta(1)).isoformat(), 'rows')
-        generate(last, final, out, multi=True, bad=(i == a.bad_night))
+        first = i == 1      # the backfill rides on the first night: only nights before the run are filled
+        generate(last, final, out, multi=True, bad=(i == a.bad_night),
+                 backfill_days=a.forecast_backfill if first else 0, backfill_until=last if first else None)
 
 
-def generate(last, anchor, out, multi, bad=False):
+def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_until=None):
     """one night: data through `last`; planted events dated from `anchor` (the final night's last day)"""
     data_date = last + dt.timedelta(1)
     run_id = str(uuid.uuid4())
@@ -101,6 +115,9 @@ def generate(last, anchor, out, multi, bad=False):
                                  counts='Counts: the AI performs substantive processing of a customer message.'),
         'atlas-msa-a': dict(kind='all_conversations', status='active', label='Conversations (Atlas MSA, Exhibit A)',
                             contract_text='[SYNTHETIC] Every conversation counts.', counts='Counts: every conversation a user starts.'),
+        'orchid-sow-4b': dict(kind='meaningful_engagement', status='active', label='Meaningful engagement (Orchid SOW, section 4B)',
+                              contract_text='[SYNTHETIC] Contacts with meaningful engagement count toward volume.',
+                              counts='Counts: the AI resolves or substantively handles the contact.'),
         'bluebird-sow-3c': dict(kind='contained', status='pending_probe', label='Contained conversations (Bluebird SOW, section 3C)',
                                 contract_text='[SYNTHETIC] Contained conversations only.', counts='Not live: probe pending.'),
     }
@@ -125,6 +142,8 @@ def generate(last, anchor, out, multi, bad=False):
         ('Summit Games', [dict(ch='Chat', start='2026-09-05', months=12, billed=900000, vas=[('Summit NCW', 'Chat', 2400, dict(cm=True))])]),
         ('Lakeside Insurance', [dict(ch='Email', start='2025-11-30', months=12, billed=60000, vas=[('Lakeside Email', 'Email', 32, dict(silent_days=9))])]),
         ('Kestrel Travel', [dict(ch='Chat', start='2026-03-01', months=12, billed=125000, vas=[('Kestrel Chat', 'Chat', 540, {})])]),
+        ('Orchid Health', [dict(ch='Chat', start='2026-03-15', months=12, billed=ORCHID_BILLED, rule='orchid-sow-4b', ratio_drop=True,
+                                vas=[('Orchid Chat', 'Chat', 500, dict(handoff_up=True, pace_jump=True))])]),
     ]
     pool_def = dict(account='Bluebird Air', pool=0, name='Bluebird Air: 3 lines, pooled entitlement', billed=3000000, start='2026-01-29')
 
@@ -149,10 +168,14 @@ def generate(last, anchor, out, multi, bad=False):
                         c = 0
                     if ex.get('spike') and d == spike_day:
                         c = int(c * 2.6)
+                    if ex.get('pace_jump') and d == anchor - dt.timedelta(2):
+                        c = c * 14                                    # anomaly v2: crossing date jumps earlier
                     if multi and (last - d).days < len(SETTLING):
                         c = int(c * SETTLING[-1 - (last - d).days])
                     e = int(round(c * rr.uniform(0.82, 0.9)))
                     h = None if ex.get('cm') else int(round(e * rr.uniform(0.4, 0.6)))
+                    if ex.get('handoff_up') and d > anchor - dt.timedelta(14):
+                        h = int(round(e * 0.78))                      # anomaly v2: containment drop
                     rows[d] = (c, e, h)
                 va_daily[vname] = (acct, vch, ex, rows)
 
@@ -176,6 +199,7 @@ def generate(last, anchor, out, multi, bad=False):
                              csm_rocketlane='csm9@example.com', run_id=run_id))
 
     pool_members, pool_used, pool_last30 = [], 0, 0
+    pool_meas, fc_series = {}, []          # daily measure per forecast series, for the forecast-history backfill
     for acct, lines in W:
         for idx, L in enumerate(lines):
             sc = L.get('sheet_customer', acct)
@@ -194,7 +218,8 @@ def generate(last, anchor, out, multi, bad=False):
                     conv[d] += c; eng[d] += e
             billable = None
             if kind == 'meaningful_engagement':
-                billable = {d: int(eng[d] * 0.86) for d in line_days}
+                billable = {d: int(eng[d] * (0.55 if L.get('ratio_drop') and d > anchor - dt.timedelta(14) else 0.86))
+                            for d in line_days}                       # ratio_drop: anomaly v2 measure gap
                 for d in line_days:
                     T['line_day_billable'].append(dict(day=d.isoformat(), account=acct, line_key=lk, rule_id=rule, rule_hash=rule_hash[rule],
                                                        conversations=conv[d], engaged_flag=eng[d], billable=billable[d], run_id=run_id))
@@ -230,8 +255,11 @@ def generate(last, anchor, out, multi, bad=False):
                                                  pct_billed_page=pct))
             if L.get('pool') is not None:
                 pool_members.append(lk); pool_used += used or 0; pool_last30 += last30 or 0
+                for d, v in meas.items():
+                    pool_meas[d] = pool_meas.get(d, 0) + v
             elif used is not None and billed:
                 T['forecast'].append(forecast_row(acct, skey, None, L['start_d'], L['end_d'], last, used, last30, billed, run_id))
+                fc_series.append((acct, skey, None, L['start_d'], L['end_d'], billed, meas))
 
     # pool + its forecast
     ps = dt.date.fromisoformat(pool_def['start']); pe = dt.date(ps.year + 1, ps.month, ps.day) - dt.timedelta(1)
@@ -239,6 +267,24 @@ def generate(last, anchor, out, multi, bad=False):
                           billed_basis='[SYNTHETIC] one entitlement across 3 lines', start_date=ps.isoformat(), end_date=pe.isoformat(),
                           line_keys=pool_members, run_id=run_id))
     T['forecast'].append(forecast_row('Bluebird Air', 'Bluebird Air|pool0', 0, ps, pe, last, pool_used, pool_last30, pool_def['billed'], run_id))
+    fc_series.append(('Bluebird Air', 'Bluebird Air|pool0', 0, ps, pe, pool_def['billed'], pool_meas))
+
+    # forecast history backfill (B15): the forecast each earlier night would have stored, for the nights before
+    # `backfill_until` (the first generated night), so accuracy over 30/60/90 days can be tested without 90+ loads
+    if backfill_days:
+        T['forecast_history'] = []
+        for k in range(backfill_days, 0, -1):
+            t = backfill_until - dt.timedelta(k)            # data through t; the night is t + 1
+            for acct, skey, pool, s0, e0, billed, m in fc_series:
+                if t < s0:
+                    continue
+                used_t = sum(v for d, v in m.items() if d <= t)
+                last30_t = sum(v for d, v in m.items() if t - dt.timedelta(30) < d <= t)
+                f = forecast_row(acct, skey, pool, s0, e0, t, used_t, last30_t, billed, run_id)
+                T['forecast_history'].append(dict(
+                    data_date=(t + dt.timedelta(1)).isoformat(), run_id=run_id, account=acct, series_key=skey, pool_id=pool,
+                    horizon=f['horizon'], rate_per_day=f['rate_per_day'], forecast_m3=f['forecast_m3'], billed=billed,
+                    consumed=used_t, cross_date=f['cross_date'], exhaust_date=f['exhaust_date']))
 
     # unbilled VA rows and its daily series
     bot, live, src = va_row('Cedar Ops Chat', 'Cedar Logistics', 'Chat', {}, on_contract=False)
@@ -254,7 +300,8 @@ def generate(last, anchor, out, multi, bad=False):
                               run_id=run_id))
     for sid, desc in [('consumption_days', 'Daily conversations and engaged per VA and per line'),
                       ('containment_days', 'Daily handoffs per VA'), ('consumption_rules', 'Contract-rule counts per line per day')]:
-        T['source'].append(dict(source_id=sid, description='[SYNTHETIC] ' + desc, definition='', check_text='', last_day=last.isoformat(), run_id=run_id))
+        T['source'].append(dict(source_id=sid, description='[SYNTHETIC] ' + desc, definition='', check_text='',
+                                last_day=(last - dt.timedelta(STALE.get(sid, 0))).isoformat(), run_id=run_id))
 
     phase2(T, va_daily, last, anchor, run_id)
 

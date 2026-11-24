@@ -24,7 +24,7 @@ first guesses; they are tuned monthly from review outcomes.
   spikes grouped apart from drops and silences).
 - The newest 0–2 days produce most false drops (data still settling). Provisional days never alert.
 
-## Anomaly detection v2 (planned; build and test on synthetic)
+## Anomaly detection v2 (built 24 Nov 2026, B20: `v_anomaly_v2`; thresholds in `n360.settings`; tested on planted synthetic cases)
 
 | Signal | Rule |
 |---|---|
@@ -48,7 +48,12 @@ SQL.** `generate_synthetic.py::forecast_row` reproduces it exactly, so you can s
 | Crosses billed on | runs-out date if before contract end |
 | Flags | Early term (< 60 days history) · Step change (last-30 rate vs term average differs > 50%) · Already above billed · Projected to exceed billed by a date |
 
-## What to add (backlog items F1–F4)
+## What to add (backlog items F1–F4) — built 24 Nov 2026 on synthetic
+
+F1 `forecast_history` (B15, copied by `load.py` each loaded night), F2 accuracy (B16, `v_forecast_accuracy`,
+`v_forecast_drift`), F3 challenger backtest (B21, `code/forecast/challenger.py`, report in `10_CHALLENGER_BACKTEST.md`).
+F4 ranges is not built (the challenger gives no interval yet).
+
 
 1. **`forecast_history`**: store every night's forecast per line and pool. Without it nothing can be checked.
 2. **Accuracy**: for forecasts made 30, 60, 90 days ago, compare predicted cumulative use with actual; MAPE per line and overall; how far crossing dates moved.
@@ -58,7 +63,7 @@ SQL.** `generate_synthetic.py::forecast_row` reproduces it exactly, so you can s
 Forecasts never use engaged where a rule applies, never sum lines outside a confirmed pool, and
 say "Not reported yet" for lines that are not measurable or not implemented.
 
-## Alerting (planned; Grafana alert rules provisioned from code)
+## Alerting (built 24 Nov 2026, B18: `code/grafana/build_alerts.py` → `provisioning/alerting/`; contact points are placeholders)
 
 | Alert | Condition | To | When |
 |---|---|---|---|

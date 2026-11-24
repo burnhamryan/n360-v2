@@ -107,7 +107,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT formatDateTime(window_end, '%e %b %Y') AS data_through\n        FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC LIMIT 1",
+          "rawSql": "SELECT formatDateTime(window_end, '%e %b %Y') AS data_through\n        FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
           "refId": "A"
         }
       ],
@@ -158,7 +158,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC LIMIT 1",
+          "rawSql": "SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
           "refId": "A"
         }
       ],
@@ -362,7 +362,7 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Every flagged VA-day of the chosen kind in the time range. Review outcomes (real / expected / data issue) come with the anomaly log (backlog B19): \"Not reported yet\" until then. Click a VA to open it.\n\n**Source:** n360.v_va_day_anomaly  \n**Filter:** Customer; Kind; Include provisional  \n**Window:** dashboard time range",
+      "description": "Every flagged VA-day of the chosen kind in the time range, with its review outcome (real / expected / data issue, or \"Not reviewed\"). Reviews are recorded with code/review_anomaly.py. Click a VA to open it.\n\n**Source:** n360.v_anomaly_review (n360.v_va_day_anomaly, n360.anomaly_log)  \n**Filter:** Customer; Kind; Include provisional  \n**Window:** dashboard time range",
       "gridPos": {
         "x": 0,
         "y": 12,
@@ -378,7 +378,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT concat(toString(toDayOfMonth(f.day)), ' ', formatDateTime(f.day, '%b %Y')) AS Day, ac.display_name AS Customer, concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')') AS VA, f.actual AS Actual,\n               f.expected AS Expected, f.z AS z, f.kind AS Kind, if(f.provisional, 'Provisional', 'Settled') AS Status,\n               CAST(NULL, 'Nullable(String)') AS Review,\n               concat('/d/n360-va?var-account=', f.account, '&var-va=', toString(f.bot_id)) AS drill\n        FROM n360.v_va_day_anomaly AS f INNER JOIN n360.va AS v ON v.bot_id = f.bot_id\n        INNER JOIN n360.account AS ac ON ac.account = f.account\n        WHERE f.account IN (${account:singlequote}) AND if(${kind:singlequote} = 'spikes', f.kind = 'spike', f.kind IN ('drop', 'went silent')) AND (NOT f.provisional OR ${provisional:singlequote} = 'yes') AND $__dateFilter(f.day)\n        ORDER BY f.day DESC",
+          "rawSql": "SELECT concat(toString(toDayOfMonth(f.day)), ' ', formatDateTime(f.day, '%b %Y')) AS Day, ac.display_name AS Customer, concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')') AS VA, f.actual AS Actual,\n               f.expected AS Expected, f.z AS z, f.kind AS Kind, if(f.provisional, 'Provisional', 'Settled') AS Status,\n               CAST(f.outcome, 'Nullable(String)') AS Review, f.note AS Note,\n               concat('/d/n360-va?var-account=', f.account, '&var-va=', toString(f.bot_id)) AS drill\n        FROM n360.v_anomaly_review AS f INNER JOIN n360.va AS v ON v.bot_id = f.bot_id\n        INNER JOIN n360.account AS ac ON ac.account = f.account\n        WHERE f.account IN (${account:singlequote}) AND if(${kind:singlequote} = 'spikes', f.kind = 'spike', f.kind IN ('drop', 'went silent')) AND (NOT f.provisional OR ${provisional:singlequote} = 'yes') AND $__dateFilter(f.day)\n        ORDER BY f.day DESC",
           "refId": "A"
         }
       ],
@@ -446,7 +446,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Review"
+              "options": "Note"
             },
             "properties": [
               {
@@ -457,13 +457,170 @@
                     "options": {
                       "match": "null",
                       "result": {
-                        "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "text": "",
                         "index": 0
                       }
                     }
                   }
                 ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Review"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "real": {
+                        "text": "Real",
+                        "color": "red",
+                        "index": 0
+                      },
+                      "expected": {
+                        "text": "Expected",
+                        "color": "green",
+                        "index": 1
+                      },
+                      "data issue": {
+                        "text": "Data issue",
+                        "color": "orange",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reviewed",
+                        "color": "#8e8e8e",
+                        "index": 9
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Review"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Day"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VA"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 170
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Actual"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Expected"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "z"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 60
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Kind"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
               }
             ]
           },
@@ -608,6 +765,217 @@
       },
       "options": {},
       "n360MayBeEmpty": "no cross-account event in the range"
+    },
+    {
+      "id": 9,
+      "title": "Other signals: containment, measure, pace, freshness",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Anomaly detection v2 (05): a VA's weekly containment more than 10 points below its 8-week median (on 200+ engaged); a rule line's measure share of engaged more than 20 points from its usual level; a crossing date moved more than 14 days earlier overnight; a source 2+ days behind. \"This period\" and \"Usual\" are % (days moved, for pace change). Thresholds in n360.settings. Complete weeks only.\n\n**Source:** n360.v_anomaly_v2 (v_containment_week, v_measure_gap_week, v_forecast_change, v_source_freshness)  \n**Filter:** Customer  \n**Window:** the 60 days to the data-through day",
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 24,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT v2.signal AS Signal, ifNull(ac.display_name, '') AS Customer, v2.subject AS Subject, concat(toString(toDayOfMonth(v2.period)), ' ', formatDateTime(v2.period, '%b %Y')) AS `When`,\n               v2.value AS `This period`, v2.usual AS Usual, v2.detail AS Detail\n        FROM n360.v_anomaly_v2 AS v2 LEFT JOIN n360.account AS ac ON ac.account = v2.account\n        WHERE (v2.account = '' OR v2.account IN (${account:singlequote})) AND v2.period > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 60\n        ORDER BY v2.period DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No other signals in the last 60 days"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Signal"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 140
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 140
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "When"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "This period"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 95
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Usual"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Subject"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 260
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Usual"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "n360MayBeEmpty": "no v2 signal in the last 60 days"
+    },
+    {
+      "id": 8,
+      "title": "Flag quality per week",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Settled flags per week and what reviews found. A low share of real flags means the thresholds (n360.settings) flag too much; tuned monthly from these outcomes (05). All customers.\n\n**Source:** n360.v_flag_quality (n360.v_anomaly_review)  \n**Filter:** settled flags  \n**Window:** dashboard time range, by week",
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 24,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT toString(week) AS `Week of`, flags AS Flags, reviewed AS Reviewed, real AS Real, expected AS Expected,\n               data_issue AS `Data issue`, pct_real_of_reviewed AS `Real, of reviewed`\n        FROM n360.v_flag_quality WHERE $__dateFilter(week) ORDER BY week DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Real, of reviewed"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Real, of reviewed"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "None reviewed",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "n360MayBeEmpty": "no settled flags in the range"
     },
     {
       "id": 7,

@@ -1,0 +1,412 @@
+{
+  "apiVersion": 1,
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "n360",
+      "folder": "N360",
+      "interval": "5m",
+      "rules": [
+        {
+          "uid": "n360-load-failed",
+          "title": "Load failed",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "n360-clickhouse",
+              "model": {
+                "refId": "A",
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT toUInt8(argMax(toString(status), (loaded_at, data_date)) = 'failed_checks') AS value FROM n360.runs",
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "0s",
+          "isPaused": false,
+          "annotations": {
+            "summary": "The latest nightly run was stopped by a data check; dashboards still show the previous good night.",
+            "description": "Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views."
+          },
+          "labels": {
+            "team": "n360",
+            "audience": "owner",
+            "cadence": "immediately",
+            "severity": "critical"
+          }
+        },
+        {
+          "uid": "n360-data-stale",
+          "title": "Data stale",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "n360-clickhouse",
+              "model": {
+                "refId": "A",
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT toUInt8(dateDiff('day', toDate(max(window_end)), toDate(now('America/New_York'))) > 1 AND toHour(now('America/New_York')) >= 10) AS value FROM n360.runs WHERE status = 'loaded'",
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "Alerting",
+          "execErrState": "Error",
+          "for": "0s",
+          "isPaused": false,
+          "annotations": {
+            "summary": "No loaded run with data through yesterday, checked from 10:00 ET.",
+            "description": "Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views."
+          },
+          "labels": {
+            "team": "n360",
+            "audience": "owner",
+            "cadence": "daily",
+            "severity": "warning"
+          }
+        },
+        {
+          "uid": "n360-source-stale",
+          "title": "Source stale",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "n360-clickhouse",
+              "model": {
+                "refId": "A",
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT source_id AS source, toString(status) AS status, toUInt8(status != 'green') AS value FROM n360.v_source_freshness",
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "0s",
+          "isPaused": false,
+          "annotations": {
+            "summary": "A source is 2 or more days behind the data-through day (thresholds in n360.settings).",
+            "description": "Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views."
+          },
+          "labels": {
+            "team": "n360",
+            "audience": "owner",
+            "cadence": "daily",
+            "severity": "warning"
+          }
+        },
+        {
+          "uid": "n360-va-silent-dropped",
+          "title": "VA went silent or dropped",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "n360-clickhouse",
+              "model": {
+                "refId": "A",
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')') AS va, ac.display_name AS customer, a.kind AS kind, toUInt8(1) AS value FROM n360.v_va_day_anomaly AS a INNER JOIN n360.va AS v ON v.bot_id = a.bot_id INNER JOIN n360.account AS ac ON ac.account = a.account WHERE a.kind IN ('drop', 'went silent') AND NOT a.provisional AND a.day = (SELECT max(day) FROM n360.v_va_day_anomaly WHERE NOT provisional)",
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "0s",
+          "isPaused": false,
+          "annotations": {
+            "summary": "A VA went silent or dropped on the newest settled day (provisional days never alert). Pass to the account CSM after a look.",
+            "description": "Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views."
+          },
+          "labels": {
+            "team": "n360",
+            "audience": "owner",
+            "cadence": "daily",
+            "severity": "warning"
+          }
+        },
+        {
+          "uid": "n360-cross-account",
+          "title": "Cross-account event",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "n360-clickhouse",
+              "model": {
+                "refId": "A",
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT toString(day) AS event_day, direction, toUInt32(accounts) AS value FROM n360.v_anomaly_events WHERE day = (SELECT max(day) FROM n360.v_va_day_anomaly WHERE NOT provisional)",
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "0s",
+          "isPaused": false,
+          "annotations": {
+            "summary": "Several customers were flagged in the same direction on the newest settled day: one event.",
+            "description": "Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views."
+          },
+          "labels": {
+            "team": "n360",
+            "audience": "owner",
+            "cadence": "daily",
+            "severity": "info"
+          }
+        },
+        {
+          "uid": "n360-over-billed",
+          "title": "Newly over billed",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "n360-clickhouse",
+              "model": {
+                "refId": "A",
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT series_key AS line, account AS customer, toUInt8(1) AS value FROM n360.v_forecast_change WHERE data_date = (SELECT max(data_date) FROM n360.forecast_history) AND newly_over_billed",
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "0s",
+          "isPaused": false,
+          "annotations": {
+            "summary": "A line or pool went above 100% of billed since the night before.",
+            "description": "Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views."
+          },
+          "labels": {
+            "team": "n360",
+            "audience": "cs",
+            "cadence": "weekly",
+            "severity": "warning"
+          }
+        },
+        {
+          "uid": "n360-crossing-soon",
+          "title": "Crossing billed soon",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "n360-clickhouse",
+              "model": {
+                "refId": "A",
+                "editorType": "sql",
+                "format": 1,
+                "queryType": "table",
+                "rawSql": "SELECT series_key AS line, account AS customer, if(newly_crossing_soon, 'newly crossing soon', 'moved earlier') AS reason, toUInt8(1) AS value FROM n360.v_forecast_change WHERE data_date = (SELECT max(data_date) FROM n360.forecast_history) AND (newly_crossing_soon OR moved_earlier)",
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "0s",
+          "isPaused": false,
+          "annotations": {
+            "summary": "A line now crosses billed within the red window (n360.settings), or its crossing date moved more than the set number of days earlier overnight.",
+            "description": "Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views."
+          },
+          "labels": {
+            "team": "n360",
+            "audience": "cs",
+            "cadence": "weekly",
+            "severity": "warning"
+          }
+        }
+      ]
+    }
+  ]
+}

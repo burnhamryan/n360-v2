@@ -17,12 +17,16 @@
 | 11 dashboards with drill-downs; Portfolio → Customer → Contract line → VA | 22 Nov 2026 |
 | Straight-line last-30-day forecast stays the forecast of record until a challenger proves better | 22 Nov 2026 |
 | Pace colour is decided in a view (`v_line_pace`), not in the dashboard builder; dashboards only map its label to a colour | 24 Nov 2026 |
+| Phase 2 tables as built: `cortex_day` = authoring sessions, `explorer_day` = analytics-assistant questions, `playbook_day` added for executions | 24 Nov 2026 |
+| Top asks: "several customers" = 2 or more | 24 Nov 2026 |
+| Anomaly heatmap watch band z ±2; source freshness amber at 2 days behind, red at 3 | 24 Nov 2026 |
+| Pooled-entitlement panel shows for every customer ("No pooled entitlement") | 24 Nov 2026 |
 
 ## Proposed (build as settings; Ryan approves)
 
 | Item | Proposal |
 |---|---|
-| Pace colours (values at the top of `v_line_pace`) | Green ≤ term + 10 pts; amber > term + 10 or crossing ≤ 60 d; red > 100% or crossing ≤ 30 d; grey not measurable / not implemented / not read |
+| Pace colours (values in `n360.settings`) | Green ≤ term + 10 pts; amber > term + 10 or crossing ≤ 60 d; red > 100% or crossing ≤ 30 d; grey not measurable / not implemented / not read |
 | Anomaly thresholds | Same weekday 8 weeks; z ≤ −4 / ≥ 4; min median 20; provisional 3 days |
 | Alert routing and timing | As in `05_ANOMALY_AND_FORECAST.md` |
 | Challenger adoption bar | Better 30-day MAPE on most lines for 8 straight weeks, plus Ryan's approval |
@@ -43,8 +47,8 @@
 | Does the pipeline count usage after a line's end date? (synthetic does: Atlas 282.6% all days vs 268.4% within term) | Views follow `reported_measured` as given |
 | Pace for an entitlement whose term has ended (synthetic: Lakeside ended 31 Oct at 13.9% of billed shows green "on pace") | `v_line_pace` reports `term_ended`; the colour follows the proposed rule, which says nothing about ended terms |
 | Cross-account events: should spikes and drops on the same day be one event or two? | Built as two (by direction); one line to change |
-| Phase 2 field meanings: is `cortex_day` authoring sessions? `explorer_day` the analytics assistant? What exactly is an MCP server "live" or a supervisory rule "on"? Where do playbook executions come from (a `playbook_day` table was added)? | Built on these readings, labelled proposed; adjust `schema.sql` and the generator once known |
-| Top asks: how many customers make "several"? | 2 or more, in `v_top_asks` |
-| Anomaly heatmap "watch" band at z ±2 (spec 7) and freshness amber 2 / red 3 days (spec 11) | Built as the specs say, each in one view; listed here as proposed |
-| Pooled-entitlement panel on Customer shows for every customer ("No pooled entitlement") | Grafana OSS cannot hide a panel by data |
+| Who receives alerts, and when (contact points are `example.invalid` placeholders; daily / weekly timing approximated by repeat intervals) | Set addresses and delivery windows in `build_alerts.py` |
+| Anomaly v2 thresholds (containment drop 10 pts on 200+ engaged; measure gap 20 pts; pace change 14 days) | Built as `05` says, in `n360.settings`, proposed |
+| Challenger model settings (Holt-Winters alpha 0.2, beta 0.01, gamma 0.2, 365-day fit) | First guesses; it does not beat the straight line overall on synthetic data (`10_CHALLENGER_BACKTEST.md`) |
+| Who may record anomaly reviews (loader user via `code/review_anomaly.py`; Grafana OSS cannot write) | Fine for one owner; a team needs its own way in |
 | Term-end convention: synthetic ends a 12-month line on the last day of the month before its start month (29 Jan start → 31 Dec end; pool ends 28 Jan) | Check against the contract sheet before trusting % of term |

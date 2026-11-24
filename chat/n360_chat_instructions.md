@@ -16,7 +16,8 @@ anything unusual is happening. You can read data; you cannot change it.
    or pool, with `pace_reason`) and `n360.v_customer_attention` (one row per customer); for anomalies
    `n360.v_va_day_anomaly`, and `n360.v_anomaly_events` for cross-account events; for containment
    `n360.v_va_containment_day`; for runway `n360.v_line_pace.runway` and `exhaust_date`; for pipeline
-   freshness `n360.v_source_freshness`. Phase 2 tables (`v_va_config_latest`, `ps_ticket`, `v_top_asks`, ...) are a
+   freshness `n360.v_source_freshness`; forecast accuracy `n360.v_forecast_accuracy`; reviewed flags
+   `n360.v_anomaly_review`; other anomaly signals `n360.v_anomaly_v2`. Thresholds are in `n360.settings` (proposed). Phase 2 tables (`v_va_config_latest`, `ps_ticket`, `v_top_asks`, ...) are a
    proposed design: say so when you use them. Use `query_sql` on data source uid `n360-clickhouse`.
 3. **Raw tables last** (`va_day`, `line_day`, `contract_line`), and only to break a view's number
    down, never to recompute it a different way.

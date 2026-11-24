@@ -52,7 +52,7 @@ def main():
     a = ap.parse_args()
     ch = CH(a)
 
-    last = ch.rows("SELECT toString(toDate(window_end)) AS d FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC LIMIT 1")
+    last = ch.rows("SELECT toString(toDate(window_end)) AS d FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC, data_date DESC LIMIT 1")
     if not last:
         print('no loaded run in n360.runs; load data first')
         return 1
