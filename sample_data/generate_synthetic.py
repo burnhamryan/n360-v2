@@ -22,6 +22,7 @@ Edge cases deliberately present (and what each one tests):
   Lakeside Insurance  an Email VA that goes silent for the last 9 days (anomaly: went silent)
   Northwind Outfitters a normal account; joins a cross-account spike with Bluebird and Harbor
   Cedar Logistics     an unbilled VA (no contract line)
+  Kestrel Travel      a line running ahead of its term but under billed (pace amber: gap > 10 points)
 A same-day spike hits Northwind, Bluebird and Harbor 6 days before the last day (cross-account event).
 
 Multi-night mode (--nights): every day's numbers come from per-VA random streams, so a day reads the
@@ -121,6 +122,7 @@ def generate(last, anchor, out, multi, bad=False):
                           dict(ch='Chat', start='2026-01-22', months=12, billed=80000, sheet_customer='Juniper Marketing', vas=[('Juniper Marketing', 'Chat', 230, {})])]),
         ('Summit Games', [dict(ch='Chat', start='2026-09-05', months=12, billed=900000, vas=[('Summit NCW', 'Chat', 2400, dict(cm=True))])]),
         ('Lakeside Insurance', [dict(ch='Email', start='2025-11-30', months=12, billed=60000, vas=[('Lakeside Email', 'Email', 32, dict(silent_days=9))])]),
+        ('Kestrel Travel', [dict(ch='Chat', start='2026-03-01', months=12, billed=125000, vas=[('Kestrel Chat', 'Chat', 540, {})])]),
     ]
     pool_def = dict(account='Bluebird Air', pool=0, name='Bluebird Air: 3 lines, pooled entitlement', billed=3000000, start='2026-01-29')
 

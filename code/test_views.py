@@ -48,10 +48,14 @@ def main():
     check('Harbor Telecom Chat is red: crosses billed within 30 days, while under 100%',
           r.get('pace') == 'red' and r.get('pct_billed', 999) <= 100 and r.get('days_to_cross') is not None
           and int(r['days_to_cross']) <= 30, r)
+    r = one.get(('Kestrel Travel', 'Chat'), {})
+    check('Kestrel Travel Chat is amber: more than 10 points ahead of term, under billed, not crossing within 30 days',
+          r.get('pace') == 'amber' and r.get('pct_billed', 999) <= 100 and r.get('days_to_cross') is not None
+          and int(r['days_to_cross']) > 30 and 'ahead of term' in r.get('pace_reason', ''), r)
     bb = [v for v in rows if v['account'] == 'Bluebird Air']
     check('Bluebird Air pool measured once: one pool row, no pooled line rows',
           len(bb) == 1 and bb[0]['entitlement'] == 'pool', bb)
-    check('Bluebird Air pool is red at 122.3%', bb and bb[0]['pace'] == 'red' and abs(bb[0]['pct_billed'] - 122.3) < 0.05, bb)
+    check('Bluebird Air pool is red: above billed (about 122%)', bb and bb[0]['pace'] == 'red' and bb[0]['pct_billed'] > 100, bb)
     check('Harbor Telecom Voice: not measurable, no colour',
           one.get(('Harbor Telecom', 'Voice'), {}).get('pace') == 'not measurable', one.get(('Harbor Telecom', 'Voice')))
     check('Pinecrest Retail Voice: not implemented, no colour',

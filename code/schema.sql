@@ -308,7 +308,10 @@ WITH
     30  AS red_cross_days,
     e AS (
         SELECT s.account AS account, 'line' AS entitlement, s.line_key AS line_key, CAST(NULL, 'Nullable(UInt8)') AS pool_id,
-               s.channel AS name, s.measure AS measure, s.consumed AS used, s.billed AS billed, s.pct_billed AS pct_billed,
+               s.channel AS name,
+               -- label for screens: the channel, plus the sheet's customer name where one account has several (Juniper)
+               concat(s.channel, if(l.sheet_customer != s.account, concat(' (', l.sheet_customer, ')'), '')) AS label,
+               s.measure AS measure, s.consumed AS used, s.billed AS billed, s.pct_billed AS pct_billed,
                s.pct_term_elapsed AS pct_term, s.start_date AS start_date, s.end_date AS end_date,
                toDate(s.window_end) AS data_through, f.cross_date AS cross_date
         FROM n360.v_line_status AS s
@@ -317,7 +320,7 @@ WITH
         WHERE s.pool_id IS NULL
         UNION ALL
         SELECT p.account, 'pool', CAST(NULL, 'Nullable(String)'), CAST(p.pool_id, 'Nullable(UInt8)'),
-               p.name, p.measure, p.consumed, p.billed, p.pct_billed,
+               p.name, p.name, p.measure, p.consumed, p.billed, p.pct_billed,
                -- % of term as in v_line_status (term = start to end inclusive); pools carry dates, not term_days
                round(100 * least(greatest(dateDiff('day', p.start_date, r.d) + 1, 0), dateDiff('day', p.start_date, p.end_date) + 1)
                      / (dateDiff('day', p.start_date, p.end_date) + 1), 1),
@@ -327,7 +330,7 @@ WITH
         LEFT JOIN (SELECT account, pool_id, cross_date FROM n360.forecast WHERE pool_id IS NOT NULL) AS f
                ON f.account = p.account AND f.pool_id = p.pool_id
     )
-SELECT account, entitlement, line_key, pool_id, name, measure, used, billed, pct_billed, pct_term,
+SELECT account, entitlement, line_key, pool_id, name, label, measure, used, billed, pct_billed, pct_term,
        round(pct_billed - pct_term, 1) AS pace_gap,
        cross_date, dateDiff('day', data_through, cross_date) AS days_to_cross,
        end_date < data_through AS term_ended,
@@ -366,7 +369,7 @@ WITH
     worst AS (
         SELECT account,
                argMax(tuple(entitlement, name, measure, used, billed, pct_billed, pct_term, pace_gap, cross_date,
-                            days_to_cross, pace, pace_reason), tuple(pace_rank, ifNull(pace_gap, -1e9))) AS w,
+                            days_to_cross, pace, pace_reason, label, pace_rank), tuple(pace_rank, ifNull(pace_gap, -1e9))) AS w,
                countIf(pace = 'red') AS red_entitlements, countIf(pace = 'amber') AS amber_entitlements,
                count() AS entitlements, 1 AS found
         FROM n360.v_line_pace GROUP BY account
@@ -390,6 +393,7 @@ SELECT a.account AS account, a.display_name AS display_name,
        if(has_entitlement, w.w.7, NULL) AS pct_term, if(has_entitlement, w.w.8, NULL) AS pace_gap,
        if(has_entitlement, w.w.9, NULL) AS cross_date, if(has_entitlement, w.w.10, NULL) AS days_to_cross,
        if(has_entitlement, w.w.11, NULL) AS pace, if(has_entitlement, w.w.12, NULL) AS pace_reason,
+       if(has_entitlement, w.w.13, NULL) AS worst_label, if(has_entitlement, w.w.14, 0) AS pace_rank,
        ifNull(w.red_entitlements, 0) AS red_entitlements, ifNull(w.amber_entitlements, 0) AS amber_entitlements,
        ifNull(w.entitlements, 0) AS entitlements,
        ifNull(f.drops_silences_7d, 0) AS drops_silences_7d, ifNull(f.spikes_7d, 0) AS spikes_7d,

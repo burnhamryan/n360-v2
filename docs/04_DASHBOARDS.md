@@ -48,8 +48,15 @@ detail to build from. Build against the spec. Ryan will reconcile with the appro
 The view decides the colour (decided 24 Nov 2026): `n360.v_line_pace` holds the four thresholds at its top, the
 only place they exist. `build_dashboards.py` maps the view's `pace` label to a display colour (`PACE_LABEL`).
 
-## 1. Portfolio overview · `n360-overview`
+## 1. Portfolio overview · `n360-overview` (BUILT 24 Nov 2026, B6)
 Question: which customers need attention this week, and why? Audience: leadership.
+
+Built as specified, with these differences for Ryan to accept or change: 1.6 sorts red first, then
+amber, then by pace gap (pure pace-gap order would put a red line crossing in 28 days below an amber
+line); the pace chip reads Red / Amber / Green with the view's reason in a "Why" column beside it.
+1.6 lists customers with red or amber pace, or a settled drop or silence. 1.8 is a table with a bar
+per row (capped at 100%, true % beside it) and % of term in its own column: Grafana OSS bar gauges
+cannot draw a tick at % of term. 1.7 counts complete weeks only, and a week with an unread day is a gap.
 
 | # | Panel | Visual | Data | Drills to |
 |---|---|---|---|---|

@@ -1,3 +1,71 @@
+# CHANGES · 24 Nov 2026 · amber test case, and backlog B6 (Portfolio overview)
+
+## End-to-end test (fresh start, as on the Mac)
+
+Database and Grafana volumes wiped, then the README steps: `docker compose up -d` → generate one night →
+`load.py` as the loader user → Grafana. Results:
+
+| Step | Result |
+|---|---|
+| Stack start | ClickHouse and Grafana up in about 8 s; data source health "Data source is working" |
+| Generate + load | 8 × PASS, LOADED, data through 19 Nov 2026 |
+| Grafana | Folder N360 with `n360-overview` and `n360-contracts`; both render with no panel errors |
+| Every panel query, as Grafana's read-only user | All pass (2 dashboards, 15 panels, 1 variable) |
+| View checks, as Grafana's read-only user | All pass |
+| Locks | Saving a provisioned dashboard refused ("Cannot save provisioned dashboard"); `DROP VIEW` as `grafana` refused |
+| CI, both engines (14 nights, night 9 bad) | `ci.sh chdb` and `ci.sh server` pass |
+
+Still **not** tested: macOS / Docker Desktop, GitHub Actions itself, Claude Desktop with the chat config.
+This container also needs a test-only override (lower `nofile`, plugin mounted because containers have
+no DNS here). Neither is in the pack.
+
+## Amber test case
+
+New synthetic customer **Kestrel Travel** (one Chat line, billed 125,000): 85.5% of billed at 72.3% of term
+(13.2 points ahead), crossing billed in 45 days → **amber** ("more than 10 points ahead of term"), with
+margin on both sides (not near 10 points, not near the 30-day red line). `test_views.py` checks it.
+
+In multi-night mode (CI) every other customer's numbers are unchanged: daily rows, totals, forecasts,
+anomaly flags and the 13 Nov event, compared before and after. In single-night mode (README quick start)
+the shared random stream shifts, so other customers move slightly (e.g. Bluebird pool 122.0% vs 122.3%).
+The tests check rules, not exact figures. Customer count is now 10.
+
+## B6: Portfolio overview `n360-overview`
+
+| # | Panel | Data | Drills to |
+|---|---|---|---|
+| 1.1 | Data through | `runs` | Pipeline health |
+| — | Last night (header) | `runs` | |
+| 1.2 | Customers · Contract lines · Pools | `account`, `contract_line`, `pool` | |
+| 1.3 | Lines above billed (red when > 0) | `v_line_pace`: lines and pools, pool counted once → **3** | Contracts |
+| 1.4 | Crossing billed in 90 days | `v_line_pace` (stored forecast) → 2 (Harbor, Kestrel) | Forecast |
+| 1.5 | Drops or silences, 7 settled days | `v_customer_attention` → 4 (Lakeside) | Anomalies |
+| 1.6 | Customers needing attention | `v_customer_attention`: worst line, measure, %, pace chip, why, crosses billed, drops 7d | Customer (row) |
+| 1.7 | Conversations per week, top 5 + Other | `va_day`, complete weeks only | Customer (bar) |
+| 1.8 | Use against billed, by line | `v_line_pace`: bar capped at 100%, true %, % of term | Contract line (pool → Customer) |
+
+Every link was clicked in Chromium and lands on the right uid with the right variable and time range. The targets
+(`n360-customer`, `n360-line`, `n360-forecast`, `n360-anomalies`, `n360-pipeline`) are B7–B11, so they
+show "Dashboard not found" until built.
+
+Differences from the spec (also in `04`): 1.6 sorted red, amber, then pace gap; chip reads Red / Amber / Green
+with a "Why" column; 1.8 is a table with bars because Grafana OSS bar gauges can't draw the % of term
+tick; 1.6 lists only customers needing attention (red/amber, or a settled drop/silence).
+
+Fixed on the way, found by screenshots: double URL-encoding in links (Grafana encodes the values itself);
+bar-gauge labels swallowed the link column; titles truncated at narrow widths.
+
+| File | Change |
+|---|---|
+| `sample_data/generate_synthetic.py` | Kestrel Travel (amber) |
+| `code/schema.sql` | `v_line_pace.label` (e.g. "Chat (Juniper Marketing)"); `v_customer_attention.worst_label`, `pace_rank` |
+| `code/grafana/build_dashboards.py` | `overview()`; helpers `date_sql`, `count_col`, `width`, `hidden`, `panel_link`, `path_link`, `red_when_any`; `UID`, `CROSS_WINDOW_DAYS`, `TOP_CUSTOMERS`; pace chip words |
+| `code/grafana/dashboards/n360-overview.json` (new) | Generated |
+| `code/test_views.py` | Amber case; pool check by rule, not exact figure |
+| `docs/04_DASHBOARDS.md`, `README.md` | Spec 1 status and differences; status row |
+
+---
+
 # CHANGES · 24 Nov 2026 · backlog B5 (views for the dashboards)
 
 **Three new views in `schema.sql`. The pace colour is decided in `v_line_pace`, as you decided, and the four

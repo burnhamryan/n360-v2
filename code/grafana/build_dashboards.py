@@ -23,20 +23,24 @@ ACCT = "account IN (${account:singlequote})"
 HOME = ('n360-overview', 'Portfolio overview')      # every dashboard's Back link and header link
 PIPELINE = ('n360-pipeline', 'Pipeline health')     # "Data through" drills here (04 conventions)
 DEFAULT_RANGE = {'from': 'now-90d', 'to': 'now'}
+UID = {'overview': 'n360-overview', 'contracts': 'n360-contracts', 'customer': 'n360-customer', 'line': 'n360-line',
+       'va': 'n360-va', 'forecast': 'n360-forecast', 'anomalies': 'n360-anomalies'}   # never change (links depend on them)
+CROSS_WINDOW_DAYS = 90      # Portfolio "Crossing billed in 90 days" (spec 1.4): a display window, not a pace rule
+TOP_CUSTOMERS = 5           # Portfolio "Conversations per week": top 5 + Other (spec 1.7)
 
 # Pace: n360.v_line_pace decides the colour (decided 24 Nov 2026) and holds the PROPOSED thresholds.
 # This file only says how each of the view's `pace` values looks: {stored: (shown, colour key)}.
 PACE_LABEL = {
-    'red': ('Over or crossing soon', 'red'),
-    'amber': ('Ahead of term', 'amber'),
-    'green': ('On pace', 'green'),
+    'red': ('Red', 'red'),              # the reason is in the view's pace_reason, shown beside the chip
+    'amber': ('Amber', 'amber'),
+    'green': ('Green', 'green'),
     'not measurable': ('Not measurable', 'grey'),
     'not implemented': ('Not implemented', 'grey'),
     'not read': (NOT_READ, 'grey'),
 }
 
 # Display colours (Grafana colour names). Empty is grey, never red.
-COLOUR = {'green': 'green', 'amber': 'orange', 'red': 'red', 'grey': '#8e8e8e', 'none': 'text'}
+COLOUR = {'green': 'green', 'amber': 'orange', 'red': 'red', 'grey': '#8e8e8e', 'none': 'text', 'neutral': 'blue'}
 
 # Words for run status, as stored in n360.runs.status
 RUN_STATUS = {'loaded': ('Loaded', 'green'), 'failed_checks': ('Stopped: data checks failed', 'red')}
@@ -55,10 +59,18 @@ def describe(definition, source, filter, window):
     return f'{definition}\n\n**Source:** {source}  \n**Filter:** {filter}  \n**Window:** {window}'
 
 
-def panel(pid, title, typ, sql, x, y, w, h, desc, fmt='table', field=None, options=None):
-    return {'id': pid, 'title': title, 'type': typ, 'datasource': DS, 'description': desc,
-            'gridPos': {'x': x, 'y': y, 'w': w, 'h': h}, 'targets': [target(sql, fmt)],
-            'fieldConfig': field or field_config(), 'options': options or {}}
+def panel(pid, title, typ, sql, x, y, w, h, desc, fmt='table', field=None, options=None, links=None):
+    p = {'id': pid, 'title': title, 'type': typ, 'datasource': DS, 'description': desc,
+         'gridPos': {'x': x, 'y': y, 'w': w, 'h': h}, 'targets': [target(sql, fmt)],
+         'fieldConfig': field or field_config(), 'options': options or {}}
+    if links:
+        p['links'] = list(links)
+    return p
+
+
+def date_sql(col):
+    """SQL for a date shown as "4 Dec 2026" (rule 14; formatDateTime's %e pads single-digit days)."""
+    return f"concat(toString(toDayOfMonth({col})), ' ', formatDateTime({col}, '%b %Y'))"
 
 
 def field_config(overrides=(), **defaults):
@@ -69,6 +81,20 @@ def field_config(overrides=(), **defaults):
 def override(column, *properties):
     return {'matcher': {'id': 'byName', 'options': column},
             'properties': [{'id': k, 'value': v} for k, v in properties]}
+
+
+def count_col(column):
+    """A count shown with thousands separators (rule 14)."""
+    return override(column, ('unit', 'locale'), ('decimals', 0))
+
+
+def width(column, px):
+    return override(column, ('custom.width', px))
+
+
+def hidden(column):
+    """A column kept for links (keys) but not shown (rule 13: internal IDs not on screen)."""
+    return override(column, ('custom.hidden', True))
 
 
 def pct(column):
@@ -104,6 +130,17 @@ def drill(uid, var, column, title):
     return {'title': title, 'url': f'/d/{uid}?var-{var}=${{__data.fields{sep}{ref}}}&${{__url_time_range}}'}
 
 
+def panel_link(key, title):
+    """Panel-level link (the panel's link menu) to another dashboard, keeping the time range."""
+    return {'title': title, 'url': f'/d/{UID[key]}?${{__url_time_range}}'}
+
+
+def path_link(column, title):
+    """Data link whose path a query built (when one panel drills to different dashboards per row,
+    e.g. a line to Contract line, a pool to Customer). Grafana encodes the values; the query must not (it would be encoded twice)."""
+    return {'title': title, 'url': f'${{__data.fields.{column}}}&${{__url_time_range}}'}
+
+
 def with_links(column, *links):
     return override(column, ('links', list(links)))
 
@@ -131,6 +168,12 @@ def coloured(column, labels, cell='color-text'):
 def pace_chip(column='Pace'):
     """The pace column from n360.v_line_pace / v_customer_attention, as a coloured word."""
     return coloured(column, PACE_LABEL, cell='color-background')
+
+
+def red_when_any():
+    """A count stat: red when above zero, uncoloured at zero (spec 1.3)."""
+    return [{'type': 'value', 'options': {'0': {'color': COLOUR['none'], 'index': 0}}},
+            {'type': 'range', 'options': {'from': 1, 'to': 1e15, 'result': {'color': COLOUR['red'], 'index': 1}}}]
 
 
 def label_colours(labels):
@@ -163,9 +206,9 @@ def last_load(pid, x, y, w, h):
                  'colorMode': 'background'})
 
 
-def header(first_id=1, y=0):
+def header(first_id=1, y=0, w=6):
     """Top row of every dashboard: Data through (drills to Pipeline health) and last night's result."""
-    return [data_through(first_id, 0, y, 6, 3), last_load(first_id + 1, 6, y, 6, 3)]
+    return [data_through(first_id, 0, y, w, 3), last_load(first_id + 1, w, y, w, 3)]
 
 
 def dashboard(uid, title, panels, variables=(), links=()):
@@ -241,7 +284,115 @@ def contracts():
     return dashboard('n360-contracts', 'N360 · Contracts', p, [var_account()])
 
 
-DASHBOARDS = [contracts]
+def overview():
+    """1. Portfolio overview: which customers need attention this week, and why? (04, spec 1). The home page:
+    no Back link. Colours come from n360.v_line_pace (pace) and v_customer_attention; nothing is re-ruled here."""
+    stat = {'reduceOptions': {'calcs': ['lastNotNull'], 'fields': '/.*/'}, 'textMode': 'value', 'colorMode': 'none'}
+    p = header(1, 0, w=8)
+    p.append(panel(3, 'Customers', 'stat', """
+        SELECT (SELECT count() FROM n360.account) AS Customers,
+               (SELECT count() FROM n360.contract_line) AS `Contract lines`,
+               (SELECT count() FROM n360.pool) AS Pools""", 16, 0, 8, 3,
+        describe('Customers in N360, with their contract lines and pooled entitlements. Includes customers with '
+                 'VAs but no contract line.', 'n360.account, n360.contract_line, n360.pool', 'none', 'the latest load'),
+        field=field_config(unit='locale'),
+        options={**stat, 'textMode': 'value_and_name', 'text': {'titleSize': 12, 'valueSize': 30}}))
+    p.append(panel(4, 'Lines above billed', 'stat', """
+        SELECT countIf(pct_billed > 100) AS above FROM n360.v_line_pace""", 0, 3, 8, 3,
+        describe('Lines and pools whose use is over the billed amount, each in its own contract measure. '
+                 'A pool is counted once, as the pool; its lines are never compared with billed alone.',
+                 'n360.v_line_pace', 'none (every customer)', 'each from its start date to the data-through day'),
+        field=field_config(mappings=red_when_any()), options={**stat, 'colorMode': 'background'},
+        links=[panel_link('contracts', 'Contracts')]))
+    p.append(panel(5, f'Crossing billed in {CROSS_WINDOW_DAYS} days', 'stat', f"""
+        SELECT countIf(days_to_cross BETWEEN 0 AND {CROSS_WINDOW_DAYS}) AS crossing FROM n360.v_line_pace""", 8, 3, 8, 3,
+        describe(f'Lines and pools under billed today that the stored forecast says will cross billed within '
+                 f'{CROSS_WINDOW_DAYS} days, before their term ends. Already above billed is counted in "Lines above billed".',
+                 'n360.forecast (straight line at the last-30-day rate, never recomputed), via n360.v_line_pace',
+                 'none (every customer)', f'next {CROSS_WINDOW_DAYS} days from the data-through day'),
+        options=stat, links=[panel_link('forecast', 'Forecast and runway')]))
+    p.append(panel(6, 'Drops or silences, 7 settled days', 'stat', """
+        SELECT sum(drops_silences_7d) AS flags FROM n360.v_customer_attention""", 16, 3, 8, 3,
+        describe('VA-days flagged as a drop (z of -4 or lower) or went silent (0 conversations), on settled days only. '
+                 'Provisional days (the newest 3) are not counted.',
+                 'n360.v_va_day_anomaly, via n360.v_customer_attention', 'none (every customer)',
+                 'the 7 newest settled days (data-through minus 9 to minus 3)'),
+        options=stat, links=[panel_link('anomalies', 'Anomalies')]))
+    p.append(panel(7, 'Customers needing attention', 'table', f"""
+        SELECT display_name AS Customer, account, worst_label AS `Worst line`, measure AS Measure,
+               pct_billed AS `% of billed`, pct_term AS `% of term`, pace AS Pace, pace_reason AS Why,
+               multiIf(cross_date IS NOT NULL, {date_sql('cross_date')}, pct_billed IS NULL, NULL,
+                       pct_billed > 100, 'Already above billed', 'Not before term end') AS `Crosses billed`,
+               drops_silences_7d AS `Drops 7d`
+        FROM n360.v_customer_attention
+        WHERE pace IN ('red', 'amber') OR drops_silences_7d > 0
+        ORDER BY pace_rank DESC, pace_gap DESC, Customer""", 0, 6, 24, 9,
+        describe('Customers with a line or pool off pace (red or amber), or a drop or silence on a settled day. '
+                 'Worst line = the customer\'s most off-pace line or pool (red, then amber, then the larger pace gap). '
+                 'Pace colours are proposed, set in n360.v_line_pace. Sorted red first, then by pace gap. '
+                 'Drops 7d = settled drops or silences in the 7 newest settled days (the newest 3 days are '
+                 'provisional and not counted). Click a customer to open it.',
+                 'n360.v_customer_attention (pace from n360.v_line_pace and n360.forecast; flags from n360.v_va_day_anomaly)',
+                 'red or amber pace, or a settled drop or silence',
+                 'use: start date to the data-through day; flags: the 7 newest settled days'),
+        field=field_config([
+            hidden('account'), pct('% of billed'), pct('% of term'), pace_chip('Pace'),
+            width('Customer', 140), width('Worst line', 130), width('Measure', 185), width('% of billed', 90),
+            width('% of term', 80), width('Pace', 65), width('Why', 235), width('Crosses billed', 145), width('Drops 7d', 75),
+            override('Crosses billed', ('mappings', [empty_grey()])),
+            override('Worst line', ('mappings', [empty_grey()])),
+            with_links('Customer', drill(UID['customer'], 'account', 'account', 'Open customer')),
+        ], custom={'align': 'auto'})))
+    p.append(panel(8, 'Conversations per week, top customers', 'timeseries', f"""
+        WITH top AS (SELECT account FROM n360.va_day WHERE $__dateFilter(day)
+                     GROUP BY account ORDER BY sum(conversations) DESC LIMIT {TOP_CUSTOMERS})
+        SELECT toDateTime(toMonday(d.day)) AS time,
+               if(d.account IN (SELECT account FROM top), a.display_name, 'Other') AS customer,
+               if(d.account IN (SELECT account FROM top), d.account, '') AS account,
+               if(countIf(d.conversations IS NULL) > 0, NULL, sum(d.conversations)) AS conversations
+        FROM n360.va_day AS d INNER JOIN n360.account AS a ON a.account = d.account
+        WHERE $__dateFilter(d.day) AND toMonday(d.day) >= toDate($__fromTime)
+          AND toMonday(d.day) + 6 <= (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded')
+        GROUP BY time, customer, account ORDER BY time""", 0, 15, 10, 14,
+        describe(f'Conversations started per week (Monday to Sunday), for the {TOP_CUSTOMERS} customers with the most '
+                 f'conversations in the time range, and every other customer together as Other. Conversations are the '
+                 f'platform count, not a contract measure. A week with any day not read shows as a gap, not a lower bar. '
+                 f'Only complete weeks. Click a bar to open the customer.',
+                 'n360.va_day (the platform daily conversation aggregate table and the conversation records reader)',
+                 'none (every customer)', 'dashboard time range, complete weeks only'),
+        fmt='timeseries',
+        field=field_config(unit='locale', decimals=0, displayName='${__field.labels.customer}',
+                           links=[{'title': 'Open customer',
+                                   'url': f"/d/{UID['customer']}?var-account=${{__field.labels.account}}&${{__url_time_range}}"}],
+                           custom={'drawStyle': 'bars', 'fillOpacity': 80, 'lineWidth': 1, 'spanNulls': False,
+                                   'stacking': {'mode': 'normal', 'group': 'A'}}),
+        options={'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'desc'}}))
+    p.append(panel(9, 'Use against billed, by line', 'table', f"""
+        SELECT if(l.entitlement = 'pool', l.label, concat(a.display_name, ' · ', l.label)) AS Line,
+               l.pct_billed AS `% of billed`, l.pct_billed AS `Used`, l.pct_term AS `% of term`,
+               if(l.entitlement = 'pool',
+                  concat('/d/{UID['customer']}?var-account=', l.account),
+                  concat('/d/{UID['line']}?var-line=', l.line_key, '&var-account=', l.account))
+                   AS drill
+        FROM n360.v_line_pace AS l INNER JOIN n360.account AS a ON a.account = l.account
+        WHERE l.pct_billed IS NOT NULL
+        ORDER BY l.pct_billed DESC""", 10, 15, 14, 14,
+        describe('Each line and pool: use as % of billed, in its own contract measure. The bar stops at 100%; the '
+                 'number beside it is the true %. % of term beside it (a tick mark on the bar is not available in '
+                 'Grafana OSS). Not measurable, not implemented and unread lines are left out (see Contracts). '
+                 'Click a line to open it; a pool opens its customer.',
+                 'n360.v_line_pace', 'lines and pools with a % of billed', 'start date to the data-through day'),
+        field=field_config([
+            hidden('drill'), width('% of billed', 90), width('% of term', 90), pct('% of billed'), pct('% of term'),
+            override('Used', ('unit', 'percent'), ('min', 0), ('max', 100), ('color', {'mode': 'fixed', 'fixedColor': COLOUR['neutral']}),
+                     ('custom.cellOptions', {'type': 'gauge', 'mode': 'basic', 'valueDisplayMode': 'hidden'})),
+            with_links('Line', path_link('drill', 'Open')),
+        ], custom={'align': 'auto'})))
+    return dashboard(UID['overview'], 'N360 · Portfolio overview', p)
+
+
+DASHBOARDS = [overview, contracts]
 
 
 def main():
