@@ -31,7 +31,7 @@ AUDIENCE = {
 RULES = [
     dict(uid='n360-load-failed', title='Load failed', audience='owner', cadence='immediately', severity='critical',
          summary='The latest nightly run was stopped by a data check; dashboards still show the previous good night.',
-         sql="""SELECT toUInt8(argMax(toString(status), loaded_at) = 'failed_checks') AS value FROM n360.runs""",
+         sql="""SELECT toUInt8(argMax(toString(status), (loaded_at, data_date)) = 'failed_checks') AS value FROM n360.runs""",
          no_data='OK'),
     dict(uid='n360-data-stale', title='Data stale', audience='owner', cadence='daily', severity='warning',
          summary='No loaded run with data through yesterday, checked from 10:00 ET.',

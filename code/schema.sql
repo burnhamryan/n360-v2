@@ -329,7 +329,7 @@ SELECT
     round(100 * least(greatest(dateDiff('day', l.start_date, toDate(r.window_end)) + 1, 0), l.term_days) / l.term_days, 1) AS pct_term_elapsed,
     r.window_end, r.capture_utc
 FROM n360.contract_line AS l
-CROSS JOIN (SELECT window_end, capture_utc FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC LIMIT 1) AS r;
+CROSS JOIN (SELECT window_end, capture_utc FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC, data_date DESC LIMIT 1) AS r;
 
 CREATE OR REPLACE VIEW n360.v_pool_status AS
 SELECT p.account, p.pool_id, p.name, p.billed, sum(l.reported_measured) AS consumed,
@@ -414,7 +414,7 @@ WITH
                p.start_date, p.end_date, r.d, f.cross_date, f.exhaust_date, f.rate_per_day, f.avg_per_day, f.forecast_m3,
                f.horizon, f.flags
         FROM n360.v_pool_status AS p
-        CROSS JOIN (SELECT toDate(window_end) AS d FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC LIMIT 1) AS r
+        CROSS JOIN (SELECT toDate(window_end) AS d FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC, data_date DESC LIMIT 1) AS r
         LEFT JOIN (SELECT account, pool_id, series_key, cross_date, exhaust_date, rate_per_day, avg_per_day, forecast_m3, horizon, flags
                    FROM n360.forecast WHERE pool_id IS NOT NULL) AS f
                ON f.account = p.account AND f.pool_id = p.pool_id

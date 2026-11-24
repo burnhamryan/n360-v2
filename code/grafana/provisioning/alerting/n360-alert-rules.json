@@ -24,7 +24,7 @@
                 "editorType": "sql",
                 "format": 1,
                 "queryType": "table",
-                "rawSql": "SELECT toUInt8(argMax(toString(status), loaded_at) = 'failed_checks') AS value FROM n360.runs",
+                "rawSql": "SELECT toUInt8(argMax(toString(status), (loaded_at, data_date)) = 'failed_checks') AS value FROM n360.runs",
                 "intervalMs": 1000,
                 "maxDataPoints": 43200
               }

@@ -283,7 +283,7 @@ def data_through(pid, x, y, w, h, link=True):
     links = [{'title': PIPELINE[1], 'url': f'/d/{PIPELINE[0]}?${{__url_time_range}}'}] if link else []
     return panel(pid, 'Data through', 'stat', """
         SELECT formatDateTime(window_end, '%e %b %Y') AS data_through
-        FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC LIMIT 1""", x, y, w, h,
+        FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC, data_date DESC LIMIT 1""", x, y, w, h,
         describe('Last day included in this load (the nightly window ends at 23:59 UTC that day).',
                  'n360.runs, written by load.py only after every data check passes',
                  'loaded runs only; the latest', 'the latest load'),
@@ -293,7 +293,7 @@ def data_through(pid, x, y, w, h, link=True):
 
 def last_load(pid, x, y, w, h):
     return panel(pid, 'Last night', 'stat', """
-        SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC LIMIT 1""", x, y, w, h,
+        SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC, data_date DESC LIMIT 1""", x, y, w, h,
         describe('Result of the latest nightly run. A stopped night leaves the previous good night on screen.',
                  'n360.runs (load.py writes one row per night, loaded or not)', 'none', 'the latest run'),
         field=field_config(mappings=label_colours(RUN_STATUS)),
@@ -1206,7 +1206,7 @@ def pipeline():
                  'the 14 nights to the latest run'), options=STAT_LAST))
     p.append(panel(4, 'Checks passed, last load', 'stat', f"""
         SELECT concat(toString({N_CHECKS} - length(checks_failed)), ' of {N_CHECKS}') AS checks
-        FROM n360.runs ORDER BY loaded_at DESC LIMIT 1""", 13, 0, 5, 3,
+        FROM n360.runs ORDER BY loaded_at DESC, data_date DESC LIMIT 1""", 13, 0, 5, 3,
         describe(f'Data checks the latest run passed, of the {N_CHECKS} in code/checks.sql. Any failure stops the load.',
                  'n360.runs, code/checks.sql', 'none', 'the latest run'),
         options={**STAT_LAST, 'reduceOptions': {'calcs': ['lastNotNull'], 'fields': '/.*/'}, 'textMode': 'value'}))
@@ -1236,7 +1236,7 @@ def pipeline():
     p.append(panel(7, 'Why nights stopped', 'table', f"""
         SELECT {date_sql('data_date')} AS Night, arrayStringConcat(checks_failed, ', ') AS `Checks failed`,
                formatDateTime(loaded_at, '%e %b %Y %H:%i UTC') AS Attempted
-        FROM n360.runs WHERE status = 'failed_checks' ORDER BY loaded_at DESC LIMIT 20""", 0, 7, 12, 6,
+        FROM n360.runs WHERE status = 'failed_checks' ORDER BY loaded_at DESC, data_date DESC LIMIT 20""", 0, 7, 12, 6,
         describe('Runs stopped by a data check, with the checks that failed (definitions in code/checks.sql and '
                  'docs/02_DATA_CONTRACT.md).', 'n360.runs', 'stopped runs', 'the latest 20'),
         field=field_config(noValue='No night has stopped'), may_be_empty='no night has stopped'))
