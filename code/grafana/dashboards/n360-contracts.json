@@ -22,8 +22,8 @@
           "type": "grafana-clickhouse-datasource",
           "uid": "n360-clickhouse"
         },
-        "query": "SELECT DISTINCT account FROM n360.contract_line ORDER BY account",
-        "definition": "SELECT DISTINCT account FROM n360.contract_line ORDER BY account",
+        "query": "SELECT account FROM n360.account ORDER BY account",
+        "definition": "SELECT account FROM n360.account ORDER BY account",
         "multi": true,
         "includeAll": true,
         "current": {
@@ -226,7 +226,7 @@
         "x": 0,
         "y": 3,
         "w": 24,
-        "h": 13
+        "h": 14
       },
       "targets": [
         {
@@ -446,7 +446,67 @@
             "properties": [
               {
                 "id": "custom.width",
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Line"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
                 "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Billed"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 95
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% of billed"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 95
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% of term"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 85
               }
             ]
           },
@@ -593,7 +653,7 @@
       "description": "One entitlement shared by several lines of one account. Lines in a pool are never compared with the billed amount one by one.\n\n**Source:** consumption_mapping.json \"pools\", via n360.v_line_pace  \n**Filter:** Customer  \n**Window:** Used: the pooled lines, each from its start date to the data-through day",
       "gridPos": {
         "x": 0,
-        "y": 16,
+        "y": 17,
         "w": 24,
         "h": 4
       },
@@ -801,7 +861,7 @@
       "description": "Daily contract measure per line (conversations for rules that bill every conversation, billable for meaningful-engagement rules, engaged otherwise). Not measurable and not implemented lines have no usage and are left out. Days not read show as gaps, not zero.\n\n**Source:** n360.line_day with n360.contract_line  \n**Filter:** Customer; measured contract lines  \n**Window:** dashboard time range, per day",
       "gridPos": {
         "x": 0,
-        "y": 20,
+        "y": 21,
         "w": 24,
         "h": 9
       },
@@ -844,7 +904,7 @@
       "description": "containment = 1 - handoffs / engaged conversations, per VA and week. One line per VA, so channels are never combined. VAs whose handoffs are not read (conversation records reader) are not shown, rather than shown as zero.\n\n**Source:** the platform daily conversation aggregate table (n360.va_day, n360.va)  \n**Filter:** Customer; VAs with handoff data; weeks with engaged conversations  \n**Window:** dashboard time range, by week (Monday start)",
       "gridPos": {
         "x": 0,
-        "y": 29,
+        "y": 30,
         "w": 24,
         "h": 8
       },

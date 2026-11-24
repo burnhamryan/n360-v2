@@ -1498,17 +1498,88 @@
     {
       "id": 14,
       "title": "Requests",
-      "type": "text",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "This customer's support tickets; area and ask are tagged by hand (\"Not tagged yet\" until then). Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** Customer  \n**Window:** all tickets",
       "gridPos": {
         "x": 0,
         "y": 39,
         "w": 24,
-        "h": 3
+        "h": 6
       },
-      "options": {
-        "mode": "markdown",
-        "content": "Requests are Phase 2 (support tickets, `ps_ticket`): see the Requests dashboard once built."
-      }
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(toString(toDayOfMonth(opened)), ' ', formatDateTime(opened, '%b %Y')) AS Opened, title AS Title, product_area AS Area, ask AS Ask, status AS Status\n        FROM n360.ps_ticket WHERE account IN (${account:singlequote}) ORDER BY opened DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No tickets for this customer"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Area"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not tagged yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Ask"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not tagged yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "n360MayBeEmpty": "a customer with no tickets"
     }
   ],
   "links": [

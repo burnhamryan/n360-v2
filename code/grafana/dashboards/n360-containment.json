@@ -22,8 +22,8 @@
           "type": "grafana-clickhouse-datasource",
           "uid": "n360-clickhouse"
         },
-        "query": "SELECT DISTINCT account FROM n360.contract_line ORDER BY account",
-        "definition": "SELECT DISTINCT account FROM n360.contract_line ORDER BY account",
+        "query": "SELECT account FROM n360.account ORDER BY account",
+        "definition": "SELECT account FROM n360.account ORDER BY account",
         "multi": true,
         "includeAll": true,
         "current": {

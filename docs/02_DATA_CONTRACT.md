@@ -106,6 +106,8 @@ definition changes `rule_hash`.
 | `v_va_day_anomaly` | Anomaly flags (see `05_ANOMALY_AND_FORECAST.md`) |
 | `v_line_pace` | One row per entitlement (unpooled line, or pool once): % of billed, % of term, pace gap, crossing date from `forecast`, `pace` (red / amber / green / not measurable / not implemented / not read), `pace_reason`, `term_ended`. Holds the proposed pace thresholds, the only place they exist |
 | `v_customer_attention` | One row per customer: worst entitlement by pace, counts of red and amber entitlements, drops and silences and spikes in the 7 newest settled days, provisional flags |
+| `v_anomaly_heat` | Heatmap band per VA-day for the Anomalies dashboard (watch band ±2; flags from `v_va_day_anomaly`) |
+| `v_source_freshness` | Days each source is behind the data-through day; green / amber (2) / red (3) |
 | `v_anomaly_events` | Cross-account events: the same settled day and direction (spikes, or drops and silences) flagged on 3 or more accounts |
 
 ## Keys and joins
@@ -130,6 +132,13 @@ definition changes `rule_hash`.
 | facts_end_on_last_day | A fact table does not end on the data-through day |
 | crosswalk_vas_known | A VA on a line has no VA row |
 | facts_not_empty | A core table is empty |
+
+## Phase 2 tables (designed 24 Nov 2026, proposed; see `schema.sql`)
+
+`va_config_snapshot`, `playbook_day` (added), `cortex_day`, `explorer_day` and `ps_ticket` are defined in `schema.sql`
+with views `v_va_config_latest`, `v_va_config_change`, `v_top_asks`. `load.py` loads them only when the export
+carries the file. Their field meanings are open questions (`08`). Still planned: `forecast_history`,
+`source_freshness` (a view `v_source_freshness` reads `source.last_day` for now), `anomaly_log`.
 
 ## Planned tables (Phase 2; design them, test on synthetic)
 

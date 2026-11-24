@@ -440,3 +440,98 @@ SELECT s.source_id, s.description, s.last_day, r.d AS data_through,
        multiIf(days_behind >= red_days, 'red', days_behind >= amber_days, 'amber', 'green') AS status
 FROM n360.source AS s
 CROSS JOIN (SELECT toDate(max(window_end)) AS d FROM n360.runs WHERE status = 'loaded') AS r;
+
+-- ───────────────────────── Phase 2 (B22, 24 Nov 2026): PROPOSED design, tested on synthetic only ─────────
+-- 02_DATA_CONTRACT "Planned tables". Field meanings are this pack's reading of the spec (04 sections 9, 10) and
+-- are open questions for Ryan (08). Loaded only when the export carries the file (load.py OPTIONAL), so a
+-- nightly run without Phase 2 files is unaffected.
+
+CREATE TABLE IF NOT EXISTS n360.va_config_snapshot         -- weekly configuration read per VA; keeps history
+(
+    snapshot_date        Date,
+    account              LowCardinality(String),
+    bot_id               UUID,
+    engine_version       LowCardinality(String),           -- as the configuration read reports it, e.g. 'V8.2'
+    engine_major         UInt8,
+    v8_playbooks         UInt16,
+    legacy_intents       UInt16,
+    mcp_servers_live     UInt8,
+    supervisory_rules_on UInt8,
+    run_id               UUID
+)
+ENGINE = MergeTree ORDER BY (account, bot_id, snapshot_date);
+
+CREATE TABLE IF NOT EXISTS n360.playbook_day               -- executions per playbook per day (built = has rows)
+(
+    day          Date,
+    account      LowCardinality(String),
+    bot_id       UUID,
+    playbook     String,
+    executions   Nullable(UInt32),
+    run_id       UUID
+)
+ENGINE = MergeTree PARTITION BY toYYYYMM(day) ORDER BY (account, bot_id, playbook, day);
+
+CREATE TABLE IF NOT EXISTS n360.cortex_day                 -- authoring sessions per account per day
+(
+    day                 Date,
+    account             LowCardinality(String),
+    user_type           Enum8('customer' = 1, 'staff' = 2),
+    authoring_sessions  Nullable(UInt32),
+    run_id              UUID
+)
+ENGINE = MergeTree PARTITION BY toYYYYMM(day) ORDER BY (account, user_type, day);
+
+CREATE TABLE IF NOT EXISTS n360.explorer_day               -- analytics-assistant questions per account per day
+(
+    day          Date,
+    account      LowCardinality(String),
+    user_type    Enum8('customer' = 1, 'staff' = 2),
+    questions    Nullable(UInt32),
+    run_id       UUID
+)
+ENGINE = MergeTree PARTITION BY toYYYYMM(day) ORDER BY (account, user_type, day);
+
+CREATE TABLE IF NOT EXISTS n360.ps_ticket                  -- support tickets; area and ask tagged by hand
+(
+    ticket_id     String,
+    account       LowCardinality(String),
+    opened        Date,
+    title         String,
+    product_area  LowCardinality(Nullable(String)),        -- NULL = not tagged yet (never tagged automatically)
+    ask           Nullable(String),                        -- the feature asked for, in one phrase; NULL = not tagged
+    status        LowCardinality(String),
+    run_id        UUID
+)
+ENGINE = MergeTree ORDER BY (account, opened, ticket_id);
+
+CREATE OR REPLACE VIEW n360.v_va_config_latest AS
+-- Latest configuration read per VA. "Current engine" = major version 8 or later (spec 9: green = V8 or later).
+WITH 8 AS current_major
+SELECT c.snapshot_date, c.account, c.bot_id, c.engine_version, c.engine_major, c.v8_playbooks, c.legacy_intents,
+       c.mcp_servers_live, c.supervisory_rules_on, c.engine_major >= current_major AS current_engine
+FROM n360.va_config_snapshot AS c
+WHERE (c.bot_id, c.snapshot_date) IN (SELECT bot_id, max(snapshot_date) FROM n360.va_config_snapshot GROUP BY bot_id);
+
+CREATE OR REPLACE VIEW n360.v_va_config_change AS
+-- What changed per VA between its two newest configuration reads ("since last week").
+WITH ranked AS (SELECT *, row_number() OVER (PARTITION BY bot_id ORDER BY snapshot_date DESC) AS rn
+                FROM n360.va_config_snapshot)
+SELECT cur.account AS account, cur.bot_id AS bot_id, cur.snapshot_date AS snapshot_date, prev.snapshot_date AS previous_date,
+       arrayFilter(x -> x != '', [
+           if(cur.engine_version != prev.engine_version, concat('engine ', prev.engine_version, ' → ', cur.engine_version), ''),
+           if(cur.v8_playbooks != prev.v8_playbooks, concat('V8 playbooks ', toString(prev.v8_playbooks), ' → ', toString(cur.v8_playbooks)), ''),
+           if(cur.legacy_intents != prev.legacy_intents, concat('legacy intents ', toString(prev.legacy_intents), ' → ', toString(cur.legacy_intents)), ''),
+           if(cur.mcp_servers_live != prev.mcp_servers_live, concat('MCP servers ', toString(prev.mcp_servers_live), ' → ', toString(cur.mcp_servers_live)), ''),
+           if(cur.supervisory_rules_on != prev.supervisory_rules_on, concat('supervisory rules ', toString(prev.supervisory_rules_on), ' → ', toString(cur.supervisory_rules_on)), '')
+       ]) AS changes
+FROM ranked AS cur INNER JOIN ranked AS prev ON prev.bot_id = cur.bot_id AND prev.rn = 2
+WHERE cur.rn = 1 AND length(changes) > 0;
+
+CREATE OR REPLACE VIEW n360.v_top_asks AS
+-- An ask wanted by several customers (spec 10 "top asks"). PROPOSED: "several" = 2 or more customers.
+WITH 2 AS several
+SELECT ask, uniqExact(account) AS customers, count() AS tickets, arraySort(groupUniqArray(account)) AS account_list,
+       min(opened) AS first_asked, max(opened) AS last_asked
+FROM n360.ps_ticket WHERE ask IS NOT NULL
+GROUP BY ask HAVING customers >= several;

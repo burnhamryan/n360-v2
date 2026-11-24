@@ -88,6 +88,25 @@ def main():
     check('customers with no entitlement have no pace (not read), not a colour',
           all(att[a]['pace'] is None for a in none), {a: att[a]['pace'] for a in none})
 
+    # Phase 2 (proposed design): skipped when the export carried no Phase 2 files
+    if int(q('SELECT count() AS n FROM n360.va_config_snapshot')[0]['n']):
+        cur = {r['va_name']: r for r in q('SELECT v.va_name AS va_name, c.engine_version AS engine_version, '
+                                          'c.current_engine AS current_engine FROM n360.v_va_config_latest AS c '
+                                          'INNER JOIN n360.va AS v ON v.bot_id = c.bot_id')}
+        check('Phase 2: VAs on V7 are not current, V8 is',
+              not cur['Lakeside Email']['current_engine'] and not cur['Cedar Ops Chat']['current_engine']
+              and cur['Harbor Chat']['current_engine'], {k: v['engine_version'] for k, v in cur.items()})
+        ch_ = q('SELECT v.va_name AS va_name, arrayStringConcat(c.changes, \'; \') AS changes FROM n360.v_va_config_change AS c '
+                'INNER JOIN n360.va AS v ON v.bot_id = c.bot_id ORDER BY va_name')
+        check('Phase 2: the two planted configuration changes, nothing else',
+              [r['va_name'] for r in ch_] == ['Harbor Chat', 'Pinecrest Chat'], ch_)
+        idle = q("SELECT playbook FROM n360.playbook_day WHERE day > (SELECT toDate(max(window_end)) FROM n360.runs "
+                 "WHERE status = 'loaded') - 31 GROUP BY bot_id, playbook HAVING sum(executions) = 0")
+        check('Phase 2: one built-but-idle playbook (Gift cards)', [r['playbook'] for r in idle] == ['[SYNTHETIC] Gift cards'], idle)
+        asks = {r['ask']: int(r['customers']) for r in q('SELECT ask, customers FROM n360.v_top_asks')}
+        check('Phase 2: top asks = the ask from 3 customers and the one from 2',
+              asks == {'Export conversations to CSV': 3, 'SMS opt-out keywords': 2}, asks)
+
     print('VIEW TESTS PASSED' if not failed else f'{failed} VIEW TESTS FAILED')
     return 1 if failed else 0
 
