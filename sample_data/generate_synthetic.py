@@ -2,6 +2,9 @@
 """Generate a SYNTHETIC night of N360 data in the exact row format the loader expects.
 
     python3 sample_data/generate_synthetic.py --out sample_data/rows --last-day 2026-11-19
+    python3 sample_data/generate_synthetic.py --out sample_data/nights --nights 14 --bad-night 9
+        # 14 consecutive nights ending on --last-day, one folder each: <out>/<data_date>/rows/
+        # Night 9 (1-based) is broken on purpose so load.py refuses it (line_measured_reconciles fails).
 
 Every company, VA, contract and number here is invented. Nothing comes from real data. The
 generator exists so the project can be built and tested anywhere, with every edge case the real
@@ -20,10 +23,15 @@ Edge cases deliberately present (and what each one tests):
   Northwind Outfitters a normal account; joins a cross-account spike with Bluebird and Harbor
   Cedar Logistics     an unbilled VA (no contract line)
 A same-day spike hits Northwind, Bluebird and Harbor 6 days before the last day (cross-account event).
+
+Multi-night mode (--nights): every day's numbers come from per-VA random streams, so a day reads the
+same on every night that includes it; the planted events stay on fixed dates (anchored to --last-day);
+and the newest 2 days of each night read slightly low (still settling) and are complete the next night.
 """
 import argparse, datetime as dt, json, math, os, random, uuid
 
-R = random.Random(20261119)
+SEED = 20261119
+R = random.Random(SEED)
 HIST_FROM = dt.date(2025, 1, 1)
 
 
@@ -40,7 +48,7 @@ def sheet(d):
     return f'{d.day}-{d.strftime("%b")}-{d.year}'
 
 
-def daily_series(base, start, last, weekend=0.55, growth=0.0, noise=0.12):
+def daily_series(base, start, last, weekend=0.55, growth=0.0, noise=0.12, rng=R):
     """conversations per day: weekly shape, gentle growth, noise; 0 before start"""
     out = {}
     for d in days(HIST_FROM, last):
@@ -49,17 +57,35 @@ def daily_series(base, start, last, weekend=0.55, growth=0.0, noise=0.12):
             continue
         t = (d - start).days
         wk = weekend if d.weekday() >= 5 else 1.0
-        v = base * wk * (1 + growth * t / 365) * (1 + R.uniform(-noise, noise))
+        v = base * wk * (1 + growth * t / 365) * (1 + rng.uniform(-noise, noise))
         out[d] = max(0, int(round(v)))
     return out
+
+
+SETTLING = [0.97, 0.90]   # multi-night: share of the final count read on the second-newest and newest day
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--out', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rows'))
     ap.add_argument('--last-day', default='2026-11-19', help='last data day (the window ends 23:59 UTC that day)')
+    ap.add_argument('--nights', type=int, default=1, help='N consecutive nights ending on --last-day, one folder each')
+    ap.add_argument('--bad-night', type=int, help='1-based night to break on purpose (multi-night only)')
     a = ap.parse_args()
-    last = dt.date.fromisoformat(a.last_day)
+    final = dt.date.fromisoformat(a.last_day)
+    if a.nights == 1 and not a.bad_night:
+        generate(final, final, a.out, multi=False)
+        return
+    if a.bad_night and not 1 <= a.bad_night <= a.nights:
+        ap.error('--bad-night must be between 1 and --nights')
+    for i in range(1, a.nights + 1):
+        last = final - dt.timedelta(a.nights - i)
+        out = os.path.join(a.out, (last + dt.timedelta(1)).isoformat(), 'rows')
+        generate(last, final, out, multi=True, bad=(i == a.bad_night))
+
+
+def generate(last, anchor, out, multi, bad=False):
+    """one night: data through `last`; planted events dated from `anchor` (the final night's last day)"""
     data_date = last + dt.timedelta(1)
     run_id = str(uuid.uuid4())
     T = {t: [] for t in ['account', 'va', 'contract_line', 'line_va', 'pool', 'rule', 'source', 'va_day',
@@ -98,7 +124,7 @@ def main():
     ]
     pool_def = dict(account='Bluebird Air', pool=0, name='Bluebird Air: 3 lines, pooled entitlement', billed=3000000, start='2026-01-29')
 
-    spike_day = last - dt.timedelta(6)
+    spike_day = anchor - dt.timedelta(6)
     va_daily = {}          # va name -> {day: (conv, engaged, handoffs)}
     acct_rows = []
     for acct, lines in W:
@@ -110,15 +136,19 @@ def main():
             end = dt.date(start.year + (start.month - 1 + L['months']) // 12, (start.month - 1 + L['months']) % 12 + 1, 1) - dt.timedelta(1)
             L['start_d'], L['end_d'] = start, end
             for (vname, vch, base, ex) in L['vas']:
-                conv = daily_series(base, HIST_FROM if not ex.get('cm') else start, last, growth=ex.get('growth', 0.0))
+                rn = random.Random(f'{SEED}/noise/{vname}') if multi else R      # per-VA streams: a day reads
+                rr = random.Random(f'{SEED}/ratio/{vname}') if multi else R      # the same on every night
+                conv = daily_series(base, HIST_FROM if not ex.get('cm') else start, last, growth=ex.get('growth', 0.0), rng=rn)
                 rows = {}
                 for d, c in conv.items():
-                    if ex.get('silent_days') and d > last - dt.timedelta(ex['silent_days']):
+                    if ex.get('silent_days') and d > anchor - dt.timedelta(ex['silent_days']):
                         c = 0
                     if ex.get('spike') and d == spike_day:
                         c = int(c * 2.6)
-                    e = int(round(c * R.uniform(0.82, 0.9)))
-                    h = None if ex.get('cm') else int(round(e * R.uniform(0.4, 0.6)))
+                    if multi and (last - d).days < len(SETTLING):
+                        c = int(c * SETTLING[-1 - (last - d).days])
+                    e = int(round(c * rr.uniform(0.82, 0.9)))
+                    h = None if ex.get('cm') else int(round(e * rr.uniform(0.4, 0.6)))
                     rows[d] = (c, e, h)
                 va_daily[vname] = (acct, vch, ex, rows)
 
@@ -136,7 +166,8 @@ def main():
         return bot, live, src
 
     # unbilled VA
-    va_daily['Cedar Ops Chat'] = ('Cedar Logistics', 'Chat', {}, {d: (c, int(c * .85), int(c * .4)) for d, c in daily_series(90, dt.date(2026, 5, 29), last).items()})
+    cedar = daily_series(90, dt.date(2026, 5, 29), last, rng=random.Random(f'{SEED}/noise/Cedar Ops Chat') if multi else R)
+    va_daily['Cedar Ops Chat'] = ('Cedar Logistics', 'Chat', {}, {d: (c, int(c * .85), int(c * .4)) for d, c in cedar.items()})
     T['account'].append(dict(account='Cedar Logistics', display_name='Cedar Logistics', rocketlane_account_id=100099,
                              csm_rocketlane='csm9@example.com', run_id=run_id))
 
@@ -221,18 +252,23 @@ def main():
                       ('containment_days', 'Daily handoffs per VA'), ('consumption_rules', 'Contract-rule counts per line per day')]:
         T['source'].append(dict(source_id=sid, description='[SYNTHETIC] ' + desc, definition='', check_text='', last_day=last.isoformat(), run_id=run_id))
 
-    os.makedirs(a.out, exist_ok=True)
+    if bad:   # a pipeline bug: one line's total disagrees with its daily series
+        broken = next(x for x in T['contract_line'] if x['account'] == 'Northwind Outfitters')
+        broken['reported_measured'] += 1
+
+    os.makedirs(out, exist_ok=True)
     counts = {}
     for t, rows in T.items():
-        with open(os.path.join(a.out, f'{t}.ndjson'), 'w') as f:
+        with open(os.path.join(out, f'{t}.ndjson'), 'w') as f:
             for r in rows:
                 f.write(json.dumps(r, separators=(',', ':')) + '\n')
         counts[t] = len(rows)
     run = dict(run_id=run_id, data_date=data_date.isoformat(), window_end=f'{last.isoformat()} 23:59:00',
                capture_utc=f'{data_date.isoformat()} 03:00:00', source_dir='synthetic', code_fingerprint='synthetic', row_counts=counts)
-    with open(os.path.join(a.out, 'run.json'), 'w') as f:
+    with open(os.path.join(out, 'run.json'), 'w') as f:
         json.dump(run, f, indent=1)
-    print('synthetic run', run_id, ' '.join(f'{k}={v}' for k, v in counts.items()))
+    print('synthetic run', run_id, 'data', data_date.isoformat(), 'BROKEN ON PURPOSE' if bad else '',
+          ' '.join(f'{k}={v}' for k, v in counts.items()))
 
 
 def forecast_row(acct, skey, pool, start, end, last, used, last30, billed, run_id):

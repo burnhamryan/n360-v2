@@ -1,0 +1,5 @@
+# Generated: regenerate with sample_data/generate_synthetic.py
+sample_data/rows/
+sample_data/nights/
+# Local secrets
+code/.env

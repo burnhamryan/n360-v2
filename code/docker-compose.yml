@@ -32,7 +32,9 @@ services:
       - "127.0.0.1:3000:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
-      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      # Installed before Grafana starts; a failed install stops start-up instead of leaving the panels blank.
+      # GF_INSTALL_PLUGINS is deprecated in 13.x. Pin the version in .env (empty = latest, not reproducible).
+      GF_PLUGINS_PREINSTALL_SYNC: grafana-clickhouse-datasource@${GRAFANA_CH_PLUGIN_VERSION:-}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GRAFANA_CH_PASSWORD: ${GRAFANA_CH_PASSWORD}
     volumes:
