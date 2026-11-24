@@ -108,6 +108,11 @@ definition changes `rule_hash`.
 | `v_customer_attention` | One row per customer: worst entitlement by pace, counts of red and amber entitlements, drops and silences and spikes in the 7 newest settled days, provisional flags |
 | `v_anomaly_heat` | Heatmap band per VA-day for the Anomalies dashboard (watch band ±2; flags from `v_va_day_anomaly`) |
 | `v_source_freshness` | Days each source is behind the data-through day; green / amber (2) / red (3) |
+| `settings` | Every proposed threshold, one row (pace, anomaly, freshness, engine, asks, anomaly v2). Views read it |
+| `v_forecast_accuracy`, `v_forecast_change`, `v_forecast_drift` | Forecast MAPE at 30/60/90 days; night over night changes; crossing-date drift (B16) |
+| `v_anomaly_review`, `v_flag_quality` | Flags with their newest review; weekly flag quality (B19) |
+| `v_containment_week`, `v_measure_gap_week`, `v_anomaly_v2` | Anomaly detection v2 signals (B20) |
+| `v_challenger_backtest` | Newest challenger backtest MAPE per model and horizon (B21) |
 | `v_anomaly_events` | Cross-account events: the same settled day and direction (spikes, or drops and silences) flagged on 3 or more accounts |
 
 ## Keys and joins
@@ -132,6 +137,15 @@ definition changes `rule_hash`.
 | facts_end_on_last_day | A fact table does not end on the data-through day |
 | crosswalk_vas_known | A VA on a line has no VA row |
 | facts_not_empty | A core table is empty |
+
+## History and review tables (B15–B21, 24 Nov 2026; never swapped)
+
+| Table | Written by | Grain |
+|---|---|---|
+| `forecast_history` | `load.py` after each swap (copy of `forecast`), optional backfill file | Line or pool × night |
+| `source_freshness` | `load.py` after each swap (copy of `source`) | Source × night |
+| `anomaly_log` | `code/review_anomaly.py` (loader user) | Flag × review; newest wins |
+| `forecast_challenger` | `code/forecast/challenger.py` | Backtest prediction (run × model × series × cutoff × horizon) |
 
 ## Phase 2 tables (designed 24 Nov 2026, proposed; see `schema.sql`)
 

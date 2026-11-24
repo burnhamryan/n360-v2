@@ -46,8 +46,8 @@ detail to build from. Build against the spec. Ryan will reconcile with the appro
 | Red | Above 100% of billed, or crossing billed within 30 days |
 | Grey | Not measurable, not implemented, or not read |
 
-The view decides the colour (decided 24 Nov 2026): `n360.v_line_pace` holds the four thresholds at its top, the
-only place they exist. `build_dashboards.py` maps the view's `pace` label to a display colour (`PACE_LABEL`).
+The view decides the colour (decided 24 Nov 2026): `n360.v_line_pace` reads the four thresholds from `n360.settings`,
+the one view that holds every proposed threshold. `build_dashboards.py` maps the view's `pace` label to a display colour (`PACE_LABEL`).
 
 ## 1. Portfolio overview · `n360-overview` (BUILT 24 Nov 2026, B6)
 Question: which customers need attention this week, and why? Audience: leadership.
@@ -89,12 +89,12 @@ Stats: status (Normal / Went silent / …), conversations 30d, typical weekday (
 Data through, lines above billed, contract lines table, pools, daily use per line, containment per VA weekly, with pace colours, data links, header and Back link. Fixed: lines above billed now counts the pool; not measurable lines are not plotted; "Contract unit" says "Sheet terms" where no SOW overrides; thousands separators, dates as "4 Dec 2026", clean series names.
 
 ## 6. Forecast and runway · `n360-forecast` (BUILT, B11)
-Differences: the runway's contract-end tick is a change of shade (dark after the term end). Forecast accuracy is a note until `forecast_history` exists (B15).
+Differences: the runway's contract-end tick is a change of shade (dark after the term end). Forecast accuracy (6.5) and crossing-date drift (6.6) built from `forecast_history` (B15–B16), plus a challenger backtest panel (B21).
 
 Stats: crossing in 30 / 60 / 90 days, already above billed, step changes. Panels: runway timeline (one lane per line, bar from today to runs-out date, tick at contract end; colours: red crosses ≤30 days, blue crosses before term end, grey runs out after term end); runway table (line, used, billed, rate, runs out, term ends, note; flag when the term end has already passed); step changes table (last-30 vs term %, "rising"/"falling"/"stopped"); forecast accuracy (needs `forecast_history`; show a note until 30 nights).
 
 ## 7. Anomalies · `n360-anomalies` (BUILT, B12)
-Differences: the heatmap is a state timeline (one lane per flagged VA); not-scored days are blank. Review column is "Not reported yet" until the anomaly log (B19). Cross-account events are split by direction (spikes vs drops/silences).
+Differences: the heatmap is a state timeline (one lane per flagged VA); not-scored days are blank. Review column from the anomaly log (B19: "Not reviewed" until recorded with `code/review_anomaly.py`); flag quality per week; anomaly v2 signals (B20). Cross-account events are split by direction (spikes vs drops/silences).
 
 Controls: kind (drops and silences / spikes), include provisional (No default / Yes). Stats: drops, silences, spikes (7 settled days), provisional count. Panels: heatmap VA × day (30 days, VAs flagged in the window; colour by z: red ≤ −4 or silent, dark red −4..−2, neutral, dark blue 2..4, blue ≥ 4, near-black not scored; provisional columns faded); anomaly feed (day, customer, VA, actual, expected, z, kind, status, review) with VA drill; same-day events across customers (grouped); settled flags per week (stacked: drops+silences, spikes).
 
@@ -112,6 +112,6 @@ Engine version per VA (green = V8 or later); V8 playbooks vs legacy intents; pla
 Tickets by product area; top asks (several customers wanting the same thing); tickets by customer; "Not tagged yet" list (tagged by hand, never automatically).
 
 ## 11. Pipeline health · `n360-pipeline` (BUILT, B14)
-Differences: "ran, not loaded" (orange) cannot show: a run that errors before logging (loader exit 2) writes nothing to `runs`, so it shows as "no run". Hover shows the status, not the failed checks (they are in "Why nights stopped").
+Differences: "ran, not loaded" (orange) cannot show: a run that errors before logging (loader exit 2) writes nothing to `runs`, so it shows as "no run". Hover shows the status, not the failed checks (they are in "Why nights stopped"). Freshness history per night (B17).
 
 Stats: last night result, data through, nights loaded of last 14, checks passed on last load, stale sources. Panels: runs, last 14 nights (one block per night: loaded green, stopped red, ran-not-loaded orange, no run grey; hover shows reason); why nights stopped (table); source freshness (last day, days behind: amber 2, red 3); contract measure mix (lines per measure; rules not live).

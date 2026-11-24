@@ -275,7 +275,7 @@ CREATE TABLE IF NOT EXISTS n360.anomaly_log              -- B19: review outcome 
     outcome       Enum8('real' = 1, 'expected' = 2, 'data issue' = 3),
     note          String,
     reviewed_by   LowCardinality(String),
-    reviewed_at   DateTime('UTC') DEFAULT now()
+    reviewed_at   DateTime64(3, 'UTC') DEFAULT now64(3)      -- milliseconds: two reviews in one second must not tie
 )
 ENGINE = MergeTree ORDER BY (bot_id, day, reviewed_at);
 

@@ -763,8 +763,8 @@
       "gridPos": {
         "x": 0,
         "y": 33,
-        "w": 12,
-        "h": 10
+        "w": 24,
+        "h": 13
       },
       "targets": [
         {
@@ -856,7 +856,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 300
+                "value": 380
               }
             ]
           }
@@ -875,10 +875,10 @@
       },
       "description": "Where each line's crossing date stood 7 and 30 stored nights ago, and how many days it has moved (negative = earlier). Empty where the forecast had no crossing date then (\"Not reported yet\" = no crossing before the term end, or not stored).\n\n**Source:** n360.v_forecast_drift (n360.forecast_history)  \n**Filter:** Customer; lines that cross billed now or did then  \n**Window:** stored nights",
       "gridPos": {
-        "x": 12,
-        "y": 33,
-        "w": 12,
-        "h": 10
+        "x": 0,
+        "y": 46,
+        "w": 24,
+        "h": 8
       },
       "targets": [
         {
@@ -1026,7 +1026,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 240
+                "value": 380
               }
             ]
           }
@@ -1046,7 +1046,7 @@
       "description": "Mean absolute % error of each model when backtested at weekly cutoffs over the loaded history (all lines and pools). The straight line stays the forecast of record; the challenger replaces it only if it has the better 30-day MAPE on most lines for 8 straight weeks AND Ryan approves (08). Run code/forecast/challenger.py to refresh; the full report is docs/10_CHALLENGER_BACKTEST.md.\n\n**Source:** n360.v_challenger_backtest (n360.forecast_challenger)  \n**Filter:** none (every customer)  \n**Window:** the newest backtest run",
       "gridPos": {
         "x": 0,
-        "y": 43,
+        "y": 54,
         "w": 24,
         "h": 6
       },

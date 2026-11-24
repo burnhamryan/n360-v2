@@ -1,3 +1,37 @@
+# CHANGES · 24 Nov 2026 · B15–B21 (history, accuracy, freshness, alerts, review log, anomaly v2, challenger)
+
+**The backlog is done: every item B1–B23 is built and tested on synthetic data.** What is left is company-side
+work and the open questions in `08`.
+
+| Item | What was built | Tested |
+|---|---|---|
+| Settings | `n360.settings`: every proposed threshold in one view (pace, anomaly, freshness, engine, asks, v2); all views read it | View tests unchanged |
+| B15 | `forecast_history`, copied by `load.py` from the forecast of record after each swap (no pipeline change); optional backfill file; generator `--forecast-backfill DAYS` | One row per line/pool per loaded night (13 of 14 nights; the refused night has none) |
+| B16 | `v_forecast_accuracy` (MAPE at 30/60/90 days: the stored forecast evaluated, never refitted), `v_forecast_change`, `v_forecast_drift`; Forecast panels 6.5, 6.6 | Harbor Chat MAPE recomputed by hand in Python matches the view |
+| B17 | `source_freshness` (per night); Pipeline "Days behind, night by night"; generator `--stale SOURCE=DAYS` | 2 days behind → amber, 3 → red |
+| B18 | 7 alert rules as code (`build_alerts.py` → `provisioning/alerting/`): load failed, data stale, source stale, VA silent/dropped, cross-account event, newly over billed, crossing soon; placeholder contact points routed by audience | Rule queries checked after nights 7, 9, 11, 12 and final, plus two stale cases. A provisional-only silence does not fire. In Grafana 13.3.1 all 7 load healthy; Lakeside, Data stale and (after a bad night) Load failed fire |
+| B19 | `anomaly_log` (the nightly load never touches it), `code/review_anomaly.py`, `v_anomaly_review` (newest review wins), `v_flag_quality`; Anomalies "Review" and "Flag quality per week" | Outcomes join back to flags; week of 9 Nov: 3 reviewed, 1 real, 1 expected, 1 data issue |
+| B20 | `v_containment_week`, `v_measure_gap_week`, `v_anomaly_v2` (plus pace change and freshness); Anomalies "Other signals" | New synthetic customer Orchid Health carries the planted cases: exactly 3 signals, none elsewhere |
+| B21 | `code/forecast/challenger.py`: weekday Holt-Winters against the straight line at weekly cutoffs; writes `forecast_challenger` and `docs/10_CHALLENGER_BACKTEST.md`; Forecast panel | CI fails if `n360.forecast` changes (checksum). Result: the challenger is worse overall (90 days: 3.9% vs 1.3% MAPE) but better on most lines at 30 days for 6 straight weeks; not adopted |
+
+**Bugs found on the way (fixed):**
+- `runs.loaded_at` has one-second precision, so loads in the same second tied and "the latest run" could be an older night (now broken by `data_date`). Found by server-mode CI.
+- Two reviews of one flag in the same second tied the same way (`anomaly_log.reviewed_at` is now milliseconds).
+- Alias collisions and a correlated join that ClickHouse refuses.
+
+**Synthetic data:** added **Orchid Health** (anomaly v2 cases). Existing customers' numbers are unchanged in multi-night
+mode; customer count is now 11.
+
+**New open questions in `08`:** alert recipients and timing (placeholders now); anomaly v2 thresholds; challenger
+settings; who may record reviews.
+
+| Check | Result |
+|---|---|
+| `ci.sh chdb`, `ci.sh server` | Pass: loads, all view tests (B5, B15, B16, B19, B20, Phase 2), alert scenarios, stale scenarios, challenger checksum, dashboards and alert rules regenerate identically, every panel query as Grafana's read-only user |
+| Grafana 13.3.1 | Forecast, Anomalies, Pipeline render (screenshots updated); alert rules provisioned and evaluated |
+
+---
+
 # CHANGES · 24 Nov 2026 · all 11 dashboards (B7–B14, B10, Phase 2 B22–B23)
 
 **Every dashboard in `04` is built, rendered in Grafana 13.3.1 on synthetic data, and every drill-down link was

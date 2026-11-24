@@ -1001,13 +1001,13 @@ def forecast():
                    round(sumIf(mape * forecasts, horizon_days = 90) / sumIf(forecasts, horizon_days = 90), 1),
                    sumIf(forecasts, horizon_days = 30)
             FROM n360.v_forecast_accuracy WHERE {ACCT} HAVING sumIf(forecasts, horizon_days = 30) > 0
-        ) ORDER BY o, Line""", 0, 33, 12, 10,
+        ) ORDER BY o, Line""", 0, 33, 24, 13,
         describe('How far the stored forecast was off: forecasts made 30, 60 and 90 days earlier against what was then '
                  'used (mean absolute % error; lower is better). The forecast is evaluated as stored, never refitted. '
                  'Shows once forecasts 30 days old are stored.', 'n360.v_forecast_accuracy (n360.forecast_history)',
                  'Customer; lines and pools with a billed amount', 'every stored night'),
         field=field_config([*[override(c, ('unit', 'percent'), ('decimals', 1)) for c in ('30 days', '60 days', '90 days')],
-                            count_col('Forecasts'), width('Line', 300)],
+                            count_col('Forecasts'), width('Line', 380)],
                            noValue='Shows once forecasts 30 days old are stored'),
         may_be_empty='fewer than 30 nights of stored forecasts'))
     p.append(panel(10, 'Crossing date drift', 'table', f"""
@@ -1018,21 +1018,21 @@ def forecast():
         FROM n360.v_forecast_drift AS d
         INNER JOIN n360.v_line_pace AS pc ON pc.series_key = d.series_key
         INNER JOIN n360.account AS a ON a.account = d.account
-        WHERE d.{ACCT} ORDER BY ifNull(d.moved_7, 0)""", 12, 33, 12, 10,
+        WHERE d.{ACCT} ORDER BY ifNull(d.moved_7, 0)""", 0, 46, 24, 8,
         describe('Where each line\'s crossing date stood 7 and 30 stored nights ago, and how many days it has moved '
                  '(negative = earlier). Empty where the forecast had no crossing date then ("Not reported yet" = no '
                  'crossing before the term end, or not stored).', 'n360.v_forecast_drift (n360.forecast_history)',
                  'Customer; lines that cross billed now or did then', 'stored nights'),
         field=field_config([*[override(c, ('mappings', [empty_grey()])) for c in
                               ('Crosses billed', '7 nights ago', '30 nights ago', 'Moved, 7 nights', 'Moved, 30 nights')],
-                            width('Line', 240)], noValue='No line crosses billed'),
+                            width('Line', 380)], noValue='No line crosses billed'),
         may_be_empty='no line crosses billed'))
     p.append(panel(11, 'Challenger backtest (comparison only)', 'table', """
         SELECT concat(toString(horizon_days), ' days') AS Horizon,
                anyIf(mape, model = 'straight line') AS `Straight line (forecast of record)`,
                anyIf(mape, model = 'weekday HW') AS `Weekday Holt-Winters (challenger)`,
                maxIf(forecasts, model = 'straight line') AS Forecasts, toString(any(data_through)) AS `Data through`
-        FROM n360.v_challenger_backtest GROUP BY horizon_days ORDER BY horizon_days""", 0, 43, 24, 6,
+        FROM n360.v_challenger_backtest GROUP BY horizon_days ORDER BY horizon_days""", 0, 54, 24, 6,
         describe('Mean absolute % error of each model when backtested at weekly cutoffs over the loaded history (all '
                  'lines and pools). The straight line stays the forecast of record; the challenger replaces it only if '
                  'it has the better 30-day MAPE on most lines for 8 straight weeks AND Ryan approves (08). Run '
@@ -1093,12 +1093,16 @@ def anomalies():
         WHERE f.{ACCT} AND {kind_sql.replace('kind', 'f.kind').replace('${f.kind', '${kind')} AND {prov_sql.replace('provisional OR', 'f.provisional OR')} AND $__dateFilter(f.day)
         ORDER BY f.day DESC""", 0, 12, 24, 9,
         describe('Every flagged VA-day of the chosen kind in the time range, with its review outcome (real / expected / '
-                 'data issue; "Not reported yet" = not reviewed). Reviews are recorded with code/review_anomaly.py. '
+                 'data issue, or "Not reviewed"). Reviews are recorded with code/review_anomaly.py. '
                  'Click a VA to open it.', 'n360.v_anomaly_review (n360.v_va_day_anomaly, n360.anomaly_log)',
                  'Customer; Kind; Include provisional', 'dashboard time range'),
         field=field_config([hidden('drill'), count_col('Actual'), count_col('Expected'), override('z', ('decimals', 1)),
-                            override('Review', ('mappings', label_colours(REVIEW_LABEL) + [empty_grey()]),
-                                     ('custom.cellOptions', {'type': 'color-text'})), width('Review', 110),
+                            override('Note', ('mappings', [{'type': 'special', 'options': {'match': 'null', 'result': {'text': '', 'index': 0}}}])),
+                            override('Review', ('mappings', label_colours(REVIEW_LABEL) + [{'type': 'special', 'options': {
+                                'match': 'null', 'result': {'text': 'Not reviewed', 'color': COLOUR['grey'], 'index': 9}}}]),
+                                     ('custom.cellOptions', {'type': 'color-text'})), width('Review', 100),
+                            width('Day', 110), width('Customer', 150), width('VA', 170), width('Actual', 70),
+                            width('Expected', 80), width('z', 60), width('Kind', 100), width('Status', 90),
                             override('Status', ('mappings', label_colours({'Provisional': ('Provisional', 'amber'),
                                                                           'Settled': ('Settled', 'red')})),
                                      ('custom.cellOptions', {'type': 'color-text'})),
@@ -1117,18 +1121,18 @@ def anomalies():
                            noValue='No cross-account events'), may_be_empty='no cross-account event in the range'))
     p.append(panel(9, 'Other signals: containment, measure, pace, freshness', 'table', f"""
         SELECT v2.signal AS Signal, ifNull(ac.display_name, '') AS Customer, v2.subject AS Subject, {date_sql('v2.period')} AS `When`,
-               v2.value AS Value, v2.usual AS Usual, v2.detail AS Detail
+               v2.value AS `This period`, v2.usual AS Usual, v2.detail AS Detail
         FROM n360.v_anomaly_v2 AS v2 LEFT JOIN n360.account AS ac ON ac.account = v2.account
         WHERE (v2.account = '' OR v2.{ACCT}) AND v2.period > {DATA_THROUGH_SQL} - 60
         ORDER BY v2.period DESC""", 0, 35, 24, 7,
         describe('Anomaly detection v2 (05): a VA\'s weekly containment more than 10 points below its 8-week median '
                  '(on 200+ engaged); a rule line\'s measure share of engaged more than 20 points from its usual level; '
-                 'a crossing date moved more than 14 days earlier overnight; a source 2+ days behind. Value and Usual '
-                 'are % (days for pace change). Thresholds in n360.settings. Complete weeks only.',
+                 'a crossing date moved more than 14 days earlier overnight; a source 2+ days behind. "This period" and '
+                 '"Usual" are % (days moved, for pace change). Thresholds in n360.settings. Complete weeks only.',
                  'n360.v_anomaly_v2 (v_containment_week, v_measure_gap_week, v_forecast_change, v_source_freshness)',
                  'Customer', 'the 60 days to the data-through day'),
-        field=field_config([width('Signal', 140), width('Customer', 140), width('When', 110), width('Value', 70),
-                            width('Usual', 70), override('Usual', ('mappings', [{'type': 'special', 'options': {
+        field=field_config([width('Signal', 140), width('Customer', 140), width('When', 110), width('This period', 95),
+                            width('Usual', 80), width('Subject', 260), override('Usual', ('mappings', [{'type': 'special', 'options': {
                                 'match': 'null', 'result': {'text': '', 'index': 0}}}]))],
                            noValue='No other signals in the last 60 days'),
         may_be_empty='no v2 signal in the last 60 days'))
