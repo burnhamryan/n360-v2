@@ -73,6 +73,8 @@ def test_no_thresholds():
 def test_descriptions():
     for d in [f() for f in b.DASHBOARDS] + [sample()]:
         for p in d['panels']:
+            if p['type'] == 'text':      # a note, not a number: nothing to give provenance for
+                continue
             for part in ('**Source:**', '**Filter:**', '**Window:**'):
                 assert part in p['description'], f"{d['uid']} panel {p['id']} description lacks {part}"
     print('OK   every panel description has Source, Filter, Window')

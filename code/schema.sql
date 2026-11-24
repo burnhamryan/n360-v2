@@ -273,7 +273,8 @@ FROM n360.va_day;
 -- provisional = within 3 days of the data-through day: those days still settle (days-store drift), and most
 -- recent-day drops are settling, not real. Alerts fire on settled days only. NULL (not read) is never scored.
 CREATE OR REPLACE VIEW n360.v_va_day_anomaly AS
-WITH base AS (
+WITH 4 AS flag_z,          -- PROPOSED (08): drop / spike at |z| >= 4. The only place this number lives.
+base AS (
     SELECT day, account, bot_id, conversations,
            quantilesExact(0.25, 0.5, 0.75)(conversations) OVER w AS q, count() OVER w AS n
     FROM n360.va_day
@@ -283,7 +284,8 @@ WITH base AS (
 SELECT b.day, b.account, b.bot_id, v.va_name, b.conversations AS actual, b.q[2] AS expected,
        greatest((b.q[3] - b.q[1]) / 1.349, 0.1 * b.q[2], 5) AS spread,
        round((b.conversations - b.q[2]) / spread, 2) AS z,
-       multiIf(b.conversations = 0, 'went silent', z <= -4, 'drop', z >= 4, 'spike', 'normal') AS kind,
+       multiIf(b.conversations = 0, 'went silent', z <= -flag_z, 'drop', z >= flag_z, 'spike', 'normal') AS kind,
+       greatest(expected - flag_z * spread, 0) AS expected_low, expected + flag_z * spread AS expected_high,
        dateDiff('day', b.day, (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded')) < 3 AS provisional
 FROM base AS b
 LEFT JOIN n360.va AS v ON v.bot_id = b.bot_id
@@ -313,10 +315,13 @@ WITH
                concat(s.channel, if(l.sheet_customer != s.account, concat(' (', l.sheet_customer, ')'), '')) AS label,
                s.measure AS measure, s.consumed AS used, s.billed AS billed, s.pct_billed AS pct_billed,
                s.pct_term_elapsed AS pct_term, s.start_date AS start_date, s.end_date AS end_date,
-               toDate(s.window_end) AS data_through, f.cross_date AS cross_date
+               toDate(s.window_end) AS data_through, f.cross_date AS cross_date, f.exhaust_date AS exhaust_date,
+               f.rate_per_day AS rate_per_day, f.avg_per_day AS avg_per_day, f.forecast_m3 AS forecast_m3,
+               f.horizon AS horizon, f.flags AS flags
         FROM n360.v_line_status AS s
         INNER JOIN n360.contract_line AS l ON l.line_key = s.line_key
-        LEFT JOIN (SELECT series_key, cross_date FROM n360.forecast WHERE pool_id IS NULL) AS f ON f.series_key = l.series_key
+        LEFT JOIN (SELECT series_key, cross_date, exhaust_date, rate_per_day, avg_per_day, forecast_m3, horizon, flags
+                   FROM n360.forecast WHERE pool_id IS NULL) AS f ON f.series_key = l.series_key
         WHERE s.pool_id IS NULL
         UNION ALL
         SELECT p.account, 'pool', CAST(NULL, 'Nullable(String)'), CAST(p.pool_id, 'Nullable(UInt8)'),
@@ -324,10 +329,12 @@ WITH
                -- % of term as in v_line_status (term = start to end inclusive); pools carry dates, not term_days
                round(100 * least(greatest(dateDiff('day', p.start_date, r.d) + 1, 0), dateDiff('day', p.start_date, p.end_date) + 1)
                      / (dateDiff('day', p.start_date, p.end_date) + 1), 1),
-               p.start_date, p.end_date, r.d, f.cross_date
+               p.start_date, p.end_date, r.d, f.cross_date, f.exhaust_date, f.rate_per_day, f.avg_per_day, f.forecast_m3,
+               f.horizon, f.flags
         FROM n360.v_pool_status AS p
         CROSS JOIN (SELECT toDate(window_end) AS d FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC LIMIT 1) AS r
-        LEFT JOIN (SELECT account, pool_id, cross_date FROM n360.forecast WHERE pool_id IS NOT NULL) AS f
+        LEFT JOIN (SELECT account, pool_id, cross_date, exhaust_date, rate_per_day, avg_per_day, forecast_m3, horizon, flags
+                   FROM n360.forecast WHERE pool_id IS NOT NULL) AS f
                ON f.account = p.account AND f.pool_id = p.pool_id
     )
 SELECT account, entitlement, line_key, pool_id, name, label, measure, used, billed, pct_billed, pct_term,
@@ -346,7 +353,20 @@ SELECT account, entitlement, line_key, pool_id, name, label, measure, used, bill
                days_to_cross <= amber_cross_days, concat('crosses billed within ', toString(amber_cross_days), ' days'),
                'on pace') AS pace_reason,
        multiIf(pace = 'red', 3, pace = 'amber', 2, pace = 'green', 1, 0) AS pace_rank,
-       start_date, end_date, data_through
+       start_date, end_date, data_through,
+       -- forecast of record, as stored (never recomputed): runs-out date, rate, forecast to horizon, flags
+       exhaust_date, rate_per_day, avg_per_day, forecast_m3, horizon, flags,
+       -- runway (spec 6): one category per entitlement, using the same red crossing window as pace
+       multiIf(pace IN ('not measurable', 'not implemented', 'not read'), pace,
+               pct_billed > red_pct_billed, 'above billed',
+               days_to_cross <= red_cross_days, 'crosses soon',
+               cross_date IS NOT NULL, 'crosses before term end',
+               exhaust_date IS NOT NULL, 'runs out after term end',
+               'no use in the last 30 days') AS runway,
+       -- step change: flagged upstream (last-30 rate vs term average differs > 50%), direction read here
+       round(100 * rate_per_day / nullIf(avg_per_day, 0), 1) AS last30_vs_term_pct,
+       if(arrayExists(f -> startsWith(f, 'Step change'), flags),
+          multiIf(rate_per_day = 0, 'stopped', rate_per_day > avg_per_day, 'rising', 'falling'), NULL) AS step_change
 FROM e;
 
 CREATE OR REPLACE VIEW n360.v_anomaly_events AS
@@ -401,3 +421,22 @@ SELECT a.account AS account, a.display_name AS display_name,
 FROM n360.account AS a
 LEFT JOIN worst AS w ON w.account = a.account
 LEFT JOIN flags AS f ON f.account = a.account;
+
+CREATE OR REPLACE VIEW n360.v_anomaly_heat AS
+-- Heatmap band per VA-day for the Anomalies dashboard (spec 7). Display bands, PROPOSED with the anomaly
+-- thresholds (08):  band  2 spike | 1  2 <= z < 4 | 0 normal | -1  -4 < z <= -2 | -2 drop or went silent
+-- Not scored (expected below 20, or under 8 weeks of history) has no row, never a colour.
+WITH 2 AS watch_z          -- the "watch" band; the flag band (|z| >= 4) comes from v_va_day_anomaly's kind
+SELECT day, account, bot_id, va_name, actual, expected, z, kind, provisional,
+       multiIf(kind IN ('went silent', 'drop'), -2, kind = 'spike', 2, z <= -watch_z, -1, z >= watch_z, 1, 0) AS band
+FROM n360.v_va_day_anomaly;
+
+CREATE OR REPLACE VIEW n360.v_source_freshness AS
+-- Source freshness (spec 11): days the source's last day is behind the data-through day.
+-- PROPOSED thresholds, here only: amber at 2 days behind, red at 3.
+WITH 2 AS amber_days, 3 AS red_days
+SELECT s.source_id, s.description, s.last_day, r.d AS data_through,
+       dateDiff('day', s.last_day, r.d) AS days_behind,
+       multiIf(days_behind >= red_days, 'red', days_behind >= amber_days, 'amber', 'green') AS status
+FROM n360.source AS s
+CROSS JOIN (SELECT toDate(max(window_end)) AS d FROM n360.runs WHERE status = 'loaded') AS r;

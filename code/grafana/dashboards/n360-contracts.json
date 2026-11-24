@@ -65,7 +65,13 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet"
+          "noValue": "Not reported yet",
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline?${__url_time_range}"
+            }
+          ]
         },
         "overrides": []
       },
@@ -81,14 +87,14 @@
       }
     },
     {
-      "id": 2,
-      "title": "Lines above billed",
+      "id": 7,
+      "title": "Last night",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Contract lines whose measured count is over the billed amount. The measure follows the contract: a contract rule where one is mapped, otherwise the platform engaged flag (billable unit unconfirmed). Pooled lines are counted once, as their pool.\n\n**Source:** n360.v_line_status  \n**Filter:** Customer  \n**Window:** each line from its start date to the data-through day",
+      "description": "Result of the latest nightly run. A stopped night leaves the previous good night on screen.\n\n**Source:** n360.runs (load.py writes one row per night, loaded or not)  \n**Filter:** none  \n**Window:** the latest run",
       "gridPos": {
         "x": 6,
         "y": 0,
@@ -104,13 +110,30 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT countIf(pct_billed > 100) AS above FROM n360.v_line_status WHERE account IN (${account:singlequote})",
+          "rawSql": "SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC LIMIT 1",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet"
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "loaded": {
+                  "text": "Loaded",
+                  "color": "green",
+                  "index": 0
+                },
+                "failed_checks": {
+                  "text": "Stopped: data checks failed",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ]
         },
         "overrides": []
       },
@@ -118,25 +141,27 @@
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
-          ]
+          ],
+          "fields": "/.*/"
         },
-        "colorMode": "none"
+        "textMode": "value",
+        "colorMode": "background"
       }
     },
     {
-      "id": 3,
-      "title": "Contract lines",
-      "type": "table",
+      "id": 2,
+      "title": "Lines above billed",
+      "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "One row per contract line. Used = the contract measure. An empty cell means the line was not read or is not measurable, never zero.\n\n**Source:** the platform daily conversation aggregate table and the conversation records reader; contract terms from the entitlement sheet unless a signed SOW overrides it (Contract unit). Via n360.v_line_status and n360.account  \n**Filter:** Customer; lines not in a pool (pooled lines are in the table below)  \n**Window:** Used: from the start date to the data-through day",
+      "description": "Lines and pools whose use is over the billed amount, each in its own contract measure (a contract rule where one is mapped, otherwise the platform engaged flag, billable unit unconfirmed). A pool is counted once, as the pool.\n\n**Source:** n360.v_line_pace  \n**Filter:** Customer  \n**Window:** each from its start date to the data-through day",
       "gridPos": {
-        "x": 0,
-        "y": 3,
-        "w": 24,
-        "h": 11
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 3
       },
       "targets": [
         {
@@ -147,7 +172,72 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT a.display_name AS Customer, l.channel AS Channel, l.measure AS Measure,\n               l.consumed AS Used, l.billed AS Billed, l.pct_billed AS `% of billed`,\n               l.pct_term_elapsed AS `% of term`, l.start_date AS Start, l.end_date AS End, l.unit AS `Contract unit`\n        FROM n360.v_line_status AS l INNER JOIN n360.account AS a ON a.account = l.account\n        WHERE l.pool_id IS NULL AND l.account IN (${account:singlequote})\n        ORDER BY Customer, Channel",
+          "rawSql": "SELECT countIf(pct_billed > 100) AS above FROM n360.v_line_pace WHERE account IN (${account:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "color": "transparent",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 1,
+                "to": 1000000000000000.0,
+                "result": {
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Contract lines",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "One row per contract line not in a pool (pools below). Used = the contract measure. Not measurable and not implemented lines have no usage (\"Not reported yet\", grey), never zero. Contract unit: the unit of a signed SOW that overrides the entitlement sheet. Click a customer or a line to open it.\n\n**Source:** the platform daily conversation aggregate table and the conversation records reader; contract terms from the entitlement sheet unless a signed SOW overrides it. Via n360.v_line_status, n360.v_line_pace  \n**Filter:** Customer; lines not in a pool  \n**Window:** Used: from the start date to the data-through day",
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 24,
+        "h": 13
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT a.display_name AS Customer, concat(l.channel, if(l.sheet_customer != l.account, concat(' (', l.sheet_customer, ')'), '')) AS Line, l.measure AS Measure,\n               s.consumed AS Used, s.billed AS Billed, s.pct_billed AS `% of billed`, s.pct_term_elapsed AS `% of term`,\n               pc.pace AS Pace, concat(concat(toString(toDayOfMonth(l.start_date)), ' ', formatDateTime(l.start_date, '%b %Y')), ' to ', concat(toString(toDayOfMonth(l.end_date)), ' ', formatDateTime(l.end_date, '%b %Y'))) AS Term,\n               l.unit AS `Contract unit`,\n               l.account AS account, concat('/d/n360-line?var-account=', l.account, '&var-line=', l.line_key) AS drill\n        FROM n360.v_line_status AS s\n        INNER JOIN n360.contract_line AS l ON l.line_key = s.line_key\n        INNER JOIN n360.account AS a ON a.account = l.account\n        LEFT JOIN n360.v_line_pace AS pc ON pc.line_key = l.line_key\n        WHERE s.pool_id IS NULL AND s.account IN (${account:singlequote})\n        ORDER BY Customer, Line",
           "refId": "A"
         }
       ],
@@ -159,6 +249,62 @@
           }
         },
         "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "account"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "drill"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Billed"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
           {
             "matcher": {
               "id": "byName",
@@ -190,6 +336,247 @@
                 "value": 1
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Pace"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "red": {
+                        "text": "Red",
+                        "color": "red",
+                        "index": 0
+                      },
+                      "amber": {
+                        "text": "Amber",
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "green": {
+                        "text": "Green",
+                        "color": "green",
+                        "index": 2
+                      },
+                      "not measurable": {
+                        "text": "Not measurable",
+                        "color": "#8e8e8e",
+                        "index": 3
+                      },
+                      "not implemented": {
+                        "text": "Not implemented",
+                        "color": "#8e8e8e",
+                        "index": 4
+                      },
+                      "not read": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 5
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Pace"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Measure"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 185
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Term"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 200
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Billed"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% of billed"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Contract unit"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "": {
+                        "text": "Sheet terms (no SOW override)",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open customer",
+                    "url": "/d/n360-customer?var-account=${__data.fields.account}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Line"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open line",
+                    "url": "${__data.fields.drill}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
           }
         ]
       },
@@ -203,10 +590,10 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "One entitlement shared by several lines of one account. Lines in a pool are never compared with the billed amount one by one.\n\n**Source:** consumption_mapping.json \"pools\", via n360.v_pool_status  \n**Filter:** Customer  \n**Window:** Used: the pooled lines, each from its start date to the data-through day",
+      "description": "One entitlement shared by several lines of one account. Lines in a pool are never compared with the billed amount one by one.\n\n**Source:** consumption_mapping.json \"pools\", via n360.v_line_pace  \n**Filter:** Customer  \n**Window:** Used: the pooled lines, each from its start date to the data-through day",
       "gridPos": {
         "x": 0,
-        "y": 14,
+        "y": 16,
         "w": 24,
         "h": 4
       },
@@ -219,17 +606,189 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT name AS Pool, billed AS Billed, consumed AS Used, pct_billed AS `% of billed`, start_date AS Start, end_date AS End\n        FROM n360.v_pool_status WHERE account IN (${account:singlequote})",
+          "rawSql": "SELECT a.display_name AS Customer, pc.label AS Pool, pc.billed AS Billed, pc.used AS Used,\n               pc.pct_billed AS `% of billed`, pc.pct_term AS `% of term`, pc.pace AS Pace,\n               concat(concat(toString(toDayOfMonth(pc.start_date)), ' ', formatDateTime(pc.start_date, '%b %Y')), ' to ', concat(toString(toDayOfMonth(pc.end_date)), ' ', formatDateTime(pc.end_date, '%b %Y'))) AS Term, pc.account AS account\n        FROM n360.v_line_pace AS pc INNER JOIN n360.account AS a ON a.account = pc.account\n        WHERE pc.entitlement = 'pool' AND pc.account IN (${account:singlequote})",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet"
+          "noValue": "No pooled entitlement"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "account"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Billed"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% of billed"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% of term"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Pace"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "red": {
+                        "text": "Red",
+                        "color": "red",
+                        "index": 0
+                      },
+                      "amber": {
+                        "text": "Amber",
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "green": {
+                        "text": "Green",
+                        "color": "green",
+                        "index": 2
+                      },
+                      "not measurable": {
+                        "text": "Not measurable",
+                        "color": "#8e8e8e",
+                        "index": 3
+                      },
+                      "not implemented": {
+                        "text": "Not implemented",
+                        "color": "#8e8e8e",
+                        "index": 4
+                      },
+                      "not read": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 5
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Pace"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open customer",
+                    "url": "/d/n360-customer?var-account=${__data.fields.account}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
-      "options": {}
+      "options": {},
+      "n360MayBeEmpty": "no customer in the selection has a pool"
     },
     {
       "id": 5,
@@ -239,10 +798,10 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Daily contract measure per line (conversations for rules that bill every conversation, billable for meaningful-engagement rules, engaged otherwise). Days not read show as gaps, not zero.\n\n**Source:** n360.line_day with n360.contract_line  \n**Filter:** Customer; contract lines only  \n**Window:** dashboard time range, per day",
+      "description": "Daily contract measure per line (conversations for rules that bill every conversation, billable for meaningful-engagement rules, engaged otherwise). Not measurable and not implemented lines have no usage and are left out. Days not read show as gaps, not zero.\n\n**Source:** n360.line_day with n360.contract_line  \n**Filter:** Customer; measured contract lines  \n**Window:** dashboard time range, per day",
       "gridPos": {
         "x": 0,
-        "y": 18,
+        "y": 20,
         "w": 24,
         "h": 9
       },
@@ -255,13 +814,16 @@
           "editorType": "sql",
           "queryType": "timeseries",
           "format": 0,
-          "rawSql": "SELECT toDateTime(d.day) AS time, concat(l.account, ' \u00b7 ', l.channel) AS line, d.measured AS used\n        FROM n360.line_day AS d INNER JOIN n360.contract_line AS l ON l.series_key = d.series_key\n        WHERE d.kind = 'line' AND d.account IN (${account:singlequote}) AND $__dateFilter(d.day)\n        ORDER BY time",
+          "rawSql": "SELECT toDateTime(d.day) AS time, concat(a.display_name, ' \u00b7 ', concat(l.channel, if(l.sheet_customer != l.account, concat(' (', l.sheet_customer, ')'), ''))) AS line, d.measured AS used\n        FROM n360.line_day AS d INNER JOIN n360.contract_line AS l ON l.series_key = d.series_key\n        INNER JOIN n360.account AS a ON a.account = l.account\n        WHERE d.kind = 'line' AND d.account IN (${account:singlequote}) AND l.measure NOT IN ('not measurable', 'not implemented') AND $__dateFilter(d.day)\n        ORDER BY time",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "displayName": "${__field.labels.line}",
           "custom": {
             "spanNulls": false,
             "lineWidth": 1
@@ -282,7 +844,7 @@
       "description": "containment = 1 - handoffs / engaged conversations, per VA and week. One line per VA, so channels are never combined. VAs whose handoffs are not read (conversation records reader) are not shown, rather than shown as zero.\n\n**Source:** the platform daily conversation aggregate table (n360.va_day, n360.va)  \n**Filter:** Customer; VAs with handoff data; weeks with engaged conversations  \n**Window:** dashboard time range, by week (Monday start)",
       "gridPos": {
         "x": 0,
-        "y": 27,
+        "y": 29,
         "w": 24,
         "h": 8
       },
@@ -305,6 +867,8 @@
           "unit": "percentunit",
           "min": 0,
           "max": 1,
+          "decimals": 1,
+          "displayName": "${__field.labels.va}",
           "custom": {
             "spanNulls": false
           }
@@ -312,6 +876,19 @@
         "overrides": []
       },
       "options": {}
+    }
+  ],
+  "links": [
+    {
+      "type": "link",
+      "title": "Back to Portfolio overview",
+      "url": "/d/n360-overview",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
     }
   ]
 }

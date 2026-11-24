@@ -1,0 +1,842 @@
+{
+  "uid": "n360-va",
+  "title": "N360 \u00b7 VA",
+  "tags": [
+    "n360"
+  ],
+  "editable": false,
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "utc",
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "account",
+        "label": "Customer",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "n360-clickhouse"
+        },
+        "query": "SELECT account, display_name FROM n360.account ORDER BY display_name",
+        "definition": "SELECT account, display_name FROM n360.account ORDER BY display_name",
+        "multi": false,
+        "includeAll": false,
+        "refresh": 1
+      },
+      {
+        "name": "va",
+        "label": "VA",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "n360-clickhouse"
+        },
+        "query": "SELECT toString(v.bot_id), concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')')\n        FROM n360.va AS v WHERE v.account IN (${account:singlequote}) ORDER BY 2",
+        "definition": "SELECT toString(v.bot_id), concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')')\n        FROM n360.va AS v WHERE v.account IN (${account:singlequote}) ORDER BY 2",
+        "multi": false,
+        "includeAll": false,
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Data through",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Last day included in this load (the nightly window ends at 23:59 UTC that day).\n\n**Source:** n360.runs, written by load.py only after every data check passes  \n**Filter:** loaded runs only; the latest  \n**Window:** the latest load",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT formatDateTime(window_end, '%e %b %Y') AS data_through\n        FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline?${__url_time_range}"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Last night",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Result of the latest nightly run. A stopped night leaves the previous good night on screen.\n\n**Source:** n360.runs (load.py writes one row per night, loaded or not)  \n**Filter:** none  \n**Window:** the latest run",
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "loaded": {
+                  "text": "Loaded",
+                  "color": "green",
+                  "index": 0
+                },
+                "failed_checks": {
+                  "text": "Stopped: data checks failed",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Status",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "The newest scored day for this VA. Provisional (newest 3 days) may still change. \"Not scored\": the VA has under 8 weeks of history or under 20 conversations on a typical weekday.\n\n**Source:** n360.v_va_day_anomaly  \n**Filter:** VA  \n**Window:** the newest scored day",
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if(count() = 0, 'Not scored',\n                  if(argMax(kind, day) = 'normal', 'Normal',\n                     concat(multiIf(argMax(kind, day) = 'went silent', 'Went silent', argMax(kind, day) = 'drop', 'Drop', 'Spike'),\n                            if(argMax(provisional, day), ' (provisional)', '')))) AS Status\n        FROM n360.v_va_day_anomaly WHERE toString(bot_id) IN (${va:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "Normal": {
+                  "text": "Normal",
+                  "color": "text",
+                  "index": 0
+                },
+                "Not scored": {
+                  "text": "Not scored",
+                  "color": "#8e8e8e",
+                  "index": 1
+                },
+                "Went silent": {
+                  "text": "Went silent",
+                  "color": "red",
+                  "index": 2
+                },
+                "Went silent (provisional)": {
+                  "text": "Went silent (provisional)",
+                  "color": "orange",
+                  "index": 3
+                },
+                "Drop": {
+                  "text": "Drop",
+                  "color": "red",
+                  "index": 4
+                },
+                "Drop (provisional)": {
+                  "text": "Drop (provisional)",
+                  "color": "orange",
+                  "index": 5
+                },
+                "Spike": {
+                  "text": "Spike",
+                  "color": "red",
+                  "index": 6
+                },
+                "Spike (provisional)": {
+                  "text": "Spike (provisional)",
+                  "color": "orange",
+                  "index": 7
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 26
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Last 30 days",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Conversations started in the 30 days to the data-through day. \"Not reported yet\" if any day was not read.\n\n**Source:** n360.va_day  \n**Filter:** VA  \n**Window:** the 30 days to the data-through day",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if(countIf(conversations IS NULL) > 0, NULL, sum(conversations)) AS Conversations\n        FROM n360.va_day WHERE toString(bot_id) IN (${va:singlequote}) AND day > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 30",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "none",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 26
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Expected",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Expected conversations for the newest scored day: the median of the same weekday over the previous 8 weeks.\n\n**Source:** n360.v_va_day_anomaly  \n**Filter:** VA  \n**Window:** previous 8 weeks, same weekday",
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT argMax(expected, day) AS Expected FROM n360.v_va_day_anomaly WHERE toString(bot_id) IN (${va:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not scored",
+          "unit": "locale",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "none",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 26
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Containment",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "1 - handoffs / engaged, for this VA only. \"Not reported yet\" where handoffs are not read.\n\n**Source:** n360.va_day  \n**Filter:** VA  \n**Window:** the 30 days to the data-through day",
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if(countIf(handoffs IS NOT NULL) = 0, NULL,\n                  1 - sumIf(handoffs, handoffs IS NOT NULL) / sumIf(engaged, handoffs IS NOT NULL)) AS Containment\n        FROM n360.va_day WHERE toString(bot_id) IN (${va:singlequote}) AND day > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 30",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "percentunit",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "none",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 26
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Daily conversations against the expected range",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Each day's conversations (line), the expected value for that weekday (dots) and the range within which a day is not flagged (shaded: expected +/- 4 spreads). Flags: red settled, orange provisional. Days not scored have no expected value; days not read are gaps.\n\n**Source:** n360.va_day, n360.v_va_day_anomaly  \n**Filter:** VA  \n**Window:** dashboard time range, daily",
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT toDateTime(d.day) AS time, d.conversations AS Actual, a.expected AS Expected,\n               a.expected_low AS `Expected range low`, a.expected_high AS `Expected range high`,\n               if(a.kind NOT IN ('normal', '') AND NOT a.provisional, d.conversations, NULL) AS `Flag (settled)`,\n               if(a.kind NOT IN ('normal', '') AND a.provisional, d.conversations, NULL) AS `Flag (provisional)`\n        FROM n360.va_day AS d\n        LEFT JOIN n360.v_va_day_anomaly AS a ON a.bot_id = d.bot_id AND a.day = d.day\n        WHERE toString(d.bot_id) IN (${va:singlequote}) AND $__dateFilter(d.day)\n        ORDER BY time\n        SETTINGS join_use_nulls = 1",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "custom": {
+            "spanNulls": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Actual"
+            },
+            "properties": [
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Expected"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "points"
+              },
+              {
+                "id": "custom.pointSize",
+                "value": 4
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#8e8e8e"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Expected range high"
+            },
+            "properties": [
+              {
+                "id": "custom.fillBelowTo",
+                "value": "Expected range low"
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 15
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#8e8e8e"
+                }
+              },
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": false,
+                  "viz": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Expected range low"
+            },
+            "properties": [
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#8e8e8e"
+                }
+              },
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": false,
+                  "viz": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Flag (settled)"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "points"
+              },
+              {
+                "id": "custom.pointSize",
+                "value": 10
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Flag (provisional)"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "points"
+              },
+              {
+                "id": "custom.pointSize",
+                "value": 10
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 8,
+      "title": "Flags",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Every flagged day for this VA in the time range. Provisional days may still change.\n\n**Source:** n360.v_va_day_anomaly  \n**Filter:** VA; flagged days  \n**Window:** dashboard time range",
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(toString(toDayOfMonth(day)), ' ', formatDateTime(day, '%b %Y')) AS Day, kind AS Kind, actual AS Actual, expected AS Expected, z AS z,\n               if(provisional, 'Provisional', 'Settled') AS Status\n        FROM n360.v_va_day_anomaly WHERE toString(bot_id) IN (${va:singlequote}) AND kind != 'normal' AND $__dateFilter(day) ORDER BY day DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No flags in this time range"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Actual"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Expected"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Day"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Kind"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "z"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Provisional": {
+                        "text": "Provisional",
+                        "color": "orange",
+                        "index": 0
+                      },
+                      "Settled": {
+                        "text": "Settled",
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "n360MayBeEmpty": "a VA with no flags"
+    },
+    {
+      "id": 9,
+      "title": "Reader and configuration",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Where this VA's counts come from. Configuration fields are Phase 2 (weekly configuration read) and show \"Not reported yet\" until that read exists.\n\n**Source:** n360.va, n360.va_day  \n**Filter:** VA  \n**Window:** the latest load",
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT Item, Value FROM (\n            SELECT 1 AS o, 'Reader' AS Item, toNullable(toString(consumption_source)) AS Value FROM n360.va WHERE toString(bot_id) IN (${va:singlequote})\n            UNION ALL SELECT 2, 'Contract line', if(on_contract, arrayStringConcat(line_labels, ', '), 'None (unbilled VA)')\n                FROM n360.va WHERE toString(bot_id) IN (${va:singlequote})\n            UNION ALL SELECT 3, 'Region', toString(region) FROM n360.va WHERE toString(bot_id) IN (${va:singlequote})\n            UNION ALL SELECT 4, 'Handoff data', if((SELECT countIf(handoffs IS NOT NULL) FROM n360.va_day WHERE toString(bot_id) IN (${va:singlequote})) > 0,\n                'Read', 'Not read (conversation records reader): containment not reported') \n            UNION ALL SELECT 5, 'Contract start', if(contract_start IS NULL, NULL, concat(toString(toDayOfMonth(contract_start)), ' ', formatDateTime(contract_start, '%b %Y'))) FROM n360.va WHERE toString(bot_id) IN (${va:singlequote})\n            UNION ALL SELECT 6, 'Engine version', CAST(NULL, 'Nullable(String)')\n            UNION ALL SELECT 7, 'V8 playbooks / legacy intents', NULL\n            UNION ALL SELECT 8, 'MCP servers, supervisory rules', NULL\n        ) ORDER BY o",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Item"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 290
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": false
+      }
+    }
+  ],
+  "links": [
+    {
+      "type": "link",
+      "title": "Back to Customer",
+      "url": "/d/n360-customer",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": true,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "type": "link",
+      "title": "Back to Portfolio overview",
+      "url": "/d/n360-overview",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    }
+  ]
+}

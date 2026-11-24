@@ -1,0 +1,1027 @@
+{
+  "uid": "n360-line",
+  "title": "N360 \u00b7 Contract line",
+  "tags": [
+    "n360"
+  ],
+  "editable": false,
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "utc",
+  "time": {
+    "from": "now-400d",
+    "to": "now+120d"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "account",
+        "label": "Customer",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "n360-clickhouse"
+        },
+        "query": "SELECT account, display_name FROM n360.account ORDER BY display_name",
+        "definition": "SELECT account, display_name FROM n360.account ORDER BY display_name",
+        "multi": false,
+        "includeAll": false,
+        "refresh": 1
+      },
+      {
+        "name": "line",
+        "label": "Contract line",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "n360-clickhouse"
+        },
+        "query": "SELECT l.line_key, concat(concat(l.channel, if(l.sheet_customer != l.account, concat(' (', l.sheet_customer, ')'), '')), ' \u00b7 from ',\n        toString(toDayOfMonth(l.start_date)), ' ', formatDateTime(l.start_date, '%b %Y'))\n        FROM n360.contract_line AS l WHERE l.account IN (${account:singlequote}) ORDER BY l.channel, l.start_date",
+        "definition": "SELECT l.line_key, concat(concat(l.channel, if(l.sheet_customer != l.account, concat(' (', l.sheet_customer, ')'), '')), ' \u00b7 from ',\n        toString(toDayOfMonth(l.start_date)), ' ', formatDateTime(l.start_date, '%b %Y'))\n        FROM n360.contract_line AS l WHERE l.account IN (${account:singlequote}) ORDER BY l.channel, l.start_date",
+        "multi": false,
+        "includeAll": false,
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Data through",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Last day included in this load (the nightly window ends at 23:59 UTC that day).\n\n**Source:** n360.runs, written by load.py only after every data check passes  \n**Filter:** loaded runs only; the latest  \n**Window:** the latest load",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT formatDateTime(window_end, '%e %b %Y') AS data_through\n        FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline?${__url_time_range}"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Last night",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Result of the latest nightly run. A stopped night leaves the previous good night on screen.\n\n**Source:** n360.runs (load.py writes one row per night, loaded or not)  \n**Filter:** none  \n**Window:** the latest run",
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "loaded": {
+                  "text": "Loaded",
+                  "color": "green",
+                  "index": 0
+                },
+                "failed_checks": {
+                  "text": "Stopped: data checks failed",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Used",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "The line's contract measure from its start date, and the last 30 days.\n\n**Source:** n360.contract_line  \n**Filter:** Contract line  \n**Window:** start date to the data-through day",
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT reported_measured AS Used, reported_last30_measured AS `Last 30 days`\n        FROM n360.contract_line WHERE line_key IN (${line:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last 30 days"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 26
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Billed",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "The billed amount for this line (after any signed SOW override; the basis is under \"How this line is measured\"). A pooled line has none of its own.\n\n**Source:** n360.contract_line  \n**Filter:** Contract line  \n**Window:** the contract term",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT billed AS Billed FROM n360.contract_line WHERE line_key IN (${line:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "None of its own"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Billed"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "none",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 26
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "% of billed",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Used / billed in the line's own measure, and its pace colour (proposed rule, set in n360.v_line_pace). A pooled line has no % of its own: see the pool on the Customer dashboard.\n\n**Source:** n360.v_line_pace  \n**Filter:** Contract line  \n**Window:** start date to the data-through day",
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT pct_billed AS `% of billed`, pace AS Pace FROM n360.v_line_pace WHERE line_key IN (${line:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% of billed"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Pace"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "red": {
+                        "text": "Red",
+                        "color": "red",
+                        "index": 0
+                      },
+                      "amber": {
+                        "text": "Amber",
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "green": {
+                        "text": "Green",
+                        "color": "green",
+                        "index": 2
+                      },
+                      "not measurable": {
+                        "text": "Not measurable",
+                        "color": "#8e8e8e",
+                        "index": 3
+                      },
+                      "not implemented": {
+                        "text": "Not implemented",
+                        "color": "#8e8e8e",
+                        "index": 4
+                      },
+                      "not read": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 5
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 26
+        }
+      },
+      "n360MayBeEmpty": "a pooled line (measured at the pool)"
+    },
+    {
+      "id": 6,
+      "title": "% of term",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Days elapsed / term days.\n\n**Source:** n360.v_line_status  \n**Filter:** Contract line  \n**Window:** start date to the data-through day",
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT s.pct_term_elapsed AS `% of term`,\n               toUInt32(round(s.pct_term_elapsed * l.term_days / 100)) AS `Days in`, l.term_days AS `Term days`\n        FROM n360.v_line_status AS s INNER JOIN n360.contract_line AS l ON l.line_key = s.line_key WHERE s.line_key IN (${line:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% of term"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 18
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Forecast to horizon",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "The stored forecast: used + rate x days to the horizon (the earlier of contract end and the month end 3 months out), as % of billed; rate = last 30 days / 30. Never recomputed here.\n\n**Source:** n360.forecast via n360.v_line_pace  \n**Filter:** Contract line  \n**Window:** to the horizon",
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 8,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT round(100 * forecast_m3 / billed, 1) AS `% of billed`, round(rate_per_day) AS `Per day`,\n               concat(toString(toDayOfMonth(horizon)), ' ', formatDateTime(horizon, '%b %Y')) AS Horizon\n        FROM n360.v_line_pace WHERE line_key IN (${line:singlequote}) AND forecast_m3 IS NOT NULL",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No forecast for this line"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% of billed"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Per day"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 18
+        }
+      },
+      "n360MayBeEmpty": "no forecast (pooled, not implemented or not measurable)"
+    },
+    {
+      "id": 8,
+      "title": "How this line is measured",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "How the contract measure for this line is counted, from conversations to the measure, and whether this view's % of billed matches the existing page's figure.\n\n**Source:** n360.contract_line, n360.rule, n360.source, n360.v_line_status  \n**Filter:** Contract line  \n**Window:** the contract term",
+      "gridPos": {
+        "x": 8,
+        "y": 3,
+        "w": 16,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT Item, Value FROM (\n            SELECT 1 AS o, 'Measure' AS Item, toString(l.measure) AS Value FROM n360.contract_line AS l WHERE l.line_key IN (${line:singlequote})\n            UNION ALL SELECT 2, 'Contract rule', if(l.rule_id IS NULL, 'None: engaged conversations (billable unit unconfirmed)', r.label)\n                FROM n360.contract_line AS l LEFT JOIN n360.rule AS r ON r.rule_id = l.rule_id WHERE l.line_key IN (${line:singlequote})\n            UNION ALL SELECT 3, 'What counts', if(l.rule_id IS NULL, 'Conversations the platform flags as engaged', r.counts_plain)\n                FROM n360.contract_line AS l LEFT JOIN n360.rule AS r ON r.rule_id = l.rule_id WHERE l.line_key IN (${line:singlequote})\n            UNION ALL SELECT 4, 'Rule status', if(l.rule_id IS NULL, 'no rule', toString(r.status))\n                FROM n360.contract_line AS l LEFT JOIN n360.rule AS r ON r.rule_id = l.rule_id WHERE l.line_key IN (${line:singlequote})\n            UNION ALL SELECT 5, 'Conversations \u2192 engaged \u2192 measured',\n                if(l.reported_measured IS NULL, NULL, concat(if(l.reported_consumed_convs IS NULL, NULL, if(l.reported_consumed_convs >= 1000000, concat(toString(intDiv(l.reported_consumed_convs, 1000000)), ',', leftPad(toString(intDiv(l.reported_consumed_convs, 1000) % 1000), 3, '0'), ',', leftPad(toString(l.reported_consumed_convs % 1000), 3, '0')), if(l.reported_consumed_convs >= 1000, concat(toString(intDiv(l.reported_consumed_convs, 1000)), ',', leftPad(toString(l.reported_consumed_convs % 1000), 3, '0')), toString(l.reported_consumed_convs)))), ' \u2192 ',\n                   if(l.reported_engaged_flag IS NULL, NULL, if(l.reported_engaged_flag >= 1000000, concat(toString(intDiv(l.reported_engaged_flag, 1000000)), ',', leftPad(toString(intDiv(l.reported_engaged_flag, 1000) % 1000), 3, '0'), ',', leftPad(toString(l.reported_engaged_flag % 1000), 3, '0')), if(l.reported_engaged_flag >= 1000, concat(toString(intDiv(l.reported_engaged_flag, 1000)), ',', leftPad(toString(l.reported_engaged_flag % 1000), 3, '0')), toString(l.reported_engaged_flag)))), ' \u2192 ', if(l.reported_measured IS NULL, NULL, if(l.reported_measured >= 1000000, concat(toString(intDiv(l.reported_measured, 1000000)), ',', leftPad(toString(intDiv(l.reported_measured, 1000) % 1000), 3, '0'), ',', leftPad(toString(l.reported_measured % 1000), 3, '0')), if(l.reported_measured >= 1000, concat(toString(intDiv(l.reported_measured, 1000)), ',', leftPad(toString(l.reported_measured % 1000), 3, '0')), toString(l.reported_measured))))))\n                FROM n360.contract_line AS l WHERE l.line_key IN (${line:singlequote})\n            UNION ALL SELECT 6, 'Matches the page', if(l.reported_pct_page IS NULL OR s.pct_billed IS NULL, NULL,\n                concat(if(abs(l.reported_pct_page - s.pct_billed) < 0.05, 'Yes', 'NO'), ': page ',\n                       toString(round(l.reported_pct_page, 1)), '%, here ', toString(round(s.pct_billed, 1)), '%'))\n                FROM n360.contract_line AS l INNER JOIN n360.v_line_status AS s ON s.line_key = l.line_key WHERE l.line_key IN (${line:singlequote})\n            UNION ALL SELECT 8, 'Billed basis', multiIf(l.pool_id IS NOT NULL, 'billed at the pool', l.billed IS NULL,\n                'blank on the sheet', l.unit != '', concat('signed SOW: ', l.unit), 'entitlement sheet')\n                FROM n360.contract_line AS l WHERE l.line_key IN (${line:singlequote})\n            UNION ALL SELECT 7, 'Source', ifNull(any(src.description), '')\n                FROM n360.contract_line AS l LEFT JOIN n360.source AS src\n                  ON src.source_id = if(l.rule_id IS NULL, 'consumption_days', 'consumption_rules') WHERE l.line_key IN (${line:singlequote})\n        ) ORDER BY o",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Item"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 290
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": false
+      }
+    },
+    {
+      "id": 9,
+      "title": "Cumulative used against billed",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Used so far (solid), the stored forecast from the data-through day to its horizon (dashed), and the billed amount (dashed red) over the term. Days not read add nothing to the running total. Not measurable and not implemented lines have no usage line.\n\n**Source:** n360.line_day, n360.v_line_pace (n360.forecast), n360.contract_line  \n**Filter:** Contract line  \n**Window:** start date to the end of the term",
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT time, Used, Forecast, Billed FROM (\n            SELECT toDateTime(d.day) AS time,\n                   toNullable(toFloat64(sum(d.measured) OVER (ORDER BY d.day ROWS UNBOUNDED PRECEDING))) AS Used,\n                   CAST(NULL, 'Nullable(Float64)') AS Forecast, CAST(NULL, 'Nullable(Float64)') AS Billed\n            FROM n360.line_day AS d INNER JOIN n360.contract_line AS l ON l.series_key = d.series_key\n            WHERE d.kind = 'line' AND l.line_key IN (${line:singlequote}) AND l.measure NOT IN ('not measurable', 'not implemented') AND d.day >= l.start_date\n            UNION ALL SELECT toDateTime(data_through), NULL, toFloat64(used), NULL FROM n360.v_line_pace WHERE line_key IN (${line:singlequote}) AND forecast_m3 IS NOT NULL\n            UNION ALL SELECT toDateTime(horizon), NULL, toFloat64(forecast_m3), NULL FROM n360.v_line_pace WHERE line_key IN (${line:singlequote}) AND forecast_m3 IS NOT NULL\n            UNION ALL SELECT toDateTime(start_date), NULL, NULL, toFloat64(billed) FROM n360.contract_line WHERE line_key IN (${line:singlequote}) AND billed IS NOT NULL\n            UNION ALL SELECT toDateTime(end_date), NULL, NULL, toFloat64(billed) FROM n360.contract_line WHERE line_key IN (${line:singlequote}) AND billed IS NOT NULL\n        ) ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "custom": {
+            "spanNulls": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Forecast"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.spanNulls",
+                "value": true
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Billed"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    4,
+                    6
+                  ]
+                }
+              },
+              {
+                "id": "custom.spanNulls",
+                "value": true
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used"
+            },
+            "properties": [
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 10,
+      "title": "Measure against the engaged flag, by month",
+      "type": "barchart",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Per month: the contract measure beside the platform engaged flag, so a contract rule's effect is visible (for lines with no rule they are the same). Never one replaced by the other.\n\n**Source:** n360.line_day  \n**Filter:** Contract line  \n**Window:** start date to the data-through day, by calendar month",
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT formatDateTime(toStartOfMonth(d.day), '%b %y') AS Month, sum(d.measured) AS `Contract measure`,\n               sum(d.engaged) AS `Engaged (platform flag)`\n        FROM n360.line_day AS d INNER JOIN n360.contract_line AS l ON l.series_key = d.series_key\n        WHERE d.kind = 'line' AND l.line_key IN (${line:singlequote}) AND d.day >= l.start_date\n        GROUP BY toStartOfMonth(d.day) ORDER BY toStartOfMonth(d.day)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "xField": "Month",
+        "orientation": "vertical",
+        "xTickLabelRotation": -45,
+        "xTickLabelSpacing": 0,
+        "groupWidth": 0.7,
+        "barWidth": 0.9,
+        "showValue": "never",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "n360MayBeEmpty": "a line with no daily series (not implemented)"
+    },
+    {
+      "id": 11,
+      "title": "VAs on this line",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "The VAs feeding this line and each one's share of the line's conversations (conversations, not the contract measure). Click a VA to open it.\n\n**Source:** n360.line_va, n360.va_day  \n**Filter:** Contract line  \n**Window:** the 30 days to the data-through day",
+      "gridPos": {
+        "x": 12,
+        "y": 22,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')') AS VA, lv.region AS Region, sum(d.conversations) AS `Conversations, 30 days`,\n               round(100 * sum(d.conversations) / sum(sum(d.conversations)) OVER (), 1) AS `Share`,\n               concat('/d/n360-va?var-account=', lv.account, '&var-va=', toString(lv.bot_id)) AS drill\n        FROM n360.line_va AS lv INNER JOIN n360.va AS v ON v.bot_id = lv.bot_id\n        LEFT JOIN n360.va_day AS d ON d.bot_id = lv.bot_id AND d.day > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 30\n        WHERE lv.line_key IN (${line:singlequote})\n        GROUP BY lv.bot_id, lv.account, lv.region, v.va_name, v.channels ORDER BY `Conversations, 30 days` DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "drill"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Conversations, 30 days"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Share"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Share"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Region"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Conversations, 30 days"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 170
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VA"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open VA",
+                    "url": "${__data.fields.drill}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "n360MayBeEmpty": "a line with no VA (not implemented)"
+    },
+    {
+      "id": 12,
+      "title": "% of billed, night by night",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "What N360 said each night for this line, so a jump between nights is visible. Shown once 7 nights are stored.\n\n**Source:** n360.line_totals_history (append-only, one row per line per night)  \n**Filter:** Contract line  \n**Window:** every stored night",
+      "gridPos": {
+        "x": 0,
+        "y": 31,
+        "w": 24,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT toDateTime(data_date) AS time, pct_billed_page AS `% of billed`\n        FROM n360.line_totals_history\n        WHERE line_key IN (${line:singlequote}) AND (SELECT count(DISTINCT data_date) FROM n360.line_totals_history) >= 7\n        ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Shows once 7 nights are stored",
+          "unit": "percent",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {},
+      "n360MayBeEmpty": "fewer than 7 nights stored",
+      "timeFrom": "45d"
+    }
+  ],
+  "links": [
+    {
+      "type": "link",
+      "title": "Back to Customer",
+      "url": "/d/n360-customer",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": true,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "type": "link",
+      "title": "Back to Portfolio overview",
+      "url": "/d/n360-overview",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    }
+  ]
+}

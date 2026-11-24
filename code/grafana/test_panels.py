@@ -6,6 +6,8 @@ query errors or a panel listed as must-have-rows returns none.
     python3 code/grafana/test_panels.py --chdb /tmp/n360                          # embedded, after load.py --chdb
     python3 code/grafana/test_panels.py --user grafana --password ...             # server, as Grafana's user
 
+Panels without queries (notes) are skipped. A panel with "n360MayBeEmpty": "<reason>" may return no rows.
+Custom (fixed-choice) variables are tested with their default choice.
 Macros handled: ${var}, ${var:singlequote}, $var (variables expand to every value, as "All" does),
 $__dateFilter(col), $__timeFilter(col), $__fromTime, $__toTime, ${__from}, ${__to}.
 Time range: --days back from the run's data-through day (default 90, the dashboards' default).
@@ -63,6 +65,10 @@ def main():
         print(f"{dash['uid']}  ({frm} to {to})")
         values = {}
         for v in dash.get('templating', {}).get('list', []):
+            if v.get('type') == 'custom':      # fixed choices: test with the default (current) choice
+                values[v['name']] = [str(v.get('current', {}).get('value') or v['options'][0]['value'])]
+                print(f"  var  {v['name']:28s} OK   custom, testing '{values[v['name']][0]}'")
+                continue
             if v.get('type') != 'query':
                 continue
             try:
@@ -79,8 +85,10 @@ def main():
             for t in p.get('targets', []):
                 try:
                     rows = ch.rows(expand(t['rawSql'], values, frm, to))
-                    ok = bool(rows)
-                    print(f"  {p['id']:>3}  {p['title'][:28]:28s} {'OK  ' if ok else 'FAIL'} {len(rows)} rows")
+                    # a panel may be empty by design (e.g. history shorter than it needs); it says why
+                    ok = bool(rows) or bool(p.get('n360MayBeEmpty'))
+                    note = '' if rows else (f"  (empty allowed: {p['n360MayBeEmpty']})" if ok else '')
+                    print(f"  {p['id']:>3}  {p['title'][:28]:28s} {'OK  ' if ok else 'FAIL'} {len(rows)} rows{note}")
                     if not ok:
                         failed += 1
                 except Exception as e:  # noqa: BLE001
