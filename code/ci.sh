@@ -9,7 +9,7 @@
 #
 # Steps: generate 14 nights (night 9 broken on purpose) -> load in order, expecting exactly night 9
 # refused -> check runs and line_totals_history -> build dashboards and confirm the committed JSON
-# matches the generator -> run every panel and variable query.
+# matches the generator -> run every panel and variable query -> test the dashboard building blocks.
 set -euo pipefail
 MODE=${1:?usage: ci.sh chdb|server}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -69,4 +69,6 @@ diff -r "$WORK/committed" "$ROOT/code/grafana/dashboards" \
   || { echo "FAIL: committed dashboard JSON differs from build_dashboards.py output (run it and commit)"; exit 1; }
 
 python3 "$ROOT/code/grafana/test_panels.py" "${PANEL_CONN[@]}"
+# build_dashboards.py helpers: settings in one place, description shape, sample header/links/colours queries
+python3 "$ROOT/code/grafana/test_build.py" "${PANEL_CONN[@]}"
 echo "CI PASSED ($MODE)"

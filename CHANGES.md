@@ -1,3 +1,63 @@
+# CHANGES · 24 Nov 2026 · backlog B4 (dashboard generator refactor)
+
+**`build_dashboards.py` is now built from shared building blocks; the Contracts dashboard is unchanged
+in meaning.** Every query, layout, unit, variable and setting in `n360-contracts.json` is identical to
+before (compared field by field). Only the panel descriptions changed shape (below).
+
+| Building block | What it gives B6–B10 |
+|---|---|
+| `PACE` | The 4 proposed pace thresholds (10 pts ahead, above 100%, crossing ≤ 60 d, ≤ 30 d), in one place, marked proposed |
+| `COLOUR`, `RUN_STATUS` | Display colours and run-status words, in one place. Grey for empty |
+| `describe()` | Every panel description: definition, then **Source**, **Filter**, **Window** (rule 5) |
+| `query_var()`, `var_account()` | Dashboard variables. `line` and `va` are added when their dashboards are specified in detail (B7–B9) |
+| `header()`, `data_through()`, `last_load()` | Top row: Data through (links to Pipeline health), Last night (Loaded / Stopped: data checks failed) |
+| `drill()`, `with_links()` | Data links in the `04` form `/d/<uid>?var-<name>=${__data.fields.<column>}&${__url_time_range}` |
+| `back_link()` | "Back to Portfolio overview", keeps the time range |
+| `coloured()`, `pct_billed_colours()`, `pace_gap_colours()`, `label_colours()`, `empty_grey()` | Threshold colours from `PACE`/`COLOUR`; empty cells grey "Not reported yet" |
+| `field_config()`, `override()`, `pct()`, `dashboard()` | The repeated JSON, once |
+
+The Contracts dashboard does not use the header, links or colours yet: adding them changes what it
+shows, which is B10.
+
+**Panel descriptions.** Same facts, new shape. Example, "Lines above billed": the definition text is
+unchanged, followed by `Source: n360.v_line_status · Filter: Customer · Window: each line from its start
+date to the data-through day`. Where the old text had a source sentence, it moved into **Source**; I
+added the view names (e.g. `n360.v_line_status`) and the filter and window as the queries apply them.
+The "Pooled lines are counted once, as their pool" sentence on "Lines above billed" is kept as is,
+though it is wrong (item 1 under "Found, not fixed" below; fix in B10).
+
+**One bug found in the new helpers and fixed before use:** Grafana paints an empty cell in the base
+threshold colour, so an unread pace gap showed "Not reported yet" in green. `coloured()` now always
+adds a grey mapping for empty.
+
+| Check | Result |
+|---|---|
+| Contracts JSON, old vs new, descriptions aside | Identical (and identical when serialised) |
+| `test_build.py`: rebuild a sample with `PACE`/`COLOUR` replaced by marker values | Every colour and threshold in the output is a marker. Planting a literal `100` or `'red'` in a helper fails it |
+| `test_build.py`: description shape | Every panel has Source, Filter, Window |
+| Sample dashboard (header, pace columns, data link, Back link) in Grafana 13.3.1 | Renders, no errors; Back link → `/d/n360-overview?from=…&to=…`; clicking a customer opens `/d/n360-customer?var-account=Atlas%20Streaming&from=…`; empty pace gap grey |
+| Contracts in Grafana after the refactor | 6 panels, no errors, no empty panels |
+| `ci.sh chdb`, `ci.sh server` (now also run `test_build.py`) | Both pass |
+
+Not tested: the "Stopped: data checks failed" colour on screen (the query and mapping are tested; the
+last night in the test data was loaded). Target dashboards don't exist yet, so data links lead to
+"Dashboard not found" until B6–B9.
+
+Open question added to `08_DECISIONS.md`: **where the pace rule lives.** `04` asks for the thresholds as
+constants in the builder (done); rule 4 and B5 put the colour in a view. Red depends on the
+forecast, so it can only be worked out in SQL. My recommendation: the view decides (B5), and the
+builder only maps its label to a colour. Until you decide, the numbers sit in `PACE` only.
+
+| File | Change |
+|---|---|
+| `code/grafana/build_dashboards.py` | Rewritten into building blocks; same Contracts output |
+| `code/grafana/dashboards/n360-contracts.json` | Regenerated: descriptions only |
+| `code/grafana/test_build.py` (new) | Tests above |
+| `code/ci.sh` | Runs `test_build.py` after `test_panels.py` |
+| `README.md`, `docs/08_DECISIONS.md`, `.gitignore` | Status row; pace-rule question; `__pycache__/` |
+
+---
+
 # CHANGES · 24 Nov 2026 · backlog B1, B2, B3, B3a
 
 All tested on synthetic data in a Linux container (Docker 29.9, ClickHouse 25.8.33.6, Grafana 13.3.1,

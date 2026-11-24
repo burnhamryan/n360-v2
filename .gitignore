@@ -3,3 +3,4 @@ sample_data/rows/
 sample_data/nights/
 # Local secrets
 code/.env
+__pycache__/

@@ -40,4 +40,5 @@
 | Whether real N360 data may be sent to Claude (chat via `mcp-grafana`; query results leave the machine) | Chat built and tested on synthetic only (`09_CHAT.md`) |
 | Who may chat with the data, and whether per-customer restriction is needed | Grafana OSS cannot limit rows per person; would need ClickHouse row policies + one data source per group |
 | Does the pipeline count usage after a line's end date? (synthetic does: Atlas 282.6% all days vs 268.4% within term) | Views follow `reported_measured` as given |
+| Where the pace rule lives. `04` says thresholds are constants in `build_dashboards.py` (`PACE`, done in B4); rule 4 and B5 put the colour in a view (`v_line_pace`). Red needs the forecast, so it can only be computed in SQL | Recommend: the view decides the colour (B5), reading the same four numbers; the builder only maps the view's label to a display colour. Until decided, `PACE` holds them and B5 must not copy the numbers |
 | Term-end convention: synthetic ends a 12-month line on the last day of the month before its start month (29 Jan start → 31 Dec end; pool ends 28 Jan) | Check against the contract sheet before trusting % of term |

@@ -43,7 +43,7 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Last day included in this load (the nightly window ends at 23:59 UTC that day). Source: n360.runs, written by load.py only after every data check passes.",
+      "description": "Last day included in this load (the nightly window ends at 23:59 UTC that day).\n\n**Source:** n360.runs, written by load.py only after every data check passes  \n**Filter:** loaded runs only; the latest  \n**Window:** the latest load",
       "gridPos": {
         "x": 0,
         "y": 0,
@@ -88,7 +88,7 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Contract lines whose measured count is over the billed amount. The measure follows the contract: a contract rule where one is mapped, otherwise the platform engaged flag (billable unit unconfirmed). Pooled lines are counted once, as their pool.",
+      "description": "Contract lines whose measured count is over the billed amount. The measure follows the contract: a contract rule where one is mapped, otherwise the platform engaged flag (billable unit unconfirmed). Pooled lines are counted once, as their pool.\n\n**Source:** n360.v_line_status  \n**Filter:** Customer  \n**Window:** each line from its start date to the data-through day",
       "gridPos": {
         "x": 6,
         "y": 0,
@@ -131,7 +131,7 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "One row per contract line (pooled lines are in the table below). Used = the contract measure from the start date to the data-through day. Source: the platform daily conversation aggregate table and the conversation records reader; contract terms from the entitlement sheet unless a signed SOW overrides it (Contract unit). An empty cell means the line was not read or is not measurable, never zero.",
+      "description": "One row per contract line. Used = the contract measure. An empty cell means the line was not read or is not measurable, never zero.\n\n**Source:** the platform daily conversation aggregate table and the conversation records reader; contract terms from the entitlement sheet unless a signed SOW overrides it (Contract unit). Via n360.v_line_status and n360.account  \n**Filter:** Customer; lines not in a pool (pooled lines are in the table below)  \n**Window:** Used: from the start date to the data-through day",
       "gridPos": {
         "x": 0,
         "y": 3,
@@ -203,7 +203,7 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "One entitlement shared by several lines of one account (consumption_mapping.json \"pools\"). Lines in a pool are never compared with the billed amount one by one.",
+      "description": "One entitlement shared by several lines of one account. Lines in a pool are never compared with the billed amount one by one.\n\n**Source:** consumption_mapping.json \"pools\", via n360.v_pool_status  \n**Filter:** Customer  \n**Window:** Used: the pooled lines, each from its start date to the data-through day",
       "gridPos": {
         "x": 0,
         "y": 14,
@@ -239,7 +239,7 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Daily contract measure per line (conversations for rules that bill every conversation, billable for meaningful-engagement rules, engaged otherwise). Days not read show as gaps, not zero.",
+      "description": "Daily contract measure per line (conversations for rules that bill every conversation, billable for meaningful-engagement rules, engaged otherwise). Days not read show as gaps, not zero.\n\n**Source:** n360.line_day with n360.contract_line  \n**Filter:** Customer; contract lines only  \n**Window:** dashboard time range, per day",
       "gridPos": {
         "x": 0,
         "y": 18,
@@ -279,7 +279,7 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "containment = 1 - handoffs / engaged conversations, per VA and week, from the platform daily conversation aggregate table. One line per VA, so channels are never combined. VAs whose handoffs are not read (conversation records reader) are not shown, rather than shown as zero.",
+      "description": "containment = 1 - handoffs / engaged conversations, per VA and week. One line per VA, so channels are never combined. VAs whose handoffs are not read (conversation records reader) are not shown, rather than shown as zero.\n\n**Source:** the platform daily conversation aggregate table (n360.va_day, n360.va)  \n**Filter:** Customer; VAs with handoff data; weeks with engaged conversations  \n**Window:** dashboard time range, by week (Monday start)",
       "gridPos": {
         "x": 0,
         "y": 27,
