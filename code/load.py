@@ -12,7 +12,8 @@ Steps
      nothing is swapped, exit 3. The live tables keep the previous load.
      Phase 2 tables (OPTIONAL) are staged and swapped only when their file is in the export.
   4. EXCHANGE TABLES n360.<t> AND n360_next.<t> for each table (atomic per table; ES: alias flip).
-  5. Append-only tables (runs, line_totals_history) written straight to n360.
+  5. Append-only tables (runs, line_totals_history) written straight to n360; forecast_history copied from
+     the forecast just loaded (plus an optional backfill of earlier nights).
 
 Exit codes: 0 loaded, 3 checks failed, 2 error.
 """
@@ -130,6 +131,19 @@ def main():
     for t in APPEND:
         ch.cmd(f"ALTER TABLE n360.{t} DELETE WHERE data_date = '{run['data_date']}'")
         ch.insert_ndjson(f'n360.{t}', os.path.abspath(os.path.join(a.rows, f'{t}.ndjson')))
+    # forecast history (B15): tonight's forecast of record, copied from the table just swapped in. Optional backfill
+    # file (earlier nights' forecasts) fills only nights not already stored, so a stored night is never overwritten.
+    backfill = os.path.join(a.rows, 'forecast_history.ndjson')
+    if os.path.exists(backfill):
+        ch.cmd('TRUNCATE TABLE n360_next.forecast_history')
+        ch.insert_ndjson('n360_next.forecast_history', os.path.abspath(backfill))
+        ch.cmd("""INSERT INTO n360.forecast_history SELECT * FROM n360_next.forecast_history
+                  WHERE data_date NOT IN (SELECT DISTINCT data_date FROM n360.forecast_history)""")
+    ch.cmd(f"ALTER TABLE n360.forecast_history DELETE WHERE data_date = '{run['data_date']}'")
+    ch.cmd(f"""INSERT INTO n360.forecast_history
+               SELECT toDate('{run['data_date']}'), toUUID('{run['run_id']}'), account, series_key, pool_id, horizon,
+                      rate_per_day, forecast_m3, billed, consumed_engaged, cross_date, exhaust_date
+               FROM n360.forecast""")
     print(f'LOADED run {run["run_id"]}  data {run["data_date"]}  window end {run["window_end"]}')
     return 0
 

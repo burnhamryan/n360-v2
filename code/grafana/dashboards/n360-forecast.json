@@ -709,7 +709,7 @@
       "gridPos": {
         "x": 0,
         "y": 27,
-        "w": 12,
+        "w": 24,
         "h": 6
       },
       "targets": [
@@ -753,18 +753,287 @@
     },
     {
       "id": 9,
-      "title": "Forecast accuracy",
-      "type": "text",
+      "title": "Forecast accuracy (MAPE)",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "How far the stored forecast was off: forecasts made 30, 60 and 90 days earlier against what was then used (mean absolute % error; lower is better). The forecast is evaluated as stored, never refitted. Shows once forecasts 30 days old are stored.\n\n**Source:** n360.v_forecast_accuracy (n360.forecast_history)  \n**Filter:** Customer; lines and pools with a billed amount  \n**Window:** every stored night",
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT Line, `30 days`, `60 days`, `90 days`, Forecasts FROM (\n            SELECT 0 AS o, concat(a.display_name, ' \u00b7 ', pc.label) AS Line,\n                   anyIf(fa.mape, fa.horizon_days = 30) AS `30 days`, anyIf(fa.mape, fa.horizon_days = 60) AS `60 days`,\n                   anyIf(fa.mape, fa.horizon_days = 90) AS `90 days`, maxIf(fa.forecasts, fa.horizon_days = 30) AS Forecasts\n            FROM n360.v_forecast_accuracy AS fa\n            INNER JOIN n360.v_line_pace AS pc ON pc.series_key = fa.series_key\n            INNER JOIN n360.account AS a ON a.account = fa.account\n            WHERE fa.account IN (${account:singlequote}) GROUP BY Line\n            UNION ALL\n            SELECT 1, 'All lines (weighted by forecasts)',\n                   round(sumIf(mape * forecasts, horizon_days = 30) / sumIf(forecasts, horizon_days = 30), 1),\n                   round(sumIf(mape * forecasts, horizon_days = 60) / sumIf(forecasts, horizon_days = 60), 1),\n                   round(sumIf(mape * forecasts, horizon_days = 90) / sumIf(forecasts, horizon_days = 90), 1),\n                   sumIf(forecasts, horizon_days = 30)\n            FROM n360.v_forecast_accuracy WHERE account IN (${account:singlequote}) HAVING sumIf(forecasts, horizon_days = 30) > 0\n        ) ORDER BY o, Line",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Shows once forecasts 30 days old are stored"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "30 days"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "60 days"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "90 days"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Forecasts"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Line"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "n360MayBeEmpty": "fewer than 30 nights of stored forecasts"
+    },
+    {
+      "id": 10,
+      "title": "Crossing date drift",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Where each line's crossing date stood 7 and 30 stored nights ago, and how many days it has moved (negative = earlier). Empty where the forecast had no crossing date then (\"Not reported yet\" = no crossing before the term end, or not stored).\n\n**Source:** n360.v_forecast_drift (n360.forecast_history)  \n**Filter:** Customer; lines that cross billed now or did then  \n**Window:** stored nights",
       "gridPos": {
         "x": 12,
-        "y": 27,
+        "y": 33,
         "w": 12,
-        "h": 6
+        "h": 10
       },
-      "options": {
-        "mode": "markdown",
-        "content": "Not available yet: accuracy needs each night's forecast stored (`forecast_history`, backlog B15). It will show how far forecasts made 30, 60 and 90 days ago were off (MAPE) and how much crossing dates moved, once 30 nights are stored."
-      }
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(a.display_name, ' \u00b7 ', pc.label) AS Line,\n               concat(toString(toDayOfMonth(d.cross_now)), ' ', formatDateTime(d.cross_now, '%b %Y')) AS `Crosses billed`, concat(toString(toDayOfMonth(d.cross_7_nights_ago)), ' ', formatDateTime(d.cross_7_nights_ago, '%b %Y')) AS `7 nights ago`,\n               concat(toString(toDayOfMonth(d.cross_30_nights_ago)), ' ', formatDateTime(d.cross_30_nights_ago, '%b %Y')) AS `30 nights ago`, d.moved_7 AS `Moved, 7 nights`,\n               d.moved_30 AS `Moved, 30 nights`\n        FROM n360.v_forecast_drift AS d\n        INNER JOIN n360.v_line_pace AS pc ON pc.series_key = d.series_key\n        INNER JOIN n360.account AS a ON a.account = d.account\n        WHERE d.account IN (${account:singlequote}) ORDER BY ifNull(d.moved_7, 0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No line crosses billed"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Crosses billed"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "7 nights ago"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "30 nights ago"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Moved, 7 nights"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Moved, 30 nights"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Line"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 240
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "n360MayBeEmpty": "no line crosses billed"
     }
   ],
   "links": [

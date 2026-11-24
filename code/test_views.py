@@ -88,6 +88,30 @@ def main():
     check('customers with no entitlement have no pace (not read), not a colour',
           all(att[a]['pace'] is None for a in none), {a: att[a]['pace'] for a in none})
 
+    # Forecast history (B15) and accuracy (B16)
+    nights = int(q("SELECT countIf(status = 'loaded') AS n FROM n360.runs")[0]['n'])
+    first = q("SELECT toString(min(data_date)) AS d FROM n360.runs")[0]['d']
+    per = q(f"SELECT series_key, count() AS n FROM n360.forecast_history WHERE data_date >= '{first}' GROUP BY series_key")
+    n_fc = int(q('SELECT count() AS n FROM n360.forecast')[0]['n'])
+    check('B15: one forecast_history row per line or pool per loaded night',
+          len(per) == n_fc and all(int(r['n']) == nights for r in per), (nights, per))
+    acc = q("SELECT mape, forecasts FROM n360.v_forecast_accuracy WHERE series_key = 'Harbor Telecom|0' AND horizon_days = 30")
+    if acc:   # hand check: recompute MAPE at 30 days for Harbor Chat in Python from the stored rows
+        rows = q("SELECT toString(data_date) AS d, consumed, rate_per_day FROM n360.forecast_history "
+                 "WHERE series_key = 'Harbor Telecom|0'")
+        import datetime as _d
+        by = {_d.date.fromisoformat(r['d']): r for r in rows}
+        apes = [abs(float(by[m + _d.timedelta(30)]['consumed']) - (float(r['consumed']) + float(r['rate_per_day']) * 30))
+                / float(by[m + _d.timedelta(30)]['consumed'])
+                for m, r in by.items() if m + _d.timedelta(30) in by and float(by[m + _d.timedelta(30)]['consumed']) > 0]
+        hand = round(100 * sum(apes) / len(apes), 1)
+        check('B16: Harbor Chat MAPE at 30 days matches a hand calculation',
+              abs(hand - float(acc[0]['mape'])) < 0.05 and len(apes) == int(acc[0]['forecasts']), (hand, acc))
+    else:
+        print('SKIP B16 hand check: fewer than 30 nights of stored forecasts')
+    ch_rows = q("SELECT count() AS n FROM n360.v_forecast_change WHERE series_key = 'Harbor Telecom|0' AND newly_crossing_soon")
+    check('B16: Harbor Chat flagged once as newly crossing billed soon', int(ch_rows[0]['n']) == 1 or not acc, ch_rows)
+
     # Phase 2 (proposed design): skipped when the export carried no Phase 2 files
     if int(q('SELECT count() AS n FROM n360.va_config_snapshot')[0]['n']):
         cur = {r['va_name']: r for r in q('SELECT v.va_name AS va_name, c.engine_version AS engine_version, '

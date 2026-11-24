@@ -978,16 +978,54 @@ def forecast():
         SELECT a.display_name AS Customer, pc.label AS Line, pc.last30_vs_term_pct AS `Last 30 days vs term average`,
                pc.step_change AS Change
         FROM n360.v_line_pace AS pc INNER JOIN n360.account AS a ON a.account = pc.account
-        WHERE pc.{ACCT} AND pc.step_change IS NOT NULL""", 0, 27, 12, 6,
+        WHERE pc.{ACCT} AND pc.step_change IS NOT NULL""", 0, 27, 24, 6,
         describe('Lines whose last-30-day rate is more than 50% away from their term average: rising, falling or '
                  'stopped. The forecast uses the last 30 days, so a step change moves the runs-out date a lot.',
                  'n360.forecast via n360.v_line_pace', 'Customer; flagged lines', 'last 30 days against the term'),
         field=field_config([pct('Last 30 days vs term average')], noValue='No step changes'),
         may_be_empty='no line has a step change'))
-    p.append(text_panel(9, 'Forecast accuracy', 12, 27, 12, 6,
-        'Not available yet: accuracy needs each night\'s forecast stored (`forecast_history`, backlog B15). '
-        'It will show how far forecasts made 30, 60 and 90 days ago were off (MAPE) and how much crossing dates moved, '
-        'once 30 nights are stored.'))
+    p.append(panel(9, 'Forecast accuracy (MAPE)', 'table', f"""
+        SELECT Line, `30 days`, `60 days`, `90 days`, Forecasts FROM (
+            SELECT 0 AS o, concat(a.display_name, ' · ', pc.label) AS Line,
+                   anyIf(fa.mape, fa.horizon_days = 30) AS `30 days`, anyIf(fa.mape, fa.horizon_days = 60) AS `60 days`,
+                   anyIf(fa.mape, fa.horizon_days = 90) AS `90 days`, maxIf(fa.forecasts, fa.horizon_days = 30) AS Forecasts
+            FROM n360.v_forecast_accuracy AS fa
+            INNER JOIN n360.v_line_pace AS pc ON pc.series_key = fa.series_key
+            INNER JOIN n360.account AS a ON a.account = fa.account
+            WHERE fa.{ACCT} GROUP BY Line
+            UNION ALL
+            SELECT 1, 'All lines (weighted by forecasts)',
+                   round(sumIf(mape * forecasts, horizon_days = 30) / sumIf(forecasts, horizon_days = 30), 1),
+                   round(sumIf(mape * forecasts, horizon_days = 60) / sumIf(forecasts, horizon_days = 60), 1),
+                   round(sumIf(mape * forecasts, horizon_days = 90) / sumIf(forecasts, horizon_days = 90), 1),
+                   sumIf(forecasts, horizon_days = 30)
+            FROM n360.v_forecast_accuracy WHERE {ACCT} HAVING sumIf(forecasts, horizon_days = 30) > 0
+        ) ORDER BY o, Line""", 0, 33, 12, 10,
+        describe('How far the stored forecast was off: forecasts made 30, 60 and 90 days earlier against what was then '
+                 'used (mean absolute % error; lower is better). The forecast is evaluated as stored, never refitted. '
+                 'Shows once forecasts 30 days old are stored.', 'n360.v_forecast_accuracy (n360.forecast_history)',
+                 'Customer; lines and pools with a billed amount', 'every stored night'),
+        field=field_config([*[override(c, ('unit', 'percent'), ('decimals', 1)) for c in ('30 days', '60 days', '90 days')],
+                            count_col('Forecasts'), width('Line', 300)],
+                           noValue='Shows once forecasts 30 days old are stored'),
+        may_be_empty='fewer than 30 nights of stored forecasts'))
+    p.append(panel(10, 'Crossing date drift', 'table', f"""
+        SELECT concat(a.display_name, ' · ', pc.label) AS Line,
+               {date_sql('d.cross_now')} AS `Crosses billed`, {date_sql('d.cross_7_nights_ago')} AS `7 nights ago`,
+               {date_sql('d.cross_30_nights_ago')} AS `30 nights ago`, d.moved_7 AS `Moved, 7 nights`,
+               d.moved_30 AS `Moved, 30 nights`
+        FROM n360.v_forecast_drift AS d
+        INNER JOIN n360.v_line_pace AS pc ON pc.series_key = d.series_key
+        INNER JOIN n360.account AS a ON a.account = d.account
+        WHERE d.{ACCT} ORDER BY ifNull(d.moved_7, 0)""", 12, 33, 12, 10,
+        describe('Where each line\'s crossing date stood 7 and 30 stored nights ago, and how many days it has moved '
+                 '(negative = earlier). Empty where the forecast had no crossing date then ("Not reported yet" = no '
+                 'crossing before the term end, or not stored).', 'n360.v_forecast_drift (n360.forecast_history)',
+                 'Customer; lines that cross billed now or did then', 'stored nights'),
+        field=field_config([*[override(c, ('mappings', [empty_grey()])) for c in
+                              ('Crosses billed', '7 nights ago', '30 nights ago', 'Moved, 7 nights', 'Moved, 30 nights')],
+                            width('Line', 240)], noValue='No line crosses billed'),
+        may_be_empty='no line crosses billed'))
     return dashboard(UID['forecast'], 'N360 · Forecast and runway', p, [var_account()], [back_link()],
                      time={'from': 'now-14d', 'to': 'now+18M'})
 

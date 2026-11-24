@@ -17,7 +17,7 @@ WORK=${CI_WORK:-$(mktemp -d)}
 NIGHTS=14 BAD=9
 echo "work dir: $WORK"
 
-python3 "$ROOT/sample_data/generate_synthetic.py" --out "$WORK/nights" --nights $NIGHTS --bad-night $BAD
+python3 "$ROOT/sample_data/generate_synthetic.py" --out "$WORK/nights" --nights $NIGHTS --bad-night $BAD --forecast-backfill 150
 
 if [ "$MODE" = chdb ]; then
   CONN=(--chdb "$WORK/chdb")

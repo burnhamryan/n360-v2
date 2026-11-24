@@ -237,7 +237,48 @@ ENGINE = MergeTree
 PARTITION BY toYYYYMM(data_date)
 ORDER BY (account, line_key, data_date);
 
+CREATE TABLE IF NOT EXISTS n360.forecast_history         -- B15: the forecast of record as it stood each loaded night
+(                                                           -- (append-only; load.py copies n360.forecast after each swap)
+    data_date      Date,                                    -- the night (data through = data_date - 1)
+    run_id         UUID,
+    account        LowCardinality(String),
+    series_key     String,
+    pool_id        Nullable(UInt8),
+    horizon        Date,
+    rate_per_day   Float64,
+    forecast_m3    UInt64,
+    billed         Nullable(UInt64),
+    consumed       UInt64,                                  -- used to the data-through day, in the contract measure
+    cross_date     Nullable(Date),
+    exhaust_date   Nullable(Date)
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMM(data_date)
+ORDER BY (account, series_key, data_date);
+
 -- ───────────────────────── views (one definition per ratio) ─────────────────────────────────────
+
+CREATE OR REPLACE VIEW n360.settings AS
+-- Every PROPOSED threshold (08_DECISIONS), in one place. Views read these; dashboards and alert rules never
+-- hold a threshold. Change a value here and every view, panel and alert follows.
+SELECT
+    10  AS pace_amber_ahead_pts,     -- amber: % of billed more than this many points ahead of % of term
+    100 AS pace_red_pct_billed,      -- red: above this % of billed
+    60  AS pace_amber_cross_days,    -- amber: crossing billed within this many days
+    30  AS pace_red_cross_days,      -- red (and "crossing soon" alerts): crossing billed within this many days
+    4   AS anomaly_flag_z,           -- drop / spike at |z| >= this
+    20  AS anomaly_min_expected,     -- only VAs whose same-weekday median is at least this are scored
+    3   AS anomaly_provisional_days, -- days within this many of data-through are provisional
+    2   AS anomaly_watch_z,          -- heatmap "watch" band
+    2   AS freshness_amber_days,     -- source this many days behind: amber
+    3   AS freshness_red_days,       -- ... red
+    8   AS engine_current_major,     -- "V8 or later"
+    2   AS asks_several_customers,   -- top asks: wanted by at least this many customers
+    14  AS pace_change_days,         -- alert / anomaly v2: crossing date moved this many days earlier overnight
+    10  AS containment_drop_pts,     -- anomaly v2: weekly containment this many points below its 8-week median
+    200 AS containment_min_engaged,  -- ... on at least this many engaged that week
+    20  AS measure_gap_pts;          -- anomaly v2: measure / engaged ratio this many points from its usual level
+
 
 CREATE OR REPLACE VIEW n360.v_line_status AS
 -- The measure is decided upstream by the page's model (contract rule, SOW terms); this view only divides.
@@ -273,7 +314,9 @@ FROM n360.va_day;
 -- provisional = within 3 days of the data-through day: those days still settle (days-store drift), and most
 -- recent-day drops are settling, not real. Alerts fire on settled days only. NULL (not read) is never scored.
 CREATE OR REPLACE VIEW n360.v_va_day_anomaly AS
-WITH 4 AS flag_z,          -- PROPOSED (08): drop / spike at |z| >= 4. The only place this number lives.
+WITH (SELECT anomaly_flag_z FROM n360.settings) AS flag_z,
+     (SELECT anomaly_min_expected FROM n360.settings) AS min_expected,
+     (SELECT anomaly_provisional_days FROM n360.settings) AS provisional_days,
 base AS (
     SELECT day, account, bot_id, conversations,
            quantilesExact(0.25, 0.5, 0.75)(conversations) OVER w AS q, count() OVER w AS n
@@ -286,17 +329,17 @@ SELECT b.day, b.account, b.bot_id, v.va_name, b.conversations AS actual, b.q[2] 
        round((b.conversations - b.q[2]) / spread, 2) AS z,
        multiIf(b.conversations = 0, 'went silent', z <= -flag_z, 'drop', z >= flag_z, 'spike', 'normal') AS kind,
        greatest(expected - flag_z * spread, 0) AS expected_low, expected + flag_z * spread AS expected_high,
-       dateDiff('day', b.day, (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded')) < 3 AS provisional
+       dateDiff('day', b.day, (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded')) < provisional_days AS provisional
 FROM base AS b
 LEFT JOIN n360.va AS v ON v.bot_id = b.bot_id
-WHERE b.n = 8 AND b.q[2] >= 20;
+WHERE b.n = 8 AND b.q[2] >= min_expected;
 
 -- ───────────────────────── dashboard views (B5, 24 Nov 2026) ─────────────────────────────────────
 
 CREATE OR REPLACE VIEW n360.v_line_pace AS
 -- Pace per entitlement: every line not in a pool, and every pool once (its lines are never paced alone).
 -- The colour is decided HERE and nowhere else (decided 24 Nov 2026). Dashboards only map `pace` to a display colour.
--- The four thresholds are PROPOSED (08_DECISIONS), awaiting Ryan. Change them only here:
+-- The four thresholds are PROPOSED (08_DECISIONS) and live in n360.settings:
 --   red    above red_pct_billed % of billed, or crossing billed within red_cross_days
 --   amber  % of billed more than amber_ahead_pts points ahead of % of term, or crossing within amber_cross_days
 --   green  otherwise
@@ -304,12 +347,13 @@ CREATE OR REPLACE VIEW n360.v_line_pace AS
 -- Crossing date comes from the stored forecast (never recomputed). term_ended is reported, not coloured:
 -- the proposed rule says nothing about ended terms.
 WITH
-    10  AS amber_ahead_pts,
-    100 AS red_pct_billed,
-    60  AS amber_cross_days,
-    30  AS red_cross_days,
+    (SELECT pace_amber_ahead_pts FROM n360.settings) AS amber_ahead_pts,
+    (SELECT pace_red_pct_billed FROM n360.settings) AS red_pct_billed,
+    (SELECT pace_amber_cross_days FROM n360.settings) AS amber_cross_days,
+    (SELECT pace_red_cross_days FROM n360.settings) AS red_cross_days,
     e AS (
         SELECT s.account AS account, 'line' AS entitlement, s.line_key AS line_key, CAST(NULL, 'Nullable(UInt8)') AS pool_id,
+               l.series_key AS series_key,
                s.channel AS name,
                -- label for screens: the channel, plus the sheet's customer name where one account has several (Juniper)
                concat(s.channel, if(l.sheet_customer != s.account, concat(' (', l.sheet_customer, ')'), '')) AS label,
@@ -324,7 +368,7 @@ WITH
                    FROM n360.forecast WHERE pool_id IS NULL) AS f ON f.series_key = l.series_key
         WHERE s.pool_id IS NULL
         UNION ALL
-        SELECT p.account, 'pool', CAST(NULL, 'Nullable(String)'), CAST(p.pool_id, 'Nullable(UInt8)'),
+        SELECT p.account, 'pool', CAST(NULL, 'Nullable(String)'), CAST(p.pool_id, 'Nullable(UInt8)'), f.series_key,
                p.name, p.name, p.measure, p.consumed, p.billed, p.pct_billed,
                -- % of term as in v_line_status (term = start to end inclusive); pools carry dates, not term_days
                round(100 * least(greatest(dateDiff('day', p.start_date, r.d) + 1, 0), dateDiff('day', p.start_date, p.end_date) + 1)
@@ -333,11 +377,11 @@ WITH
                f.horizon, f.flags
         FROM n360.v_pool_status AS p
         CROSS JOIN (SELECT toDate(window_end) AS d FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC LIMIT 1) AS r
-        LEFT JOIN (SELECT account, pool_id, cross_date, exhaust_date, rate_per_day, avg_per_day, forecast_m3, horizon, flags
+        LEFT JOIN (SELECT account, pool_id, series_key, cross_date, exhaust_date, rate_per_day, avg_per_day, forecast_m3, horizon, flags
                    FROM n360.forecast WHERE pool_id IS NOT NULL) AS f
                ON f.account = p.account AND f.pool_id = p.pool_id
     )
-SELECT account, entitlement, line_key, pool_id, name, label, measure, used, billed, pct_billed, pct_term,
+SELECT account, entitlement, line_key, pool_id, series_key, name, label, measure, used, billed, pct_billed, pct_term,
        round(pct_billed - pct_term, 1) AS pace_gap,
        cross_date, dateDiff('day', data_through, cross_date) AS days_to_cross,
        end_date < data_through AS term_ended,
@@ -426,15 +470,15 @@ CREATE OR REPLACE VIEW n360.v_anomaly_heat AS
 -- Heatmap band per VA-day for the Anomalies dashboard (spec 7). Display bands, PROPOSED with the anomaly
 -- thresholds (08):  band  2 spike | 1  2 <= z < 4 | 0 normal | -1  -4 < z <= -2 | -2 drop or went silent
 -- Not scored (expected below 20, or under 8 weeks of history) has no row, never a colour.
-WITH 2 AS watch_z          -- the "watch" band; the flag band (|z| >= 4) comes from v_va_day_anomaly's kind
+WITH (SELECT anomaly_watch_z FROM n360.settings) AS watch_z   -- watch band; the flag band comes from v_va_day_anomaly's kind
 SELECT day, account, bot_id, va_name, actual, expected, z, kind, provisional,
        multiIf(kind IN ('went silent', 'drop'), -2, kind = 'spike', 2, z <= -watch_z, -1, z >= watch_z, 1, 0) AS band
 FROM n360.v_va_day_anomaly;
 
 CREATE OR REPLACE VIEW n360.v_source_freshness AS
 -- Source freshness (spec 11): days the source's last day is behind the data-through day.
--- PROPOSED thresholds, here only: amber at 2 days behind, red at 3.
-WITH 2 AS amber_days, 3 AS red_days
+-- Thresholds in n360.settings (amber 2 days behind, red 3).
+WITH (SELECT freshness_amber_days FROM n360.settings) AS amber_days, (SELECT freshness_red_days FROM n360.settings) AS red_days
 SELECT s.source_id, s.description, s.last_day, r.d AS data_through,
        dateDiff('day', s.last_day, r.d) AS days_behind,
        multiIf(days_behind >= red_days, 'red', days_behind >= amber_days, 'amber', 'green') AS status
@@ -507,7 +551,7 @@ ENGINE = MergeTree ORDER BY (account, opened, ticket_id);
 
 CREATE OR REPLACE VIEW n360.v_va_config_latest AS
 -- Latest configuration read per VA. "Current engine" = major version 8 or later (spec 9: green = V8 or later).
-WITH 8 AS current_major
+WITH (SELECT engine_current_major FROM n360.settings) AS current_major
 SELECT c.snapshot_date, c.account, c.bot_id, c.engine_version, c.engine_major, c.v8_playbooks, c.legacy_intents,
        c.mcp_servers_live, c.supervisory_rules_on, c.engine_major >= current_major AS current_engine
 FROM n360.va_config_snapshot AS c
@@ -530,8 +574,59 @@ WHERE cur.rn = 1 AND length(changes) > 0;
 
 CREATE OR REPLACE VIEW n360.v_top_asks AS
 -- An ask wanted by several customers (spec 10 "top asks"). PROPOSED: "several" = 2 or more customers.
-WITH 2 AS several
+WITH (SELECT asks_several_customers FROM n360.settings) AS several
 SELECT ask, uniqExact(account) AS customers, count() AS tickets, arraySort(groupUniqArray(account)) AS account_list,
        min(opened) AS first_asked, max(opened) AS last_asked
 FROM n360.ps_ticket WHERE ask IS NOT NULL
 GROUP BY ask HAVING customers >= several;
+
+-- ───────────────────────── forecast accuracy (B16) ─────────────────────────────────────────────
+
+CREATE OR REPLACE VIEW n360.v_forecast_accuracy AS
+-- How far the stored forecast was off: a forecast made on night m (data through m - 1) predicts used d days later
+-- as consumed + rate x d (the straight line it stores; evaluated, never refitted). Actual = consumed as stored on
+-- the night d days later. APE = |actual - predicted| / actual; MAPE = mean APE, per line or pool and horizon.
+SELECT f.account AS account, f.series_key AS series_key, h.d AS horizon_days, count() AS forecasts,
+       round(100 * avg(abs(a.consumed - (f.consumed + f.rate_per_day * h.d)) / a.consumed), 1) AS mape,
+       min(f.data_date) AS first_forecast, max(f.data_date) AS last_forecast
+FROM n360.forecast_history AS f
+CROSS JOIN (SELECT arrayJoin([30, 60, 90]) AS d) AS h
+INNER JOIN n360.forecast_history AS a ON a.series_key = f.series_key AND a.data_date = f.data_date + h.d
+WHERE a.consumed > 0
+GROUP BY f.account, f.series_key, h.d;
+
+CREATE OR REPLACE VIEW n360.v_forecast_change AS
+-- Each night against the night before (per line or pool): % of billed, crossing date, and how far the crossing
+-- date moved (negative = earlier). Feeds the "over billed", "crossing soon" alerts and the pace-change anomaly.
+WITH (SELECT pace_red_pct_billed FROM n360.settings) AS red_pct,
+     (SELECT pace_red_cross_days FROM n360.settings) AS soon_days,
+     (SELECT pace_change_days FROM n360.settings) AS moved_days_flag,
+     nights AS (SELECT data_date AS night,
+                       lagInFrame(data_date) OVER (ORDER BY data_date ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS previous_night
+                FROM (SELECT DISTINCT data_date FROM n360.forecast_history))
+SELECT cur.data_date AS data_date, prev.data_date AS previous_date, cur.account AS account, cur.series_key AS series_key,
+       round(100 * cur.consumed / cur.billed, 1) AS pct_billed, round(100 * prev.consumed / prev.billed, 1) AS pct_billed_before,
+       cur.cross_date AS cross_date, prev.cross_date AS cross_date_before,
+       dateDiff('day', prev.cross_date, cur.cross_date) AS moved_days,
+       pct_billed > red_pct AND pct_billed_before <= red_pct AS newly_over_billed,
+       dateDiff('day', cur.data_date - 1, cur.cross_date) <= soon_days
+           AND (prev.cross_date IS NULL OR dateDiff('day', prev.data_date - 1, prev.cross_date) > soon_days) AS newly_crossing_soon,
+       moved_days <= -moved_days_flag AS moved_earlier
+FROM n360.forecast_history AS cur
+INNER JOIN nights AS n ON n.night = cur.data_date
+INNER JOIN n360.forecast_history AS prev ON prev.series_key = cur.series_key AND prev.data_date = n.previous_night
+WHERE cur.billed > 0;
+
+CREATE OR REPLACE VIEW n360.v_forecast_drift AS
+-- How far each line's crossing date has moved: now against 7 and 30 stored nights ago (negative = earlier).
+WITH (SELECT max(data_date) FROM n360.forecast_history) AS newest
+SELECT account, series_key,
+       argMax(cross_date, data_date) AS cross_now,
+       argMaxIf(cross_date, data_date, data_date <= newest - 7) AS cross_7_nights_ago,
+       argMaxIf(cross_date, data_date, data_date <= newest - 30) AS cross_30_nights_ago,
+       dateDiff('day', cross_7_nights_ago, cross_now) AS moved_7,
+       dateDiff('day', cross_30_nights_ago, cross_now) AS moved_30,
+       countIf(data_date <= newest - 30) > 0 AS has_30_nights
+FROM n360.forecast_history
+GROUP BY account, series_key
+HAVING cross_now IS NOT NULL OR cross_7_nights_ago IS NOT NULL OR cross_30_nights_ago IS NOT NULL;

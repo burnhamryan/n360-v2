@@ -2,7 +2,7 @@
 """Generate a SYNTHETIC night of N360 data in the exact row format the loader expects.
 
     python3 sample_data/generate_synthetic.py --out sample_data/rows --last-day 2026-11-19
-    python3 sample_data/generate_synthetic.py --out sample_data/nights --nights 14 --bad-night 9
+    python3 sample_data/generate_synthetic.py --out sample_data/nights --nights 14 --bad-night 9 --forecast-backfill 150
         # 14 consecutive nights ending on --last-day, one folder each: <out>/<data_date>/rows/
         # Night 9 (1-based) is broken on purpose so load.py refuses it (line_measured_reconciles fails).
 
@@ -73,20 +73,25 @@ def main():
     ap.add_argument('--last-day', default='2026-11-19', help='last data day (the window ends 23:59 UTC that day)')
     ap.add_argument('--nights', type=int, default=1, help='N consecutive nights ending on --last-day, one folder each')
     ap.add_argument('--bad-night', type=int, help='1-based night to break on purpose (multi-night only)')
+    ap.add_argument('--forecast-backfill', type=int, default=0, metavar='DAYS',
+                    help='also write forecast_history.ndjson: the forecast each of the DAYS nights before the first '
+                         'generated night would have stored (so accuracy can be tested without DAYS loads)')
     a = ap.parse_args()
     final = dt.date.fromisoformat(a.last_day)
     if a.nights == 1 and not a.bad_night:
-        generate(final, final, a.out, multi=False)
+        generate(final, final, a.out, multi=False, backfill_days=a.forecast_backfill, backfill_until=final)
         return
     if a.bad_night and not 1 <= a.bad_night <= a.nights:
         ap.error('--bad-night must be between 1 and --nights')
     for i in range(1, a.nights + 1):
         last = final - dt.timedelta(a.nights - i)
         out = os.path.join(a.out, (last + dt.timedelta(1)).isoformat(), 'rows')
-        generate(last, final, out, multi=True, bad=(i == a.bad_night))
+        first = i == 1      # the backfill rides on the first night: only nights before the run are filled
+        generate(last, final, out, multi=True, bad=(i == a.bad_night),
+                 backfill_days=a.forecast_backfill if first else 0, backfill_until=last if first else None)
 
 
-def generate(last, anchor, out, multi, bad=False):
+def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_until=None):
     """one night: data through `last`; planted events dated from `anchor` (the final night's last day)"""
     data_date = last + dt.timedelta(1)
     run_id = str(uuid.uuid4())
@@ -176,6 +181,7 @@ def generate(last, anchor, out, multi, bad=False):
                              csm_rocketlane='csm9@example.com', run_id=run_id))
 
     pool_members, pool_used, pool_last30 = [], 0, 0
+    pool_meas, fc_series = {}, []          # daily measure per forecast series, for the forecast-history backfill
     for acct, lines in W:
         for idx, L in enumerate(lines):
             sc = L.get('sheet_customer', acct)
@@ -230,8 +236,11 @@ def generate(last, anchor, out, multi, bad=False):
                                                  pct_billed_page=pct))
             if L.get('pool') is not None:
                 pool_members.append(lk); pool_used += used or 0; pool_last30 += last30 or 0
+                for d, v in meas.items():
+                    pool_meas[d] = pool_meas.get(d, 0) + v
             elif used is not None and billed:
                 T['forecast'].append(forecast_row(acct, skey, None, L['start_d'], L['end_d'], last, used, last30, billed, run_id))
+                fc_series.append((acct, skey, None, L['start_d'], L['end_d'], billed, meas))
 
     # pool + its forecast
     ps = dt.date.fromisoformat(pool_def['start']); pe = dt.date(ps.year + 1, ps.month, ps.day) - dt.timedelta(1)
@@ -239,6 +248,24 @@ def generate(last, anchor, out, multi, bad=False):
                           billed_basis='[SYNTHETIC] one entitlement across 3 lines', start_date=ps.isoformat(), end_date=pe.isoformat(),
                           line_keys=pool_members, run_id=run_id))
     T['forecast'].append(forecast_row('Bluebird Air', 'Bluebird Air|pool0', 0, ps, pe, last, pool_used, pool_last30, pool_def['billed'], run_id))
+    fc_series.append(('Bluebird Air', 'Bluebird Air|pool0', 0, ps, pe, pool_def['billed'], pool_meas))
+
+    # forecast history backfill (B15): the forecast each earlier night would have stored, for the nights before
+    # `backfill_until` (the first generated night), so accuracy over 30/60/90 days can be tested without 90+ loads
+    if backfill_days:
+        T['forecast_history'] = []
+        for k in range(backfill_days, 0, -1):
+            t = backfill_until - dt.timedelta(k)            # data through t; the night is t + 1
+            for acct, skey, pool, s0, e0, billed, m in fc_series:
+                if t < s0:
+                    continue
+                used_t = sum(v for d, v in m.items() if d <= t)
+                last30_t = sum(v for d, v in m.items() if t - dt.timedelta(30) < d <= t)
+                f = forecast_row(acct, skey, pool, s0, e0, t, used_t, last30_t, billed, run_id)
+                T['forecast_history'].append(dict(
+                    data_date=(t + dt.timedelta(1)).isoformat(), run_id=run_id, account=acct, series_key=skey, pool_id=pool,
+                    horizon=f['horizon'], rate_per_day=f['rate_per_day'], forecast_m3=f['forecast_m3'], billed=billed,
+                    consumed=used_t, cross_date=f['cross_date'], exhaust_date=f['exhaust_date']))
 
     # unbilled VA rows and its daily series
     bot, live, src = va_row('Cedar Ops Chat', 'Cedar Logistics', 'Chat', {}, on_contract=False)

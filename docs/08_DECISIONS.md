@@ -17,6 +17,10 @@
 | 11 dashboards with drill-downs; Portfolio → Customer → Contract line → VA | 22 Nov 2026 |
 | Straight-line last-30-day forecast stays the forecast of record until a challenger proves better | 22 Nov 2026 |
 | Pace colour is decided in a view (`v_line_pace`), not in the dashboard builder; dashboards only map its label to a colour | 24 Nov 2026 |
+| Phase 2 tables as built: `cortex_day` = authoring sessions, `explorer_day` = analytics-assistant questions, `playbook_day` added for executions | 24 Nov 2026 |
+| Top asks: "several customers" = 2 or more | 24 Nov 2026 |
+| Anomaly heatmap watch band z ±2; source freshness amber at 2 days behind, red at 3 | 24 Nov 2026 |
+| Pooled-entitlement panel shows for every customer ("No pooled entitlement") | 24 Nov 2026 |
 
 ## Proposed (build as settings; Ryan approves)
 
@@ -43,8 +47,4 @@
 | Does the pipeline count usage after a line's end date? (synthetic does: Atlas 282.6% all days vs 268.4% within term) | Views follow `reported_measured` as given |
 | Pace for an entitlement whose term has ended (synthetic: Lakeside ended 31 Oct at 13.9% of billed shows green "on pace") | `v_line_pace` reports `term_ended`; the colour follows the proposed rule, which says nothing about ended terms |
 | Cross-account events: should spikes and drops on the same day be one event or two? | Built as two (by direction); one line to change |
-| Phase 2 field meanings: is `cortex_day` authoring sessions? `explorer_day` the analytics assistant? What exactly is an MCP server "live" or a supervisory rule "on"? Where do playbook executions come from (a `playbook_day` table was added)? | Built on these readings, labelled proposed; adjust `schema.sql` and the generator once known |
-| Top asks: how many customers make "several"? | 2 or more, in `v_top_asks` |
-| Anomaly heatmap "watch" band at z ±2 (spec 7) and freshness amber 2 / red 3 days (spec 11) | Built as the specs say, each in one view; listed here as proposed |
-| Pooled-entitlement panel on Customer shows for every customer ("No pooled entitlement") | Grafana OSS cannot hide a panel by data |
 | Term-end convention: synthetic ends a 12-month line on the last day of the month before its start month (29 Jan start → 31 Dec end; pool ends 28 Jan) | Check against the contract sheet before trusting % of term |
