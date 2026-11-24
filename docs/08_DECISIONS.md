@@ -43,4 +43,8 @@
 | Does the pipeline count usage after a line's end date? (synthetic does: Atlas 282.6% all days vs 268.4% within term) | Views follow `reported_measured` as given |
 | Pace for an entitlement whose term has ended (synthetic: Lakeside ended 31 Oct at 13.9% of billed shows green "on pace") | `v_line_pace` reports `term_ended`; the colour follows the proposed rule, which says nothing about ended terms |
 | Cross-account events: should spikes and drops on the same day be one event or two? | Built as two (by direction); one line to change |
+| Phase 2 field meanings: is `cortex_day` authoring sessions? `explorer_day` the analytics assistant? What exactly is an MCP server "live" or a supervisory rule "on"? Where do playbook executions come from (a `playbook_day` table was added)? | Built on these readings, labelled proposed; adjust `schema.sql` and the generator once known |
+| Top asks: how many customers make "several"? | 2 or more, in `v_top_asks` |
+| Anomaly heatmap "watch" band at z ±2 (spec 7) and freshness amber 2 / red 3 days (spec 11) | Built as the specs say, each in one view; listed here as proposed |
+| Pooled-entitlement panel on Customer shows for every customer ("No pooled entitlement") | Grafana OSS cannot hide a panel by data |
 | Term-end convention: synthetic ends a 12-month line on the last day of the month before its start month (29 Jan start → 31 Dec end; pool ends 28 Jan) | Check against the contract sheet before trusting % of term |

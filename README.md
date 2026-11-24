@@ -30,12 +30,12 @@ anomaly detection and forecasting built in.
 
 | Piece | File | State |
 |---|---|---|
-| ClickHouse schema: 13 tables, 7 views (incl. anomaly detection; pace, customer attention, cross-account events) | `code/schema.sql` | Done, tested |
+| ClickHouse schema: 13 tables + 5 Phase 2 tables (proposed), 13 views | `code/schema.sql` | Done, tested on synthetic |
 | View tests (synthetic edge cases) | `code/test_views.py` | Run in CI on both engines (B5) |
 | Data checks run before every load (8) | `code/checks.sql` | Done, all pass on synthetic |
-| Loader: stage → check → atomic swap | `code/load.py` | Done (server or embedded `chdb`) |
+| Loader: stage → check → atomic swap | `code/load.py` | Done (server or embedded `chdb`); Phase 2 files loaded only when present |
 | Local stack: ClickHouse 25.8 + Grafana 13.3.1, localhost only | `code/docker-compose.yml`, `code/init/`, `code/grafana/provisioning/` | Started and tested in Linux Docker 24 Nov 2026 (B1); not yet on the Mac |
-| Dashboard generator (2 of 11 dashboards: Portfolio overview, Contracts) | `code/grafana/build_dashboards.py` | Done; renders in Grafana with plugin 4.23.5. Refactored into building blocks (B4): header, variables, data links, Back link, pace and colour settings in one place, description template |
+| Dashboard generator: **all 11 dashboards** | `code/grafana/build_dashboards.py` → `code/grafana/dashboards/*.json` | Built and rendered in Grafana 13.3.1 with plugin 4.23.5 on synthetic data; every drill-down link clicked. Phase 2 (Adoption, Requests) on a proposed design |
 | Building-block test | `code/grafana/test_build.py` | Settings written once; description shape; sample header, links and colours run and render |
 | Panel query test | `code/grafana/test_panels.py` | Runs every panel and variable query with macros expanded |
 | Synthetic data, one night or N nights | `sample_data/generate_synthetic.py` (`--nights`, `--bad-night`) | Done; 14 nights → 13 loaded, 1 refused |

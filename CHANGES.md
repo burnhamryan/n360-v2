@@ -1,3 +1,55 @@
+# CHANGES · 24 Nov 2026 · all 11 dashboards (B7–B14, B10, Phase 2 B22–B23)
+
+**Every dashboard in `04` is built, rendered in Grafana 13.3.1 on synthetic data, and every drill-down link was
+clicked.** Repository: `burnhamryan/n360-v2` (`main` = the pack through B6; this work on `claude/all-dashboards`).
+Phase 2 (Adoption, Requests) runs on a **proposed** table design; its field meanings are open questions in `08`.
+
+| Dashboard | uid | Highlights on synthetic data |
+|---|---|---|
+| Portfolio overview | `n360-overview` | (B6) unchanged |
+| Contracts | `n360-contracts` | B10: header, Back link, pace chips, links; the 4 known problems fixed (pool counted → 3 above billed; Harbor Voice no longer plotted; "Sheet terms" for no SOW; formats) |
+| Customer | `n360-customer` | Header stats, lines with pace, pooled entitlement (pool row + its lines "At the pool"), weekly use, containment, VAs, recent anomalies, requests |
+| Contract line | `n360-line` | Used / billed / % / term / forecast stats; how it is measured (rule, funnel, page match, source, billed basis); cumulative used vs billed with dashed forecast and red billed line; month bars; VAs; night by night (after 7 nights) |
+| VA | `n360-va` | Status (Went silent (provisional) for Lakeside), daily against the expected band, red settled / orange provisional flags, reader and configuration |
+| Forecast and runway | `n360-forecast` | Crossing in 30/60/90, runway lanes (Harbor red to 17 Dec, Kestrel blue, grey to term end then dark), runway table with flags and "term already ended", step changes, accuracy note (B15) |
+| Anomalies | `n360-anomalies` | Kind and include-provisional controls, heatmap lanes, feed, cross-account events, weekly flags |
+| Containment | `n360-containment` | 4 weeks vs previous 4 per VA, weekly per VA, VAs without handoff data |
+| Pipeline health | `n360-pipeline` | 14 nights (night 9 red), checks passed n of 8, freshness, measure mix, rules not live |
+| Adoption and coverage | `n360-adoption` | Engine per VA (V7 flagged), playbooks vs intents, idle playbook, MCP / supervisory, authoring and assistant use, config changes |
+| Requests | `n360-requests` | By area (incl. "Not tagged yet"), top asks (3 and 2 customers), by customer, untagged list |
+
+**Rules kept in one place (views):** pace, runway and step change in `v_line_pace`; the anomaly flag threshold
+(4) now a named constant in `v_va_day_anomaly`, which also exposes the expected range; heatmap bands in
+`v_anomaly_heat`; freshness in `v_source_freshness`; "V8 or later" in `v_va_config_latest`; "several customers"
+in `v_top_asks`. Dashboards only map labels to colours (`test_build.py` fails on any threshold in a dashboard).
+
+**Phase 2 (proposed):** tables `va_config_snapshot`, `playbook_day` (added), `cortex_day`, `explorer_day`,
+`ps_ticket`; the generator plants V7 VAs, two config changes, an idle playbook, shared asks and untagged
+tickets, using its own random streams (core synthetic numbers unchanged). `load.py` loads these only when the
+export has the file: a night without them loads exactly as before (tested).
+
+**Fixed on the way (found in screenshots):** Grafana's default colour scale (red above 80) on stats; green
+"Not reported yet" / "At the pool" cells; a runway chart broken by Grafana's own gap-filling; "All" customers
+leaving out Cedar Logistics (no contract line); `join_use_nulls` in a view on ClickHouse 25.8 (earlier);
+a compiled `__pycache__` file tracked since the pack as received (untracked).
+
+| Check | Result |
+|---|---|
+| `ci.sh chdb`, `ci.sh server` (14 nights, night 9 bad) | Pass: loads, view tests (incl. 4 Phase 2 cases), dashboards regenerate identically, all 98 panel queries (11 dashboards) as Grafana's read-only user |
+| Grafana 13.3.1, all 11 dashboards | Render, no panel errors (screenshots on the PR) |
+| Drill-downs clicked | Overview → Customer / Contract line; Customer → line / VA; line → VA; Contracts → Customer / line; Forecast → line; Anomalies, Adoption → VA; Back links keep customer and time range |
+| Night without Phase 2 files | LOADED; Phase 2 tables empty, dashboards say why |
+
+GitHub Actions: both CI jobs (chdb, ClickHouse 25.8) pass on GitHub for `main` and this branch.
+
+Not done: B15–B21 (forecast history and accuracy, freshness table and alert, alert rules, anomaly log,
+anomaly v2, challenger forecast). Not tested: macOS / Docker Desktop, Claude Desktop.
+
+New open questions in `08`: Phase 2 field meanings; "several customers" = 2; z ±2 watch band and freshness
+2/3 days as proposed; pooled panel always shown.
+
+---
+
 # CHANGES · 24 Nov 2026 · amber test case, and backlog B6 (Portfolio overview)
 
 ## End-to-end test (fresh start, as on the Mac)

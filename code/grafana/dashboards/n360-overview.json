@@ -215,7 +215,7 @@
               "type": "value",
               "options": {
                 "0": {
-                  "color": "text",
+                  "color": "transparent",
                   "index": 0
                 }
               }

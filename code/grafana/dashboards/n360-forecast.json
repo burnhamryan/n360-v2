@@ -1,0 +1,783 @@
+{
+  "uid": "n360-forecast",
+  "title": "N360 \u00b7 Forecast and runway",
+  "tags": [
+    "n360"
+  ],
+  "editable": false,
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "utc",
+  "time": {
+    "from": "now-14d",
+    "to": "now+18M"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "account",
+        "label": "Customer",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "n360-clickhouse"
+        },
+        "query": "SELECT account FROM n360.account ORDER BY account",
+        "definition": "SELECT account FROM n360.account ORDER BY account",
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Data through",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Last day included in this load (the nightly window ends at 23:59 UTC that day).\n\n**Source:** n360.runs, written by load.py only after every data check passes  \n**Filter:** loaded runs only; the latest  \n**Window:** the latest load",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT formatDateTime(window_end, '%e %b %Y') AS data_through\n        FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline?${__url_time_range}"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Last night",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Result of the latest nightly run. A stopped night leaves the previous good night on screen.\n\n**Source:** n360.runs (load.py writes one row per night, loaded or not)  \n**Filter:** none  \n**Window:** the latest run",
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "loaded": {
+                  "text": "Loaded",
+                  "color": "green",
+                  "index": 0
+                },
+                "failed_checks": {
+                  "text": "Stopped: data checks failed",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Crossing billed",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Lines and pools under billed today that the stored forecast says will cross billed within 30, 60 and 90 days, before their term ends.\n\n**Source:** n360.forecast via n360.v_line_pace  \n**Filter:** Customer  \n**Window:** from the data-through day",
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 8,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT countIf(days_to_cross BETWEEN 0 AND 30) AS `In 30 days`,\n               countIf(days_to_cross BETWEEN 0 AND 60) AS `In 60 days`,\n               countIf(days_to_cross BETWEEN 0 AND 90) AS `In 90 days`\n        FROM n360.v_line_pace WHERE account IN (${account:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "text": {
+          "titleSize": 12,
+          "valueSize": 26
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Above billed",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Lines and pools already over billed (a pool counted once).\n\n**Source:** n360.v_line_pace  \n**Filter:** Customer  \n**Window:** start date to the data-through day",
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT countIf(runway = 'above billed') AS above FROM n360.v_line_pace WHERE account IN (${account:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "color": "transparent",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 1,
+                "to": 1000000000000000.0,
+                "result": {
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background"
+      },
+      "links": [
+        {
+          "title": "Contracts",
+          "url": "/d/n360-contracts?${__url_time_range}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Step changes",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Lines and pools whose last-30-day rate differs from their term average by more than 50% (flagged upstream in the forecast).\n\n**Source:** n360.forecast via n360.v_line_pace  \n**Filter:** Customer  \n**Window:** last 30 days against the term",
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT countIf(step_change IS NOT NULL) AS steps FROM n360.v_line_pace WHERE account IN (${account:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 6,
+      "title": "Runway",
+      "type": "state-timeline",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "One lane per line or pool: from the data-through day to the day the stored forecast says it runs out (uses up billed). Red: crosses billed soon (the red window of the pace rule). Blue: crosses billed before its term ends. Grey: runs out only after the term ends; dark after the term end (the change of shade marks the contract end). Lines already above billed, not measurable or not implemented have no runway and are not shown.\n\n**Source:** n360.forecast via n360.v_line_pace  \n**Filter:** Customer; lines with a runs-out date  \n**Window:** from the data-through day forward",
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "WITH lanes AS (\n                 SELECT concat(a.display_name, ' \u00b7 ', pc.label) AS lane, pc.data_through AS dt, pc.end_date AS term_end,\n                        pc.exhaust_date AS runs_out,\n                        multiIf(pc.runway = 'crosses soon', 3, pc.runway = 'crosses before term end', 2, 1) AS cat\n                 FROM n360.v_line_pace AS pc INNER JOIN n360.account AS a ON a.account = pc.account\n                 WHERE pc.account IN (${account:singlequote}) AND pc.exhaust_date IS NOT NULL),\n             times AS (SELECT DISTINCT t FROM (SELECT dt AS t FROM lanes UNION ALL SELECT term_end FROM lanes WHERE term_end >= dt\n                                               UNION ALL SELECT runs_out FROM lanes))\n        -- every lane gets a value at every date on the chart, so Grafana never fills a gap\n        SELECT toDateTime(times.t) AS time, lanes.lane AS lane,\n               toUInt8(multiIf(times.t >= lanes.runs_out, 0, times.t >= lanes.term_end, 9, lanes.cat)) AS state\n        FROM lanes CROSS JOIN times\n        ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "3": {
+                  "text": "Crosses billed soon",
+                  "color": "red",
+                  "index": 0
+                },
+                "2": {
+                  "text": "Crosses billed before term end",
+                  "color": "blue",
+                  "index": 1
+                },
+                "1": {
+                  "text": "Runs out after term end",
+                  "color": "#8e8e8e",
+                  "index": 2
+                },
+                "9": {
+                  "text": "After the term end",
+                  "color": "#3d3d3d",
+                  "index": 3
+                },
+                "0": {
+                  "text": "Runs out",
+                  "color": "transparent",
+                  "index": 4
+                }
+              }
+            }
+          ],
+          "displayName": "${__field.labels.lane}",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#8e8e8e"
+          },
+          "custom": {
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "mergeValues": true,
+        "rowHeight": 0.8,
+        "alignValue": "left",
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Runway by line",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Every line and pool: use, rate (last 30 days / 30), the runs-out date from the stored forecast, and when the term ends. Note carries the forecast flags and says when a term has already ended. Click a line to open it (a pool opens its customer).\n\n**Source:** n360.forecast via n360.v_line_pace  \n**Filter:** Customer  \n**Window:** start date to the data-through day; forecast forward",
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 24,
+        "h": 14
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(a.display_name, ' \u00b7 ', pc.label) AS Line, pc.measure AS Measure, pc.used AS Used, pc.billed AS Billed,\n               round(pc.rate_per_day) AS `Per day`,\n               multiIf(pc.exhaust_date IS NOT NULL, concat(toString(toDayOfMonth(pc.exhaust_date)), ' ', formatDateTime(pc.exhaust_date, '%b %Y')), pc.runway = 'above billed', 'Already above billed', NULL) AS `Runs out`,\n               concat(toString(toDayOfMonth(pc.end_date)), ' ', formatDateTime(pc.end_date, '%b %Y')) AS `Term ends`, pc.runway AS Runway,\n               trim(BOTH '; ' FROM concat(if(pc.term_ended, 'Term already ended; ', ''), arrayStringConcat(pc.flags, '; '))) AS Note,\n               if(pc.entitlement = 'pool', concat('/d/n360-customer?var-account=', pc.account),\n                  concat('/d/n360-line?var-account=', pc.account, '&var-line=', pc.line_key)) AS drill\n        FROM n360.v_line_pace AS pc INNER JOIN n360.account AS a ON a.account = pc.account\n        WHERE pc.account IN (${account:singlequote}) ORDER BY pc.exhaust_date IS NULL, pc.exhaust_date",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "drill"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Billed"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Per day"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Per day"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Runs out"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Runway"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "above billed": {
+                        "text": "Already above billed",
+                        "color": "red",
+                        "index": 0
+                      },
+                      "crosses soon": {
+                        "text": "Crosses billed soon",
+                        "color": "red",
+                        "index": 1
+                      },
+                      "crosses before term end": {
+                        "text": "Crosses before term end",
+                        "color": "blue",
+                        "index": 2
+                      },
+                      "runs out after term end": {
+                        "text": "Runs out after term end",
+                        "color": "#8e8e8e",
+                        "index": 3
+                      },
+                      "no use in the last 30 days": {
+                        "text": "No use in the last 30 days",
+                        "color": "#8e8e8e",
+                        "index": 4
+                      },
+                      "not measurable": {
+                        "text": "Not measurable",
+                        "color": "#8e8e8e",
+                        "index": 5
+                      },
+                      "not implemented": {
+                        "text": "Not implemented",
+                        "color": "#8e8e8e",
+                        "index": 6
+                      },
+                      "not read": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 7
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#8e8e8e",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Runway"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 200
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Line"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 260
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Measure"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Line"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open",
+                    "url": "${__data.fields.drill}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 8,
+      "title": "Step changes",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Lines whose last-30-day rate is more than 50% away from their term average: rising, falling or stopped. The forecast uses the last 30 days, so a step change moves the runs-out date a lot.\n\n**Source:** n360.forecast via n360.v_line_pace  \n**Filter:** Customer; flagged lines  \n**Window:** last 30 days against the term",
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT a.display_name AS Customer, pc.label AS Line, pc.last30_vs_term_pct AS `Last 30 days vs term average`,\n               pc.step_change AS Change\n        FROM n360.v_line_pace AS pc INNER JOIN n360.account AS a ON a.account = pc.account\n        WHERE pc.account IN (${account:singlequote}) AND pc.step_change IS NOT NULL",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No step changes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last 30 days vs term average"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "n360MayBeEmpty": "no line has a step change"
+    },
+    {
+      "id": 9,
+      "title": "Forecast accuracy",
+      "type": "text",
+      "gridPos": {
+        "x": 12,
+        "y": 27,
+        "w": 12,
+        "h": 6
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Not available yet: accuracy needs each night's forecast stored (`forecast_history`, backlog B15). It will show how far forecasts made 30, 60 and 90 days ago were off (MAPE) and how much crossing dates moved, once 30 nights are stored."
+      }
+    }
+  ],
+  "links": [
+    {
+      "type": "link",
+      "title": "Back to Portfolio overview",
+      "url": "/d/n360-overview",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    }
+  ]
+}

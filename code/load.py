@@ -10,6 +10,7 @@ Steps
   2. Every swappable table in n360_next truncated, then loaded from its NDJSON file.
   3. checks.sql run against n360_next. Any offending row: the run is logged as failed_checks,
      nothing is swapped, exit 3. The live tables keep the previous load.
+     Phase 2 tables (OPTIONAL) are staged and swapped only when their file is in the export.
   4. EXCHANGE TABLES n360.<t> AND n360_next.<t> for each table (atomic per table; ES: alias flip).
   5. Append-only tables (runs, line_totals_history) written straight to n360.
 
@@ -21,6 +22,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SWAP = ['account', 'va', 'contract_line', 'line_va', 'pool', 'rule', 'source',
         'va_day', 'line_day', 'line_day_billable', 'forecast']
 APPEND = ['line_totals_history']
+# Phase 2 (proposed): loaded and swapped only when the export carries the file; otherwise the live table is left
+# as it is, so a night without Phase 2 files loads exactly as before.
+OPTIONAL = ['va_config_snapshot', 'playbook_day', 'cortex_day', 'explorer_day', 'ps_ticket']
 
 
 class CH:
@@ -94,6 +98,10 @@ def main():
     for t in SWAP:
         ch.cmd(f'TRUNCATE TABLE n360_next.{t}')
         ch.insert_ndjson(f'n360_next.{t}', os.path.abspath(os.path.join(a.rows, f'{t}.ndjson')))
+    optional = [t for t in OPTIONAL if os.path.exists(os.path.join(a.rows, f'{t}.ndjson'))]
+    for t in optional:
+        ch.cmd(f'TRUNCATE TABLE n360_next.{t}')
+        ch.insert_ndjson(f'n360_next.{t}', os.path.abspath(os.path.join(a.rows, f'{t}.ndjson')))
 
     last_day = run['window_end'][:10]
     failed = []
@@ -117,7 +125,7 @@ def main():
         print(f'REFUSED: {len(failed)} check(s) failed; live tables unchanged (run {run["run_id"]})')
         return 3
 
-    for t in SWAP:
+    for t in SWAP + optional:
         ch.cmd(f'EXCHANGE TABLES n360.{t} AND n360_next.{t}')
     for t in APPEND:
         ch.cmd(f"ALTER TABLE n360.{t} DELETE WHERE data_date = '{run['data_date']}'")

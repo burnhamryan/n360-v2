@@ -24,6 +24,7 @@ Edge cases deliberately present (and what each one tests):
   Cedar Logistics     an unbilled VA (no contract line)
   Kestrel Travel      a line running ahead of its term but under billed (pace amber: gap > 10 points)
 A same-day spike hits Northwind, Bluebird and Harbor 6 days before the last day (cross-account event).
+Phase 2 tables (proposed design) are generated too; see phase2() for what is planted.
 
 Multi-night mode (--nights): every day's numbers come from per-VA random streams, so a day reads the
 same on every night that includes it; the planted events stay on fixed dates (anchored to --last-day);
@@ -90,7 +91,8 @@ def generate(last, anchor, out, multi, bad=False):
     data_date = last + dt.timedelta(1)
     run_id = str(uuid.uuid4())
     T = {t: [] for t in ['account', 'va', 'contract_line', 'line_va', 'pool', 'rule', 'source', 'va_day',
-                         'line_day', 'line_day_billable', 'forecast', 'line_totals_history']}
+                         'line_day', 'line_day_billable', 'forecast', 'line_totals_history',
+                         'va_config_snapshot', 'playbook_day', 'cortex_day', 'explorer_day', 'ps_ticket']}
 
     # ── rules
     rules = {
@@ -254,6 +256,8 @@ def generate(last, anchor, out, multi, bad=False):
                       ('containment_days', 'Daily handoffs per VA'), ('consumption_rules', 'Contract-rule counts per line per day')]:
         T['source'].append(dict(source_id=sid, description='[SYNTHETIC] ' + desc, definition='', check_text='', last_day=last.isoformat(), run_id=run_id))
 
+    phase2(T, va_daily, last, anchor, run_id)
+
     if bad:   # a pipeline bug: one line's total disagrees with its daily series
         broken = next(x for x in T['contract_line'] if x['account'] == 'Northwind Outfitters')
         broken['reported_measured'] += 1
@@ -271,6 +275,71 @@ def generate(last, anchor, out, multi, bad=False):
         json.dump(run, f, indent=1)
     print('synthetic run', run_id, 'data', data_date.isoformat(), 'BROKEN ON PURPOSE' if bad else '',
           ' '.join(f'{k}={v}' for k, v in counts.items()))
+
+
+def phase2(T, va_daily, last, anchor, run_id):
+    """Phase 2 tables (proposed design, 02/08): weekly configuration reads, playbook executions, authoring
+    sessions, analytics-assistant questions and support tickets. Own random streams keyed by name and day, so the
+    core tables above are unchanged and a day reads the same on every night.
+    Planted: Lakeside Email and Cedar Ops Chat on V7 (not current); Harbor Chat upgraded V8.1 -> V8.2 and Pinecrest
+    Chat +2 V8 playbooks in the newest read; one built-but-idle playbook (Northwind 'Gift cards'); an ask shared by
+    3 customers and one by 2; 4 tickets not tagged yet."""
+    def rnd(*k):
+        return random.Random('/'.join(map(str, (SEED, 'p2') + k)))
+    mondays = sorted({last - dt.timedelta(last.weekday()) - dt.timedelta(7 * w) for w in range(8)})
+    v7 = {'Lakeside Email': 'V7.4', 'Cedar Ops Chat': 'V7.9'}
+    for vname, (acct, vch, ex, rows) in sorted(va_daily.items()):
+        bot = uid('bot/' + vname)
+        r = rnd('cfg', vname)
+        pb, li, mcp, sup = r.randint(4, 14), r.randint(0, 40), r.randint(0, 2), r.randint(0, 3)
+        for m in mondays:
+            newest = m == mondays[-1]
+            ver = v7.get(vname, 'V8.2' if vname == 'Harbor Chat' and newest else ('V8.1' if vname == 'Harbor Chat' else 'V8.3'))
+            T['va_config_snapshot'].append(dict(
+                snapshot_date=m.isoformat(), account=acct, bot_id=bot, engine_version=ver, engine_major=int(ver[1]),
+                v8_playbooks=0 if ver.startswith('V7') else pb + (2 if vname == 'Pinecrest Chat' and newest else 0),
+                legacy_intents=li + (25 if ver.startswith('V7') else 0), mcp_servers_live=mcp, supervisory_rules_on=sup,
+                run_id=run_id))
+        if vname in v7:
+            continue
+        books = ['[SYNTHETIC] Order status', '[SYNTHETIC] Refund request', '[SYNTHETIC] Store hours', '[SYNTHETIC] Password reset']
+        books = books[:2 + rnd('books', vname).randint(0, 2)] + (['[SYNTHETIC] Gift cards'] if vname == 'Northwind Chat' else [])
+        for d in (last - dt.timedelta(n) for n in range(59, -1, -1)):
+            conv = rows.get(d, (0,))[0] or 0
+            for b in books:
+                ex_ = 0 if 'Gift cards' in b else int(conv * rnd('pbx', vname, b, d).uniform(0.02, 0.12))
+                T['playbook_day'].append(dict(day=d.isoformat(), account=acct, bot_id=bot, playbook=b, executions=ex_, run_id=run_id))
+    accounts = sorted({a for a, *_ in va_daily.values()})
+    for acct in accounts:
+        for d in (last - dt.timedelta(n) for n in range(89, -1, -1)):
+            for ut, hi_s, hi_q in (('customer', 6, 15), ('staff', 4, 10)):
+                r = rnd('use', acct, ut, d)
+                weekday = d.weekday() < 5
+                T['cortex_day'].append(dict(day=d.isoformat(), account=acct, user_type=ut,
+                                            authoring_sessions=r.randint(0, hi_s) if weekday else 0, run_id=run_id))
+                T['explorer_day'].append(dict(day=d.isoformat(), account=acct, user_type=ut,
+                                              questions=r.randint(0, hi_q) if weekday else r.randint(0, 2), run_id=run_id))
+    asks = [('Export conversations to CSV', 'Analytics', ['Atlas Streaming', 'Juniper Bank', 'Northwind Outfitters']),
+            ('SMS opt-out keywords', 'Channels', ['Bluebird Air', 'Harbor Telecom']),
+            ('Playbook version history', 'Playbooks', ['Pinecrest Retail']),
+            ('Salesforce case sync', 'Integrations', ['Summit Games']),
+            ('Weekly containment email', 'Analytics', ['Kestrel Travel'])]
+    n = 0
+    for ask, area, accts in asks:
+        for a in accts:
+            n += 1
+            opened = anchor - dt.timedelta(rnd('tkt', n).randint(3, 80))
+            if opened <= last:
+                T['ps_ticket'].append(dict(ticket_id=f'SYN-{1000 + n}', account=a, opened=opened.isoformat(),
+                                           title=f'[SYNTHETIC] {ask}', product_area=area, ask=ask,
+                                           status=rnd('st', n).choice(['open', 'open', 'closed']), run_id=run_id))
+    for a in ['Lakeside Insurance', 'Pinecrest Retail', 'Harbor Telecom', 'Cedar Logistics']:
+        n += 1
+        opened = anchor - dt.timedelta(rnd('tkt', n).randint(1, 20))
+        if opened <= last:
+            T['ps_ticket'].append(dict(ticket_id=f'SYN-{1000 + n}', account=a, opened=opened.isoformat(),
+                                       title='[SYNTHETIC] Untriaged request', product_area=None, ask=None, status='open',
+                                       run_id=run_id))
 
 
 def forecast_row(acct, skey, pool, start, end, last, used, last30, billed, run_id):
