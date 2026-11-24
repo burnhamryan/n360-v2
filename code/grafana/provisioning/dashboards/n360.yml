@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: n360
+    folder: N360
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false          # dashboards change in code, never by clicking
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

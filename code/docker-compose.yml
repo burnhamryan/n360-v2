@@ -1,0 +1,45 @@
+# N360 POC: ClickHouse + Grafana on this Mac. Both bind to 127.0.0.1 only: nothing is reachable
+# from the network, and customer data never leaves the laptop.
+#
+#   cd pipeline/clickhouse
+#   cp .env.example .env            # set the two passwords
+#   docker compose up -d
+#   python3 load.py --rows ../data/<D>/rows --user n360 --password "$N360_CH_PASSWORD"
+#   open http://localhost:3000      # Grafana (admin / GRAFANA_ADMIN_PASSWORD)
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    container_name: n360-clickhouse
+    ports:
+      - "127.0.0.1:8123:8123"      # HTTP: load.py and Grafana
+    environment:
+      CLICKHOUSE_USER: n360                          # the loader: read/write
+      CLICKHOUSE_PASSWORD: ${N360_CH_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      GRAFANA_CH_PASSWORD: ${GRAFANA_CH_PASSWORD}
+    volumes:
+      - ch-data:/var/lib/clickhouse
+      - ./init/grafana_user.sh:/docker-entrypoint-initdb.d/grafana_user.sh:ro
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+
+  grafana:
+    image: grafana/grafana:13.3.1      # OSS edition (AGPLv3), latest stable 10 Nov 2026; grafana-enterprise is the paid image
+    container_name: n360-grafana
+    depends_on: [clickhouse]
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GRAFANA_CH_PASSWORD: ${GRAFANA_CH_PASSWORD}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+volumes:
+  ch-data:
+  grafana-data:

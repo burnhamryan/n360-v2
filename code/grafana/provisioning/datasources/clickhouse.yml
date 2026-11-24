@@ -1,0 +1,15 @@
+apiVersion: 1
+datasources:
+  - name: N360 ClickHouse
+    uid: n360-clickhouse
+    type: grafana-clickhouse-datasource
+    isDefault: true
+    editable: false
+    jsonData:
+      host: clickhouse
+      port: 8123
+      protocol: http
+      username: grafana
+      defaultDatabase: n360
+    secureJsonData:
+      password: $GRAFANA_CH_PASSWORD
