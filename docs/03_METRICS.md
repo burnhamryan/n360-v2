@@ -14,7 +14,8 @@ description.
 | Billed | The contract's volume for the line | `billed` | Line | `contract_line` | After SOW overrides; NULL for pooled lines |
 | % of billed | Used / billed | `100 × used / billed`, 2 dp | Line or pool | `v_line_status`, `v_pool_status` | Must equal the pipeline's figure (checked) |
 | % of term | Days elapsed / term days | `100 × least(days since start + 1, term) / term` | Line | `v_line_status` | |
-| Pace gap | % of billed − % of term | | Line | view (to add) | Positive = ahead of contract |
+| Pace gap | % of billed − % of term | `pct_billed − pct_term` | Line or pool | `v_line_pace` | Positive = ahead of contract |
+| Pace | Colour by the proposed rule (`04`) | in `v_line_pace` only | Line or pool | `v_line_pace` | Thresholds proposed; dashboards map the label to a colour, never recompute it |
 | Billable (contract rule) | Contacts meeting the contract's meaningful-engagement test | `sum(billable)` | Line × day | `line_day_billable` | |
 | Pooled used | Used across every line in a pool | `sum(reported_measured)` over the pool's lines | Pool | `v_pool_status` | |
 

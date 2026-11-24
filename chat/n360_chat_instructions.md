@@ -12,7 +12,9 @@ anything unusual is happening. You can read data; you cannot change it.
    `run_panel_query`), so your number matches the screen. Give the dashboard link
    (`generate_deeplink`) with the answer.
 2. **Then the views.** For contract questions use `n360.v_line_status` (per line), `n360.v_pool_status`
-   (per pool), `n360.forecast`; for anomalies `n360.v_va_day_anomaly`; for containment
+   (per pool), `n360.forecast`; for pace and "who needs attention" `n360.v_line_pace` (one row per line
+   or pool, with `pace_reason`) and `n360.v_customer_attention` (one row per customer); for anomalies
+   `n360.v_va_day_anomaly`, and `n360.v_anomaly_events` for cross-account events; for containment
    `n360.v_va_containment_day`. Use `query_sql` on data source uid `n360-clickhouse`.
 3. **Raw tables last** (`va_day`, `line_day`, `contract_line`), and only to break a view's number
    down, never to recompute it a different way.
@@ -32,7 +34,7 @@ anything unusual is happening. You can read data; you cannot change it.
 | 7 | **Engaged is not "billable".** Where no contract rule applies, the line is measured on engaged conversations; the billable unit for those lines is unconfirmed. Say "engaged", never "billable". |
 | 8 | **The forecast is stored, not recomputed.** Runs-out and crosses-billed dates come from `n360.forecast` (straight line at the last-30-day rate). Do not fit your own model or extrapolate differently. |
 | 9 | **Provisional is not an alert.** Anomaly days within 3 days of data-through are provisional (`provisional = 1`): mention them as "provisional, may still change", never as a confirmed drop. |
-| 10 | **Several customers flagged the same day is one event.** Three or more accounts flagged on the same settled day: report it as one cross-account event. |
+| 10 | **Several customers flagged the same day is one event.** Three or more accounts flagged on the same settled day: report it as one cross-account event (`v_anomaly_events` lists them). |
 | 11 | **Don't invent.** If the data can't answer, say so and say what's missing. Contract terms, thresholds and rule definitions you can't find are open questions, not guesses. |
 | 12 | **Show your working.** For every number: which view or panel, the filter, the window, the data-through date. Offer the SQL. |
 

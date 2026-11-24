@@ -16,12 +16,13 @@
 | Local proof of concept on Ryan's Mac, localhost only, before any cloud move | 22 Nov 2026 |
 | 11 dashboards with drill-downs; Portfolio → Customer → Contract line → VA | 22 Nov 2026 |
 | Straight-line last-30-day forecast stays the forecast of record until a challenger proves better | 22 Nov 2026 |
+| Pace colour is decided in a view (`v_line_pace`), not in the dashboard builder; dashboards only map its label to a colour | 24 Nov 2026 |
 
 ## Proposed (build as settings; Ryan approves)
 
 | Item | Proposal |
 |---|---|
-| Pace colours | Green ≤ term + 10 pts; amber > term + 10 or crossing ≤ 60 d; red > 100% or crossing ≤ 30 d; grey not measurable / not implemented / not read |
+| Pace colours (values at the top of `v_line_pace`) | Green ≤ term + 10 pts; amber > term + 10 or crossing ≤ 60 d; red > 100% or crossing ≤ 30 d; grey not measurable / not implemented / not read |
 | Anomaly thresholds | Same weekday 8 weeks; z ≤ −4 / ≥ 4; min median 20; provisional 3 days |
 | Alert routing and timing | As in `05_ANOMALY_AND_FORECAST.md` |
 | Challenger adoption bar | Better 30-day MAPE on most lines for 8 straight weeks, plus Ryan's approval |
@@ -40,5 +41,6 @@
 | Whether real N360 data may be sent to Claude (chat via `mcp-grafana`; query results leave the machine) | Chat built and tested on synthetic only (`09_CHAT.md`) |
 | Who may chat with the data, and whether per-customer restriction is needed | Grafana OSS cannot limit rows per person; would need ClickHouse row policies + one data source per group |
 | Does the pipeline count usage after a line's end date? (synthetic does: Atlas 282.6% all days vs 268.4% within term) | Views follow `reported_measured` as given |
-| Where the pace rule lives. `04` says thresholds are constants in `build_dashboards.py` (`PACE`, done in B4); rule 4 and B5 put the colour in a view (`v_line_pace`). Red needs the forecast, so it can only be computed in SQL | Recommend: the view decides the colour (B5), reading the same four numbers; the builder only maps the view's label to a display colour. Until decided, `PACE` holds them and B5 must not copy the numbers |
+| Pace for an entitlement whose term has ended (synthetic: Lakeside ended 31 Oct at 13.9% of billed shows green "on pace") | `v_line_pace` reports `term_ended`; the colour follows the proposed rule, which says nothing about ended terms |
+| Cross-account events: should spikes and drops on the same day be one event or two? | Built as two (by direction); one line to change |
 | Term-end convention: synthetic ends a 12-month line on the last day of the month before its start month (29 Jan start → 31 Dec end; pool ends 28 Jan) | Check against the contract sheet before trusting % of term |

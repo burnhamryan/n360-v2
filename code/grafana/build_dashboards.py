@@ -8,7 +8,7 @@ Wording rules carried over from the page: plain words on the panels, provenance 
 description (the (i)), and "Not reported yet" wherever a value was not read. Never red for empty.
 
 Layout of this file: settings (one place each) -> building blocks (target, panel, describe,
-variables, header, links, formats, colours) -> one function per dashboard -> main().
+variables, header, links, formats, colours from view labels) -> one function per dashboard -> main().
 """
 import json, os
 
@@ -24,12 +24,15 @@ HOME = ('n360-overview', 'Portfolio overview')      # every dashboard's Back lin
 PIPELINE = ('n360-pipeline', 'Pipeline health')     # "Data through" drills here (04 conventions)
 DEFAULT_RANGE = {'from': 'now-90d', 'to': 'now'}
 
-# Pace colours: PROPOSED, awaiting Ryan (04_DASHBOARDS, 08_DECISIONS). Change them here only.
-PACE = {
-    'amber_ahead_pts': 10,      # amber: % of billed more than this many points ahead of % of term
-    'red_pct_billed': 100,      # red: above this % of billed
-    'amber_cross_days': 60,     # amber: crossing billed within this many days
-    'red_cross_days': 30,       # red: crossing billed within this many days
+# Pace: n360.v_line_pace decides the colour (decided 24 Nov 2026) and holds the PROPOSED thresholds.
+# This file only says how each of the view's `pace` values looks: {stored: (shown, colour key)}.
+PACE_LABEL = {
+    'red': ('Over or crossing soon', 'red'),
+    'amber': ('Ahead of term', 'amber'),
+    'green': ('On pace', 'green'),
+    'not measurable': ('Not measurable', 'grey'),
+    'not implemented': ('Not implemented', 'grey'),
+    'not read': (NOT_READ, 'grey'),
 }
 
 # Display colours (Grafana colour names). Empty is grey, never red.
@@ -113,32 +116,21 @@ def back_link(to=HOME):
 
 # Colours
 
-def steps(*pairs):
-    """Grafana threshold steps from (value, colour key) pairs; the first value is None (base)."""
-    return {'mode': 'absolute', 'steps': [{'value': v, 'color': COLOUR[c]} for v, c in pairs]}
-
-
-def pct_billed_colours():
-    """% of billed: red above PACE['red_pct_billed'], otherwise no colour (the pace chip carries green/amber)."""
-    return steps((None, 'none'), (PACE['red_pct_billed'], 'red'))
-
-
-def pace_gap_colours():
-    """Pace gap (% of billed - % of term, points): green up to the amber margin, amber beyond it.
-    Red (above billed, or crossing soon) needs the forecast, so it comes from the view's pace label."""
-    return steps((None, 'green'), (PACE['amber_ahead_pts'], 'amber'))
-
-
 def empty_grey():
     """Value mapping: empty shows "Not reported yet" in grey. Without it Grafana paints empty cells in the
-    base threshold colour (green for pace), which reads as "fine" (rule 1)."""
+    base colour, which reads as "fine" (rule 1)."""
     return {'type': 'special', 'options': {'match': 'null', 'result': {'text': NOT_READ, 'color': COLOUR['grey'], 'index': 0}}}
 
 
-def coloured(column, thresholds, cell='color-text'):
-    """Table column coloured by thresholds, empty in grey. Use for every coloured column."""
-    return override(column, ('thresholds', thresholds), ('mappings', [empty_grey()]),
-                    ('custom.cellOptions', {'type': cell}))
+def coloured(column, labels, cell='color-text'):
+    """Table column coloured by the label a view stored, empty in grey. Use for every coloured column.
+    Colours come from labels, never from thresholds here: rules live in views (rule 4)."""
+    return override(column, ('mappings', label_colours(labels) + [empty_grey()]), ('custom.cellOptions', {'type': cell}))
+
+
+def pace_chip(column='Pace'):
+    """The pace column from n360.v_line_pace / v_customer_attention, as a coloured word."""
+    return coloured(column, PACE_LABEL, cell='color-background')
 
 
 def label_colours(labels):

@@ -104,6 +104,9 @@ definition changes `rule_hash`.
 | `v_pool_status` | % of billed per pool |
 | `v_va_containment_day` | 1 − handoffs / engaged per VA per day |
 | `v_va_day_anomaly` | Anomaly flags (see `05_ANOMALY_AND_FORECAST.md`) |
+| `v_line_pace` | One row per entitlement (unpooled line, or pool once): % of billed, % of term, pace gap, crossing date from `forecast`, `pace` (red / amber / green / not measurable / not implemented / not read), `pace_reason`, `term_ended`. Holds the proposed pace thresholds, the only place they exist |
+| `v_customer_attention` | One row per customer: worst entitlement by pace, counts of red and amber entitlements, drops and silences and spikes in the 7 newest settled days, provisional flags |
+| `v_anomaly_events` | Cross-account events: the same settled day and direction (spikes, or drops and silences) flagged on 3 or more accounts |
 
 ## Keys and joins
 

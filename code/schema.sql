@@ -288,3 +288,112 @@ SELECT b.day, b.account, b.bot_id, v.va_name, b.conversations AS actual, b.q[2] 
 FROM base AS b
 LEFT JOIN n360.va AS v ON v.bot_id = b.bot_id
 WHERE b.n = 8 AND b.q[2] >= 20;
+
+-- ───────────────────────── dashboard views (B5, 24 Nov 2026) ─────────────────────────────────────
+
+CREATE OR REPLACE VIEW n360.v_line_pace AS
+-- Pace per entitlement: every line not in a pool, and every pool once (its lines are never paced alone).
+-- The colour is decided HERE and nowhere else (decided 24 Nov 2026). Dashboards only map `pace` to a display colour.
+-- The four thresholds are PROPOSED (08_DECISIONS), awaiting Ryan. Change them only here:
+--   red    above red_pct_billed % of billed, or crossing billed within red_cross_days
+--   amber  % of billed more than amber_ahead_pts points ahead of % of term, or crossing within amber_cross_days
+--   green  otherwise
+--   not measurable / not implemented / not read: no colour (grey on screen), never red
+-- Crossing date comes from the stored forecast (never recomputed). term_ended is reported, not coloured:
+-- the proposed rule says nothing about ended terms.
+WITH
+    10  AS amber_ahead_pts,
+    100 AS red_pct_billed,
+    60  AS amber_cross_days,
+    30  AS red_cross_days,
+    e AS (
+        SELECT s.account AS account, 'line' AS entitlement, s.line_key AS line_key, CAST(NULL, 'Nullable(UInt8)') AS pool_id,
+               s.channel AS name, s.measure AS measure, s.consumed AS used, s.billed AS billed, s.pct_billed AS pct_billed,
+               s.pct_term_elapsed AS pct_term, s.start_date AS start_date, s.end_date AS end_date,
+               toDate(s.window_end) AS data_through, f.cross_date AS cross_date
+        FROM n360.v_line_status AS s
+        INNER JOIN n360.contract_line AS l ON l.line_key = s.line_key
+        LEFT JOIN (SELECT series_key, cross_date FROM n360.forecast WHERE pool_id IS NULL) AS f ON f.series_key = l.series_key
+        WHERE s.pool_id IS NULL
+        UNION ALL
+        SELECT p.account, 'pool', CAST(NULL, 'Nullable(String)'), CAST(p.pool_id, 'Nullable(UInt8)'),
+               p.name, p.measure, p.consumed, p.billed, p.pct_billed,
+               -- % of term as in v_line_status (term = start to end inclusive); pools carry dates, not term_days
+               round(100 * least(greatest(dateDiff('day', p.start_date, r.d) + 1, 0), dateDiff('day', p.start_date, p.end_date) + 1)
+                     / (dateDiff('day', p.start_date, p.end_date) + 1), 1),
+               p.start_date, p.end_date, r.d, f.cross_date
+        FROM n360.v_pool_status AS p
+        CROSS JOIN (SELECT toDate(window_end) AS d FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC LIMIT 1) AS r
+        LEFT JOIN (SELECT account, pool_id, cross_date FROM n360.forecast WHERE pool_id IS NOT NULL) AS f
+               ON f.account = p.account AND f.pool_id = p.pool_id
+    )
+SELECT account, entitlement, line_key, pool_id, name, measure, used, billed, pct_billed, pct_term,
+       round(pct_billed - pct_term, 1) AS pace_gap,
+       cross_date, dateDiff('day', data_through, cross_date) AS days_to_cross,
+       end_date < data_through AS term_ended,
+       multiIf(measure IN ('not measurable', 'not implemented'), measure,
+               pct_billed IS NULL, 'not read',
+               pct_billed > red_pct_billed OR days_to_cross <= red_cross_days, 'red',
+               pace_gap > amber_ahead_pts OR days_to_cross <= amber_cross_days, 'amber',
+               'green') AS pace,
+       multiIf(pace IN ('not measurable', 'not implemented', 'not read'), '',
+               pct_billed > red_pct_billed, concat('above ', toString(red_pct_billed), '% of billed'),
+               days_to_cross <= red_cross_days, concat('crosses billed within ', toString(red_cross_days), ' days'),
+               pace_gap > amber_ahead_pts, concat('more than ', toString(amber_ahead_pts), ' points ahead of term'),
+               days_to_cross <= amber_cross_days, concat('crosses billed within ', toString(amber_cross_days), ' days'),
+               'on pace') AS pace_reason,
+       multiIf(pace = 'red', 3, pace = 'amber', 2, pace = 'green', 1, 0) AS pace_rank,
+       start_date, end_date, data_through
+FROM e;
+
+CREATE OR REPLACE VIEW n360.v_anomaly_events AS
+-- Same settled day, same direction, flagged on 3 or more accounts = one cross-account event (05: "one item").
+-- Direction: spikes apart from drops and silences (a surge and an outage on the same day are two things).
+SELECT day,
+       if(kind = 'spike', 'spikes', 'drops or silences') AS direction,
+       uniqExact(account) AS accounts, count() AS vas,
+       arraySort(groupUniqArray(account)) AS account_list,
+       arraySort(groupUniqArray(kind)) AS kinds
+FROM n360.v_va_day_anomaly
+WHERE kind != 'normal' AND NOT provisional
+GROUP BY day, direction
+HAVING accounts >= 3;
+
+CREATE OR REPLACE VIEW n360.v_customer_attention AS
+-- One row per customer: its worst entitlement by pace (red, amber, green, then no colour; ties by pace gap),
+-- and its anomaly flags. "7 settled days" = the 7 newest days that are no longer provisional.
+WITH
+    worst AS (
+        SELECT account,
+               argMax(tuple(entitlement, name, measure, used, billed, pct_billed, pct_term, pace_gap, cross_date,
+                            days_to_cross, pace, pace_reason), tuple(pace_rank, ifNull(pace_gap, -1e9))) AS w,
+               countIf(pace = 'red') AS red_entitlements, countIf(pace = 'amber') AS amber_entitlements,
+               count() AS entitlements, 1 AS found
+        FROM n360.v_line_pace GROUP BY account
+    ),
+    flags AS (
+        SELECT account,
+               countIf(kind IN ('drop', 'went silent') AND NOT provisional AND day >= settled_from) AS drops_silences_7d,
+               countIf(kind = 'spike' AND NOT provisional AND day >= settled_from) AS spikes_7d,
+               countIf(kind != 'normal' AND provisional) AS provisional_flags
+        FROM n360.v_va_day_anomaly
+        CROSS JOIN (SELECT toDate(max(window_end)) - 9 AS settled_from FROM n360.runs WHERE status = 'loaded') AS r
+        GROUP BY account
+    )
+SELECT a.account AS account, a.display_name AS display_name,
+       -- no entitlement row: NULL (not read), never '' or 0. Explicit, as join_use_nulls inside a view is not
+       -- honoured by ClickHouse 25.8 (it is by newer versions): tested both.
+       w.found = 1 AS has_entitlement,
+       if(has_entitlement, w.w.1, NULL) AS worst_entitlement, if(has_entitlement, w.w.2, NULL) AS worst_name,
+       if(has_entitlement, w.w.3, NULL) AS measure, if(has_entitlement, w.w.4, NULL) AS used,
+       if(has_entitlement, w.w.5, NULL) AS billed, if(has_entitlement, w.w.6, NULL) AS pct_billed,
+       if(has_entitlement, w.w.7, NULL) AS pct_term, if(has_entitlement, w.w.8, NULL) AS pace_gap,
+       if(has_entitlement, w.w.9, NULL) AS cross_date, if(has_entitlement, w.w.10, NULL) AS days_to_cross,
+       if(has_entitlement, w.w.11, NULL) AS pace, if(has_entitlement, w.w.12, NULL) AS pace_reason,
+       ifNull(w.red_entitlements, 0) AS red_entitlements, ifNull(w.amber_entitlements, 0) AS amber_entitlements,
+       ifNull(w.entitlements, 0) AS entitlements,
+       ifNull(f.drops_silences_7d, 0) AS drops_silences_7d, ifNull(f.spikes_7d, 0) AS spikes_7d,
+       ifNull(f.provisional_flags, 0) AS provisional_flags
+FROM n360.account AS a
+LEFT JOIN worst AS w ON w.account = a.account
+LEFT JOIN flags AS f ON f.account = a.account;

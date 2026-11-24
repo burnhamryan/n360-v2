@@ -20,7 +20,8 @@ first guesses; they are tuned monthly from review outcomes.
 
 **Observed patterns the design must handle:**
 - Several customers spiking on the same day is one event (e.g. an industry-wide disruption).
-  Group same-day flags across ≥ 3 accounts into one item.
+  Group same-day flags across ≥ 3 accounts into one item. Built: `v_anomaly_events` (settled days only;
+  spikes grouped apart from drops and silences).
 - The newest 0–2 days produce most false drops (data still settling). Provisional days never alert.
 
 ## Anomaly detection v2 (planned; build and test on synthetic)

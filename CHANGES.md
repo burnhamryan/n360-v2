@@ -1,3 +1,63 @@
+# CHANGES · 24 Nov 2026 · backlog B5 (views for the dashboards)
+
+**Three new views in `schema.sql`. The pace colour is decided in `v_line_pace`, as you decided, and the four
+proposed thresholds exist only at the top of that view.** `build_dashboards.py` no longer holds any
+threshold. It only maps the view's `pace` label to a colour and a word (`PACE_LABEL`).
+
+| View | One row per | Gives |
+|---|---|---|
+| `v_line_pace` | Entitlement: each line not in a pool, and each pool once | % of billed, % of term, pace gap, crossing date (from the stored forecast), `pace` (red / amber / green / not measurable / not implemented / not read), `pace_reason` in words, `term_ended` |
+| `v_customer_attention` | Customer | Worst entitlement (red, then amber, then green; ties by pace gap), counts of red and amber entitlements, drops and silences and spikes in the 7 newest settled days, provisional flags |
+| `v_anomaly_events` | Settled day and direction flagged on ≥ 3 accounts | Number of accounts and VAs, the accounts, the kinds |
+
+Acceptance on the 14-night synthetic data (`code/test_views.py`, run in CI on both engines; on the
+server as Grafana's read-only user):
+
+| Case | Result |
+|---|---|
+| Atlas Streaming | Red: 282.6% of billed |
+| Harbor Telecom Chat | Red: 91.0% of billed, crosses billed 17 Dec 2026, in 28 days |
+| Bluebird Air pool | One row for the pool, none for its 3 lines. Red at 122.3% |
+| Harbor Voice / Pinecrest Voice | "not measurable" / "not implemented", no colour |
+| Lakeside Insurance | 4 settled silent days in the last 7 settled days, plus 3 provisional ones counted apart. Quiet weekends are below the 20-a-day floor, so not scored |
+| 13 Nov spike | One event: spikes on 3 accounts (Bluebird, Harbor, Northwind), 4 VAs |
+| Cedar Logistics (no contract lines) | Empty (not read), not a colour |
+| Planted fault: red crossing window 30 → 20 days | CI fails on Harbor Telecom |
+
+**Version difference caught by CI.** In `v_customer_attention`, the `join_use_nulls` setting inside the view
+works on the embedded engine (ClickHouse 26.11) but not on the pinned server 25.8, where a customer with
+no lines got `''` instead of empty. I replaced it with an explicit check that works on both.
+
+Also checked in Grafana: a sample table with the pace chip renders. Red "Over or crossing soon", green
+"On pace", grey "Not measurable" / "Not implemented", and empty values grey. The Contracts dashboard is
+unchanged (B10 adds colour).
+
+**Gaps and questions**
+1. **No amber case in the synthetic data.** The amber branch (more than 10 points ahead of term, or
+   crossing within 60 days) is in the view but not tested. Adding one amber line to the generator
+   changes the synthetic numbers that the chat trap test and the earlier results use, so I haven't. Say if you want it.
+2. **Ended terms** (in `08`): Lakeside ended 31 Oct at 13.9% of billed and shows green "on pace". The
+   proposed rule doesn't cover ended terms. The view reports `term_ended` so a dashboard can say so.
+3. **Spikes and drops on the same day** (in `08`): I group them as two events, by direction. One line to change.
+4. **% of term for pools** repeats `v_line_status`'s formula, because pools carry dates, not `term_days`.
+   It's the same formula written twice (against rule 4), flagged in a comment. The Bluebird pool reads
+   80.8% of term and its lines 87.5%, because of the open term-end question.
+5. "7 settled days" = the 7 newest days that are no longer provisional (data-through −9 to −3).
+
+| File | Change |
+|---|---|
+| `code/schema.sql` | `v_line_pace`, `v_customer_attention`, `v_anomaly_events` appended. Existing views unchanged |
+| `code/test_views.py` (new) | Acceptance cases above |
+| `code/ci.sh` | Runs `test_views.py` after the loads |
+| `code/grafana/build_dashboards.py` | `PACE` thresholds removed. `PACE_LABEL`, `pace_chip()`; `coloured()` takes view labels, not thresholds |
+| `code/grafana/test_build.py` | Sample uses `v_line_pace`. New check: no dashboard sets thresholds |
+| `chat/n360_chat_instructions.md` | Points to the three views (trap test not re-run, see below) |
+| `docs/02`, `03`, `04`, `05`, `08`, `README.md` | Views listed. Pace decision recorded as decided 24 Nov 2026. 2 new open questions |
+
+Not re-run: the 10-question chat test (the instructions only gained pointers to the new views).
+
+---
+
 # CHANGES · 24 Nov 2026 · backlog B4 (dashboard generator refactor)
 
 **`build_dashboards.py` is now built from shared building blocks; the Contracts dashboard is unchanged

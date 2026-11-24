@@ -30,7 +30,8 @@ anomaly detection and forecasting built in.
 
 | Piece | File | State |
 |---|---|---|
-| ClickHouse schema: 13 tables, 4 views (incl. anomaly detection) | `code/schema.sql` | Done, tested |
+| ClickHouse schema: 13 tables, 7 views (incl. anomaly detection; pace, customer attention, cross-account events) | `code/schema.sql` | Done, tested |
+| View tests (synthetic edge cases) | `code/test_views.py` | Run in CI on both engines (B5) |
 | Data checks run before every load (8) | `code/checks.sql` | Done, all pass on synthetic |
 | Loader: stage → check → atomic swap | `code/load.py` | Done (server or embedded `chdb`) |
 | Local stack: ClickHouse 25.8 + Grafana 13.3.1, localhost only | `code/docker-compose.yml`, `code/init/`, `code/grafana/provisioning/` | Started and tested in Linux Docker 24 Nov 2026 (B1); not yet on the Mac |

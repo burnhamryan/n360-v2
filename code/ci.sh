@@ -8,7 +8,7 @@
 #                                    # 'grafana' user like init/grafana_user.sh and tests panels as it
 #
 # Steps: generate 14 nights (night 9 broken on purpose) -> load in order, expecting exactly night 9
-# refused -> check runs and line_totals_history -> build dashboards and confirm the committed JSON
+# refused -> check runs and line_totals_history -> test the dashboard views -> build dashboards and confirm the committed JSON
 # matches the generator -> run every panel and variable query -> test the dashboard building blocks.
 set -euo pipefail
 MODE=${1:?usage: ci.sh chdb|server}
@@ -58,6 +58,9 @@ want_live=$(python3 -c "import datetime as d; print(d.date.fromisoformat('$want_
 echo "runs loaded=$loaded failed_checks=$failed history_nights=$hist live_last_day=$live"
 [ "$loaded" -eq $((NIGHTS - 1)) ] && [ "$failed" -eq 1 ] && [ "$hist" -eq $((NIGHTS - 1)) ] && [ "$live" = "$want_live" ] \
   || { echo "FAIL: runs/history do not match"; exit 1; }
+
+# B5 views: the synthetic edge cases (Atlas red, Harbor crossing red, pool once, Lakeside silent, the grouped spike)
+python3 "$ROOT/code/test_views.py" "${PANEL_CONN[@]}"
 
 # Dashboards: regenerate into a scratch copy and require the committed JSON to match it exactly
 cp -r "$ROOT/code/grafana/dashboards" "$WORK/committed"
