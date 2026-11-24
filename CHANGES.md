@@ -40,8 +40,10 @@ a compiled `__pycache__` file tracked since the pack as received (untracked).
 | Drill-downs clicked | Overview → Customer / Contract line; Customer → line / VA; line → VA; Contracts → Customer / line; Forecast → line; Anomalies, Adoption → VA; Back links keep customer and time range |
 | Night without Phase 2 files | LOADED; Phase 2 tables empty, dashboards say why |
 
+GitHub Actions: both CI jobs (chdb, ClickHouse 25.8) pass on GitHub for `main` and this branch.
+
 Not done: B15–B21 (forecast history and accuracy, freshness table and alert, alert rules, anomaly log,
-anomaly v2, challenger forecast). Not tested: macOS, GitHub Actions itself, Claude Desktop.
+anomaly v2, challenger forecast). Not tested: macOS / Docker Desktop, Claude Desktop.
 
 New open questions in `08`: Phase 2 field meanings; "several customers" = 2; z ±2 watch band and freshness
 2/3 days as proposed; pooled panel always shown.
