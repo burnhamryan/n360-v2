@@ -63,7 +63,7 @@ F4 ranges is not built (the challenger gives no interval yet).
 Forecasts never use engaged where a rule applies, never sum lines outside a confirmed pool, and
 say "Not reported yet" for lines that are not measurable or not implemented.
 
-## Alerting (built 24 Nov 2026, B18: `code/grafana/build_alerts.py` → `provisioning/alerting/`; contact points are placeholders)
+## Alerting (built 24 Nov 2026, B18; **paused until needed**: how to configure in `11_ALERTS.md`)
 
 | Alert | Condition | To | When |
 |---|---|---|---|

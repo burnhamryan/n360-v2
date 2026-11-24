@@ -10,6 +10,7 @@ decides the condition (thresholds live in n360.settings), returning one row per 
 columns as labels and a numeric `value`. A rule fires for each row whose value is above 0. No rows = nothing to
 report (normal). Provisional anomaly days never fire: every anomaly rule reads settled days only.
 
+Alerts are OFF by default (rules provisioned paused); switch them on in the configuration block below.
 Contact points are PLACEHOLDERS (example.invalid addresses): who receives what is an open company decision.
 """
 import json, os
@@ -22,7 +23,14 @@ FOLDER = 'N360'
 NEWEST_SETTLED = "(SELECT max(day) FROM n360.v_va_day_anomaly WHERE NOT provisional)"
 NEWEST_NIGHT = "(SELECT max(data_date) FROM n360.forecast_history)"
 
-# Who and when (05 "Alerting"). Addresses are placeholders until the company names recipients.
+# ───────────────────────── configuration (see docs/11_ALERTS.md) ─────────────────────────
+# Alerts are OFF: every rule is provisioned PAUSED (visible in Grafana > Alerting, never evaluated, never sends).
+# To turn alerts on: set ALERTS_ON = True (all rules), or list rule uids in TURN_ON (just those). Then set real
+# addresses in AUDIENCE, run this file, commit, restart Grafana.
+ALERTS_ON = False
+TURN_ON = set()            # e.g. {'n360-load-failed', 'n360-va-silent-dropped'}
+
+# Who (05 "Alerting"). Addresses are placeholders until the company names recipients.
 AUDIENCE = {
     'owner': ('N360 day-to-day owner (placeholder)', 'n360-owner@example.invalid'),
     'cs': ('CS leadership and CSM (placeholder)', 'n360-cs@example.invalid'),
@@ -86,7 +94,8 @@ def rule(r):
              'model': {'refId': 'C', 'type': 'threshold', 'expression': 'A',
                        'conditions': [{'evaluator': {'type': 'gt', 'params': [0]}}]}},
         ],
-        'noDataState': r['no_data'], 'execErrState': 'Error', 'for': '0s', 'isPaused': False,
+        'noDataState': r['no_data'], 'execErrState': 'Error', 'for': '0s',
+        'isPaused': not (ALERTS_ON or r['uid'] in TURN_ON),
         'annotations': {'summary': r['summary'],
                         'description': 'Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views.'},
         'labels': {'team': 'n360', 'audience': r['audience'], 'cadence': r['cadence'], 'severity': r['severity']},

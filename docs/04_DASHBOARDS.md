@@ -46,7 +46,8 @@ detail to build from. Build against the spec. Ryan will reconcile with the appro
 | Red | Above 100% of billed, or crossing billed within 30 days |
 | Grey | Not measurable, not implemented, or not read |
 
-The view decides the colour (decided 24 Nov 2026): `n360.v_line_pace` reads the four thresholds from `n360.settings`,
+The view decides the colour (decided 24 Nov 2026): `n360.v_line_pace` reads the four thresholds from `n360.settings`
+(where anomaly thresholds are configured too),
 the one view that holds every proposed threshold. `build_dashboards.py` maps the view's `pace` label to a display colour (`PACE_LABEL`).
 
 ## 1. Portfolio overview · `n360-overview` (BUILT 24 Nov 2026, B6)
