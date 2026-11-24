@@ -1202,6 +1202,15 @@ def pipeline():
                  'n360.v_source_freshness).', 'n360.source via n360.v_source_freshness', 'none', 'the latest load'),
         field=field_config([coloured('Status', FRESH_LABEL), width('Status', 90), width('Source', 160),
                             width('Last day', 110), width('Days behind', 100)])))
+    p.append(panel(11, 'Days behind, night by night', 'timeseries', """
+        SELECT toDateTime(data_date) AS time, source_id AS source, days_behind
+        FROM n360.source_freshness WHERE $__dateFilter(data_date) ORDER BY time""", 0, 21, 24, 7,
+        describe('How far each source\'s last day was behind the data-through day on every loaded night (0 = on time). '
+                 'Amber from 2, red from 3 (n360.settings).', 'n360.source_freshness (append-only, one row per source '
+                 'per night)', 'none', 'dashboard time range, by night'),
+        fmt='timeseries', field=field_config(decimals=0, min=0, displayName='${__field.labels.source}',
+                                             custom={'drawStyle': 'line', 'lineWidth': 2, 'spanNulls': False}),
+        may_be_empty='no night stored in the time range'))
     p.append(panel(9, 'Contract measure mix', 'table', """
         SELECT measure AS Measure, count() AS Lines FROM n360.contract_line GROUP BY measure ORDER BY Lines DESC""",
         0, 13, 12, 8,

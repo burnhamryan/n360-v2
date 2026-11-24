@@ -256,6 +256,17 @@ ENGINE = MergeTree
 PARTITION BY toYYYYMM(data_date)
 ORDER BY (account, series_key, data_date);
 
+CREATE TABLE IF NOT EXISTS n360.source_freshness         -- B17: each source's last day as it stood each loaded night
+(                                                           -- (append-only; load.py copies n360.source after each swap)
+    data_date     Date,
+    source_id     LowCardinality(String),
+    last_day      Date,
+    days_behind   Int32                                     -- data-through day minus the source's last day
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMM(data_date)
+ORDER BY (source_id, data_date);
+
 -- ───────────────────────── views (one definition per ratio) ─────────────────────────────────────
 
 CREATE OR REPLACE VIEW n360.settings AS

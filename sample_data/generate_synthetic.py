@@ -64,6 +64,7 @@ def daily_series(base, start, last, weekend=0.55, growth=0.0, noise=0.12, rng=R)
     return out
 
 
+STALE = {}            # --stale SOURCE=DAYS
 SETTLING = [0.97, 0.90]   # multi-night: share of the final count read on the second-newest and newest day
 
 
@@ -76,7 +77,12 @@ def main():
     ap.add_argument('--forecast-backfill', type=int, default=0, metavar='DAYS',
                     help='also write forecast_history.ndjson: the forecast each of the DAYS nights before the first '
                          'generated night would have stored (so accuracy can be tested without DAYS loads)')
+    ap.add_argument('--stale', action='append', default=[], metavar='SOURCE=DAYS',
+                    help='make a source stale: its last day is DAYS before the data-through day (repeatable), '
+                         'e.g. --stale containment_days=3')
     a = ap.parse_args()
+    global STALE
+    STALE = {k: int(v) for k, v in (x.split('=') for x in a.stale)}
     final = dt.date.fromisoformat(a.last_day)
     if a.nights == 1 and not a.bad_night:
         generate(final, final, a.out, multi=False, backfill_days=a.forecast_backfill, backfill_until=final)
@@ -281,7 +287,8 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
                               run_id=run_id))
     for sid, desc in [('consumption_days', 'Daily conversations and engaged per VA and per line'),
                       ('containment_days', 'Daily handoffs per VA'), ('consumption_rules', 'Contract-rule counts per line per day')]:
-        T['source'].append(dict(source_id=sid, description='[SYNTHETIC] ' + desc, definition='', check_text='', last_day=last.isoformat(), run_id=run_id))
+        T['source'].append(dict(source_id=sid, description='[SYNTHETIC] ' + desc, definition='', check_text='',
+                                last_day=(last - dt.timedelta(STALE.get(sid, 0))).isoformat(), run_id=run_id))
 
     phase2(T, va_daily, last, anchor, run_id)
 

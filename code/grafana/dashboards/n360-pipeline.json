@@ -520,6 +520,51 @@
       "options": {}
     },
     {
+      "id": 11,
+      "title": "Days behind, night by night",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "How far each source's last day was behind the data-through day on every loaded night (0 = on time). Amber from 2, red from 3 (n360.settings).\n\n**Source:** n360.source_freshness (append-only, one row per source per night)  \n**Filter:** none  \n**Window:** dashboard time range, by night",
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT toDateTime(data_date) AS time, source_id AS source, days_behind\n        FROM n360.source_freshness WHERE $__dateFilter(data_date) ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "decimals": 0,
+          "min": 0,
+          "displayName": "${__field.labels.source}",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {},
+      "n360MayBeEmpty": "no night stored in the time range"
+    },
+    {
       "id": 9,
       "title": "Contract measure mix",
       "type": "table",

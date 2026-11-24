@@ -139,6 +139,10 @@ def main():
         ch.insert_ndjson('n360_next.forecast_history', os.path.abspath(backfill))
         ch.cmd("""INSERT INTO n360.forecast_history SELECT * FROM n360_next.forecast_history
                   WHERE data_date NOT IN (SELECT DISTINCT data_date FROM n360.forecast_history)""")
+    ch.cmd(f"ALTER TABLE n360.source_freshness DELETE WHERE data_date = '{run['data_date']}'")
+    ch.cmd(f"""INSERT INTO n360.source_freshness
+               SELECT toDate('{run['data_date']}'), source_id, last_day, dateDiff('day', last_day, toDate('{last_day}'))
+               FROM n360.source""")
     ch.cmd(f"ALTER TABLE n360.forecast_history DELETE WHERE data_date = '{run['data_date']}'")
     ch.cmd(f"""INSERT INTO n360.forecast_history
                SELECT toDate('{run['data_date']}'), toUUID('{run['run_id']}'), account, series_key, pool_id, horizon,
