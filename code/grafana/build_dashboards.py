@@ -1027,6 +1027,22 @@ def forecast():
                               ('Crosses billed', '7 nights ago', '30 nights ago', 'Moved, 7 nights', 'Moved, 30 nights')],
                             width('Line', 240)], noValue='No line crosses billed'),
         may_be_empty='no line crosses billed'))
+    p.append(panel(11, 'Challenger backtest (comparison only)', 'table', """
+        SELECT concat(toString(horizon_days), ' days') AS Horizon,
+               anyIf(mape, model = 'straight line') AS `Straight line (forecast of record)`,
+               anyIf(mape, model = 'weekday HW') AS `Weekday Holt-Winters (challenger)`,
+               maxIf(forecasts, model = 'straight line') AS Forecasts, toString(any(data_through)) AS `Data through`
+        FROM n360.v_challenger_backtest GROUP BY horizon_days ORDER BY horizon_days""", 0, 43, 24, 6,
+        describe('Mean absolute % error of each model when backtested at weekly cutoffs over the loaded history (all '
+                 'lines and pools). The straight line stays the forecast of record; the challenger replaces it only if '
+                 'it has the better 30-day MAPE on most lines for 8 straight weeks AND Ryan approves (08). Run '
+                 'code/forecast/challenger.py to refresh; the full report is docs/10_CHALLENGER_BACKTEST.md.',
+                 'n360.v_challenger_backtest (n360.forecast_challenger)', 'none (every customer)',
+                 'the newest backtest run'),
+        field=field_config([*[override(c, ('unit', 'percent'), ('decimals', 2)) for c in
+                              ('Straight line (forecast of record)', 'Weekday Holt-Winters (challenger)')],
+                            count_col('Forecasts')], noValue='No backtest run yet: run code/forecast/challenger.py'),
+        may_be_empty='no backtest run yet'))
     return dashboard(UID['forecast'], 'N360 · Forecast and runway', p, [var_account()], [back_link()],
                      time={'from': 'now-14d', 'to': 'now+18M'})
 

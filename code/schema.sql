@@ -279,6 +279,21 @@ CREATE TABLE IF NOT EXISTS n360.anomaly_log              -- B19: review outcome 
 )
 ENGINE = MergeTree ORDER BY (bot_id, day, reviewed_at);
 
+CREATE TABLE IF NOT EXISTS n360.forecast_challenger      -- B21: backtest predictions of each model; written only by
+(                                                           -- code/forecast/challenger.py, never the forecast of record
+    run_id         UUID,
+    run_at         DateTime('UTC'),
+    data_through   Date,
+    model          LowCardinality(String),                  -- 'straight line' (the record's formula) | 'weekday HW'
+    series_key     String,
+    account        LowCardinality(String),
+    cutoff         Date,                                    -- data up to this day only
+    horizon_days   UInt16,
+    predicted      Float64,                                 -- cumulative use at cutoff + horizon
+    actual         Float64
+)
+ENGINE = MergeTree ORDER BY (run_at, series_key, model, cutoff, horizon_days);
+
 -- ───────────────────────── views (one definition per ratio) ─────────────────────────────────────
 
 CREATE OR REPLACE VIEW n360.settings AS
@@ -730,3 +745,11 @@ UNION ALL
 SELECT 'freshness', '', toString(s.source_id), s.data_through, toFloat64(s.days_behind), CAST(NULL, 'Nullable(Float64)'),
        concat(toString(s.days_behind), ' days behind (', s.status, ')')
 FROM n360.v_source_freshness AS s WHERE s.status != 'green';
+
+CREATE OR REPLACE VIEW n360.v_challenger_backtest AS
+-- The newest challenger backtest: MAPE per model and horizon (all lines and pools). Comparison only (B21).
+SELECT model, horizon_days, count() AS forecasts,
+       round(100 * avg(abs(actual - predicted) / actual), 2) AS mape, any(data_through) AS data_through, any(run_at) AS run_at
+FROM n360.forecast_challenger
+WHERE run_id = (SELECT argMax(run_id, run_at) FROM n360.forecast_challenger) AND actual > 0
+GROUP BY model, horizon_days;

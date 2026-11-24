@@ -1034,6 +1034,92 @@
       },
       "options": {},
       "n360MayBeEmpty": "no line crosses billed"
+    },
+    {
+      "id": 11,
+      "title": "Challenger backtest (comparison only)",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Mean absolute % error of each model when backtested at weekly cutoffs over the loaded history (all lines and pools). The straight line stays the forecast of record; the challenger replaces it only if it has the better 30-day MAPE on most lines for 8 straight weeks AND Ryan approves (08). Run code/forecast/challenger.py to refresh; the full report is docs/10_CHALLENGER_BACKTEST.md.\n\n**Source:** n360.v_challenger_backtest (n360.forecast_challenger)  \n**Filter:** none (every customer)  \n**Window:** the newest backtest run",
+      "gridPos": {
+        "x": 0,
+        "y": 43,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(toString(horizon_days), ' days') AS Horizon,\n               anyIf(mape, model = 'straight line') AS `Straight line (forecast of record)`,\n               anyIf(mape, model = 'weekday HW') AS `Weekday Holt-Winters (challenger)`,\n               maxIf(forecasts, model = 'straight line') AS Forecasts, toString(any(data_through)) AS `Data through`\n        FROM n360.v_challenger_backtest GROUP BY horizon_days ORDER BY horizon_days",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No backtest run yet: run code/forecast/challenger.py"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Straight line (forecast of record)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Weekday Holt-Winters (challenger)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Forecasts"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "n360MayBeEmpty": "no backtest run yet"
     }
   ],
   "links": [

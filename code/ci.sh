@@ -70,6 +70,14 @@ R=(python3 "$ROOT/code/review_anomaly.py" "${CONN[@]}" --by ci)
 "${R[@]}" --va "Bluebird Web" --day 2026-11-13 --outcome expected --note "industry-wide spike"
 python3 "$ROOT/code/test_views.py" "${PANEL_CONN[@]}"
 
+# Challenger forecast backtest (B21): writes n360.forecast_challenger; the forecast of record must not change
+before=$(sql "SELECT groupBitXor(cityHash64(*)) FROM n360.forecast")
+python3 "$ROOT/code/forecast/challenger.py" "${CONN[@]}" --report "$WORK/challenger.md" | tail -1
+after=$(sql "SELECT groupBitXor(cityHash64(*)) FROM n360.forecast")
+[ "$before" = "$after" ] || { echo "FAIL: the challenger changed n360.forecast"; exit 1; }
+[ "$(sql "SELECT count() > 0 FROM n360.v_challenger_backtest")" = 1 ] || { echo "FAIL: no challenger backtest rows"; exit 1; }
+echo "OK   challenger backtest written; forecast of record unchanged"
+
 # Dashboards and alert rules: regenerate into a scratch copy and require the committed JSON to match exactly
 cp -r "$ROOT/code/grafana/dashboards" "$WORK/committed"
 cp -r "$ROOT/code/grafana/provisioning/alerting" "$WORK/committed_alerting"
