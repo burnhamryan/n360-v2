@@ -9,3 +9,5 @@ were taken, so the freshness stamp is amber. Regenerate after a dashboard change
 `16-risk.png` and `17-risk-light.png` show the Risk dashboard (`docs/17_RISK_RESEARCH.md`, section 7), on the same synthetic data. The
 Salesforce records come from `sample_data/generate_salesforce.py` through the fake API. The register entries and CSM
 ratings are the ones `code/ci.sh` records.
+
+`18-risk-model.png`: the Risk model dashboard (`docs/21_RISK_MODEL.md`) on the same synthetic data, with Willow Energy chosen. The score is the expert prior (too few synthetic outcomes to train), and the backtest panels are empty until there is enough history.

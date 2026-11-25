@@ -73,5 +73,10 @@ for night in $(ls_dirs "$N360_DROP" | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | s
   esac
 done
 [ "$loaded" -eq 0 ] && log "nothing new to load"
+# risk model (docs/21): tonight's features and scores, unless N360_RISK_MODEL=0. Training stays a deliberate step.
+if [ "$loaded" -gt 0 ] && [ "${N360_RISK_MODEL:-1}" = 1 ]; then
+  "$PYTHON" "$ROOT/code/risk/risk_model.py" --url "$CH_URL" --user "$CH_USER" --password "$CH_PASSWORD" nightly \
+    || log "risk model: scoring failed (the dashboards keep the previous scores)"
+fi
 if [ "$loaded" -gt 0 ] && [ -n "${N360_BACKUP:-}" ]; then "$OPS/backup.sh"; fi
 exit 0

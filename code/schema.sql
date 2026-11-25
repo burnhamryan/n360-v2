@@ -1395,3 +1395,101 @@ GROUP BY a.account, a.display_name, a.csm_rocketlane;
 CREATE OR REPLACE VIEW n360.v_sf_unlinked AS
 -- Salesforce accounts with no N360 account, as of now (sf_runs.unmatched_accounts is the list at the time of a pull).
 SELECT sf_account_id, sf_name, owner FROM n360.v_sf_account WHERE account = '';
+
+-- ───────────────────────── risk model (26 Nov 2026): code/risk/, docs/21_RISK_MODEL.md ─────────────────────────
+-- Written only by code/risk/risk_model.py; never swapped by a load. Append-only; the newest run wins in the views.
+CREATE TABLE IF NOT EXISTS n360.risk_features         -- the feature store: each feature as it stood on a date
+(
+    as_of        Date,
+    account      LowCardinality(String),
+    feature      LowCardinality(String),
+    value        Nullable(Float64),                     -- NULL = not reported (the source had nothing)
+    computed_at  DateTime('UTC') DEFAULT now()
+)
+ENGINE = MergeTree PARTITION BY toYYYYMM(as_of) ORDER BY (account, as_of, feature);
+
+CREATE TABLE IF NOT EXISTS n360.risk_outcome          -- outcomes recorded by hand (risk_model.py outcome)
+(
+    account   LowCardinality(String),
+    date      Date,
+    outcome   Enum8('churned' = 1, 'downsold' = 2, 'renewed' = 3, 'expanded' = 4),
+    note      String,
+    by        LowCardinality(String),
+    at        DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = MergeTree ORDER BY (account, date);
+
+CREATE TABLE IF NOT EXISTS n360.risk_model_runs       -- every trained model, with its backtest
+(
+    run_id      UUID,
+    trained_at  DateTime('UTC') DEFAULT now(),
+    version     String,                                 -- risk_model.json version
+    kind        LowCardinality(String),                 -- 'prior' (too few outcomes) | 'trained'
+    n           UInt32,
+    events      UInt32,
+    note        String,
+    model       String,                                 -- JSON: intercept, coef, fill
+    backtest    String                                  -- JSON: metrics per method, reliability, lead times
+)
+ENGINE = MergeTree ORDER BY trained_at;
+
+CREATE TABLE IF NOT EXISTS n360.risk_scores
+(
+    run_id           UUID,
+    scored_at        DateTime('UTC') DEFAULT now(),
+    model_run_id     Nullable(UUID),                    -- NULL = the expert prior (no model trained yet)
+    model_kind       LowCardinality(String),
+    as_of            Date,
+    account          LowCardinality(String),
+    health           Nullable(Float64),
+    band             LowCardinality(String),            -- healthy | watch | at risk | not reported
+    probability      Float64,                           -- churn or downsell at the next renewal (within the horizon)
+    eligible         Bool,                              -- next renewal within the horizon (or unknown)
+    coverage         Float64,                           -- share of the model's weight with data
+    hard_reds        Array(String),
+    days_to_renewal  Nullable(Float64),
+    renewal_amount   Nullable(Float64),
+    revenue_at_risk  Nullable(Float64)                  -- probability x renewal amount, when eligible
+)
+ENGINE = MergeTree ORDER BY (as_of, account, scored_at);
+
+CREATE TABLE IF NOT EXISTS n360.risk_contributions    -- why: each feature's value, risk, health points lost, log-odds push
+(
+    run_id     UUID,
+    as_of      Date,
+    account    LowCardinality(String),
+    feature    LowCardinality(String),
+    dimension  LowCardinality(String),
+    value      Nullable(Float64),
+    risk       Nullable(Float64),
+    points     Float64,
+    logodds    Float64
+)
+ENGINE = MergeTree ORDER BY (as_of, account, feature, run_id);
+
+CREATE OR REPLACE VIEW n360.v_risk_outcomes AS
+-- Every known outcome: recorded by hand, closed in the risk register, or a renewal closed in Salesforce.
+SELECT account, date, outcome, source FROM (
+    SELECT account, date, toString(outcome) AS outcome, 'recorded' AS source FROM n360.risk_outcome
+    UNION ALL
+    SELECT account, toDate(updated_at), multiIf(outcome = 'churned', 'churned', outcome = 'downsold', 'downsold', 'renewed'), 'register'
+    FROM n360.v_risk_register WHERE status = 'closed' AND outcome IN ('churned', 'downsold', 'saved')
+    UNION ALL
+    SELECT s.account, o.close_date, if(o.is_won, 'renewed', 'churned'), 'salesforce'
+    FROM n360.sf_opportunity AS o INNER JOIN n360.v_sf_account AS s ON s.sf_account_id = o.sf_account_id
+    WHERE o.is_renewal AND o.is_closed AND s.account != '' AND o.close_date IS NOT NULL);
+
+CREATE OR REPLACE VIEW n360.v_risk_model AS
+-- The model in use: the newest trained run (the expert prior until one exists).
+SELECT * FROM n360.risk_model_runs ORDER BY trained_at DESC LIMIT 1;
+
+CREATE OR REPLACE VIEW n360.v_risk_score AS
+-- The newest score per customer: the newest scoring run of the newest date.
+SELECT * FROM n360.risk_scores
+WHERE (as_of, scored_at) IN (SELECT as_of, max(scored_at) FROM n360.risk_scores
+                             WHERE as_of = (SELECT max(as_of) FROM n360.risk_scores) GROUP BY as_of);
+
+CREATE OR REPLACE VIEW n360.v_risk_drivers AS
+-- The newest contributions per customer (same run as v_risk_score).
+SELECT c.* FROM n360.risk_contributions AS c
+WHERE c.run_id IN (SELECT run_id FROM n360.v_risk_score);

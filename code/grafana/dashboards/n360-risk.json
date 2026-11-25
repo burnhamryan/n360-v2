@@ -2903,6 +2903,17 @@
       "targetBlank": false,
       "asDropdown": false,
       "tags": []
+    },
+    {
+      "type": "link",
+      "title": "Back to Risk model",
+      "url": "/d/n360-risk-model",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
     }
   ]
 }
