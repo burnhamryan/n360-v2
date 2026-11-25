@@ -2,7 +2,7 @@
 # Start or stop the N360 containers (called by n360-stack.service). Adds Caddy (HTTPS) when N360_DOMAIN is set.
 set -euo pipefail
 cd "${N360_CODE:-/opt/n360}/code"
-domain=$(grep '^N360_DOMAIN=' .env | cut -d= -f2)
+domain=$(grep '^N360_DOMAIN=' .env | cut -d= -f2 || true)   # no line = no domain
 args=(-p n360 -f docker-compose.yml -f docker-compose.prod.yml)
 [ -n "$domain" ] && args+=(--profile public)
 for extra in ${N360_COMPOSE_EXTRA:-}; do args+=(-f "$extra"); done     # optional extra compose files (local overrides)
