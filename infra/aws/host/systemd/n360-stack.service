@@ -1,0 +1,15 @@
+[Unit]
+Description=N360 containers (ClickHouse, Grafana, Caddy)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/n360/infra/aws/host/stack.sh up
+ExecStop=/opt/n360/infra/aws/host/stack.sh down
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

@@ -4,6 +4,7 @@
 # load (which skips every night already in the restored n360.runs). Refuses a table that already has rows unless
 # --force (which empties it first). Checks every table's rows and checksum against the manifest.
 set -euo pipefail
+# shellcheck source=code/ops/common.sh
 . "$(dirname "$0")/common.sh"
 : "${N360_BACKUP:?set N360_BACKUP (s3://bucket/backups or a folder)}"
 which=${1:-latest}; force=${2:-}

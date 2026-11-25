@@ -42,7 +42,7 @@ before=""; for t in $HISTORY_TABLES; do before="$before $t:$(sql "SELECT count()
 
 # 3 a new server: schema only, restore, reload the newest night
 sql "DROP DATABASE n360" && sql "DROP DATABASE n360_next"
-python3 "$ROOT/code/load.py" --schema-only --url "$CH_URL" --user "$CH_USER" --password "$CH_PASSWORD"
+"$PYTHON" "$ROOT/code/load.py" --schema-only --url "$CH_URL" --user "$CH_USER" --password "$CH_PASSWORD"
 "$OPS/restore.sh" latest
 after=""; for t in $HISTORY_TABLES; do after="$after $t:$(sql "SELECT count() FROM n360.$t")/$(sql "SELECT groupBitXor(cityHash64(formatRow('TSV', *))) FROM n360.$t")"; done
 [ "$before" = "$after" ] && ok "restore: every history table identical (rows and checksum)" || fail "restore: $before vs $after"

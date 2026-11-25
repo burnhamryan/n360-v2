@@ -4,6 +4,7 @@
 # manifest.json (rows and checksum per table), then points N360_BACKUP/LATEST at it. Disk snapshots (AWS Backup)
 # are the first line of defence; this is the portable copy (laptop to AWS, or a fresh server).
 set -euo pipefail
+# shellcheck source=code/ops/common.sh
 . "$(dirname "$0")/common.sh"
 : "${N360_BACKUP:?set N360_BACKUP (s3://bucket/backups or a folder)}"
 ts=$(date -u +%Y%m%dT%H%M%SZ)

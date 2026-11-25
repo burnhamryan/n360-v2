@@ -1,0 +1,8 @@
+[Unit]
+Description=N360: load new nightly exports from S3
+After=n360-stack.service
+Requires=n360-stack.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/n360/code/ops/nightly.sh

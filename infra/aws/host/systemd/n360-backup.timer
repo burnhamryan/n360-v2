@@ -1,0 +1,9 @@
+[Unit]
+Description=N360: daily history backup to S3
+
+[Timer]
+OnCalendar=*-*-* 09:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

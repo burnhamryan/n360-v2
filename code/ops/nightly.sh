@@ -9,6 +9,7 @@
 #   --reload-latest  also reload the newest night already loaded (after a restore onto a new server, whose live
 #                    tables are still empty: the restored n360.runs makes every export look known)
 set -euo pipefail
+# shellcheck source=code/ops/common.sh
 . "$(dirname "$0")/common.sh"
 : "${N360_DROP:?set N360_DROP (s3://bucket/exports or a folder)}"
 mkdir -p "$WORK"
@@ -38,7 +39,7 @@ for night in $(ls_dirs "$N360_DROP" | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | s
   get_dir "${N360_DROP%/}/$night/rows" "$tmp/rows"
   log "$night: loading run $run_id"
   set +e
-  python3 "$ROOT/code/load.py" --rows "$tmp/rows" --url "$CH_URL" --user "$CH_USER" --password "$CH_PASSWORD"
+  "$PYTHON" "$ROOT/code/load.py" --rows "$tmp/rows" --url "$CH_URL" --user "$CH_USER" --password "$CH_PASSWORD"
   rc=$?
   set -e
   rm -rf "$tmp"

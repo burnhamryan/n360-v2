@@ -8,12 +8,18 @@
 #   CH_URL        ClickHouse HTTP (default http://localhost:8123); loader user n360 / N360_CH_PASSWORD
 OPS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$OPS/../.." && pwd)
-# shellcheck source=/dev/null
-if [ -f "$ROOT/code/.env" ]; then set -a; . "$ROOT/code/.env"; set +a; fi
+# code/.env fills in only what the environment does not already set, so `eval "$(code/ops/remote_env.sh)"` (the
+# AWS server's credentials, through the tunnel) wins over a laptop's own local .env.
+if [ -f "${N360_ENV_FILE:-$ROOT/code/.env}" ]; then
+  while IFS='=' read -r k v; do
+    [[ $k =~ ^[A-Z_][A-Z0-9_]*$ ]] && [ -z "${!k+x}" ] && export "$k=$v"
+  done < "${N360_ENV_FILE:-$ROOT/code/.env}"
+fi
 CH_URL=${CH_URL:-http://localhost:8123}
 CH_USER=${CH_USER:-n360}
 CH_PASSWORD=${CH_PASSWORD:-${N360_CH_PASSWORD:-}}
 WORK=${N360_WORK:-/var/lib/n360/work}
+PYTHON=${N360_PYTHON:-python3}     # runs load.py (needs clickhouse-connect); the server uses python3.12
 
 # History tables: built up night by night (or by people), so a nightly export cannot rebuild them.
 HISTORY_TABLES="runs line_totals_history forecast_history source_freshness anomaly_log forecast_challenger"
