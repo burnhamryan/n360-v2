@@ -1,3 +1,31 @@
+# CHANGES · 25 Nov 2026 · Dashboards rebuilt to the v2 redesign
+
+**The 11 dashboards are reviewed and rebuilt to the v2 redesign. The changes:**
+- **The v1.1 page's contract statuses and colours** replace red/amber/green, from one palette with no red.
+- **Every page starts with a sentence** that answers its question, then a freshness stamp.
+- **A new Customer health page.**
+- **Nothing the v1.1 page shows is lost.**
+
+Review and decisions: `docs/16_DASHBOARD_GAPS.md`. Brief: `docs/15_DASHBOARD_REVIEW_HANDOFF.md`. Uids are
+unchanged, so links and bookmarks keep working. Tested on synthetic data only.
+
+| Piece | What |
+|---|---|
+| `code/schema.sql` | New views: `v_contract_status` (11 statuses + renewal risk), `v_status_night`, `v_va_change`, `v_needs_attention`, `v_freshness`, `v_feature_use`, `v_customer_notes`. 14 new PROPOSED settings in `n360.settings` |
+| `code/grafana/build_dashboards.py` | One palette (`COLOUR`), one status map (`STATUS`). New building blocks: sentence, freshness stamp, tile with change and 30-night line, status columns, reference line. Overview, Contracts, Customer, Adoption and Requests rebuilt; Customer health (`n360-health`) new; the sentence and stamp added to Contract line, VA, Forecast, Anomalies, Containment and Pipeline health |
+| `sample_data/generate_synthetic.py` | Two invented customers plant every status: Maple Clinics (too early, billed not recorded, unmapped, under review) and Willow Energy (renewal risk; a busy VA down a third) |
+| Gates | `test_build.py`: one palette, no rules in dashboards, plain-word titles, page shape (rows 1–3 on screen at 1440 × 900), no layout gaps, every status has a word and a colour. `test_panels.py`: one number, one value (`n360Metric`), All on multi-value filters. `test_views.py`: every planted status, renewal risk, empty never zero, needs attention, newest night = today |
+
+**What was wrong before** (docs/16 section 1, in short):
+- Red, green and default palette colours meant several different things.
+- A line at 14% of billed with its term over showed green.
+- No "needs a decision" list and no Customer health page.
+- Internal keys appeared on screen.
+- Headline numbers had no reference.
+- Partial weeks were drawn as full bars.
+
+---
+
 # CHANGES · 25 Nov 2026 · AWS, self-hosted
 
 **N360 can now run on AWS as one private server with the same open-source stack that CI tests**, created by

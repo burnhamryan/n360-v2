@@ -36,18 +36,18 @@
   },
   "panels": [
     {
-      "id": 1,
-      "title": "Data through",
+      "id": 12,
+      "title": "In one sentence",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Last day included in this load (the nightly window ends at 23:59 UTC that day).\n\n**Source:** n360.runs, written by load.py only after every data check passes  \n**Filter:** loaded runs only; the latest  \n**Window:** the latest load",
+      "description": "Lines and pools the stored forecast says will cross billed before their term ends (the soonest named), those already over, and how far the forecast was off 30 days ahead (MAPE, weighted by forecasts).\n\n**Source:** n360.v_contract_status, n360.v_forecast_accuracy  \n**Filter:** Customer  \n**Window:** the latest load; every stored night",
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 4,
+        "w": 18,
         "h": 3
       },
       "targets": [
@@ -59,19 +59,17 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT formatDateTime(window_end, '%e %b %Y') AS data_through\n        FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
+          "rawSql": "WITH (SELECT round(sumIf(mape * forecasts, horizon_days = 30) / nullIf(sumIf(forecasts, horizon_days = 30), 0), 1)\n              FROM n360.v_forecast_accuracy WHERE account IN (${account:singlequote})) AS err\n        SELECT concat(concat(toString(countIf(status = 'will exceed')), if(countIf(status = 'will exceed') = 1, ' line or pool crosses', ' lines and pools cross')),\n                      ' billed before the term ends',\n                      if(countIf(status = 'will exceed') = 0, '', concat('; soonest: ', argMinIf(full_label, cross_date, status = 'will exceed'),\n                         ' on ', concat(toString(toDayOfMonth(minIf(cross_date, status = 'will exceed'))), ' ', formatDateTime(minIf(cross_date, status = 'will exceed'), '%b %Y')))),\n                      ' \u00b7 ', toString(countIf(status = 'over billed')), ' already over',\n                      ' \u00b7 30-day forecast error ', if(err IS NULL, 'shows once 30 nights are stored', concat(toString(err), '%'))) AS sentence\n        FROM n360.v_contract_status WHERE account IN (${account:singlequote})",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet",
-          "links": [
-            {
-              "title": "Pipeline health",
-              "url": "/d/n360-pipeline?${__url_time_range}"
-            }
-          ]
+          "noValue": "Nothing loaded yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
         },
         "overrides": []
       },
@@ -83,22 +81,27 @@
           "fields": "/.*/"
         },
         "textMode": "value",
-        "colorMode": "none"
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "valueSize": 17
+        }
       }
     },
     {
-      "id": 2,
-      "title": "Last night",
+      "id": 13,
+      "title": "Data",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Result of the latest nightly run. A stopped night leaves the previous good night on screen.\n\n**Source:** n360.runs (load.py writes one row per night, loaded or not)  \n**Filter:** none  \n**Window:** the latest run",
+      "description": "The last day of usage in this load, and the day it was loaded. Amber when the data is more than 2 days old (n360.settings stamp_stale_days): the numbers are the last good night's. Click for Pipeline health.\n\n**Source:** n360.v_freshness (n360.runs: loaded runs only)  \n**Filter:** none  \n**Window:** the latest load",
       "gridPos": {
-        "x": 4,
+        "x": 18,
         "y": 0,
-        "w": 4,
+        "w": 6,
         "h": 3
       },
       "targets": [
@@ -110,7 +113,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
+          "rawSql": "SELECT concat(stamp, if(stale, concat(' \u00b7 ', toString(days_old), ' days old'), '')) AS stamp FROM n360.v_freshness",
           "refId": "A"
         }
       ],
@@ -119,21 +122,26 @@
           "noValue": "Not reported yet",
           "mappings": [
             {
-              "type": "value",
+              "type": "regex",
               "options": {
-                "loaded": {
-                  "text": "Loaded",
-                  "color": "green",
+                "pattern": ".* days old$",
+                "result": {
+                  "color": "#F0C25A",
                   "index": 0
-                },
-                "failed_checks": {
-                  "text": "Stopped: data checks failed",
-                  "color": "red",
-                  "index": 1
                 }
               }
             }
-          ]
+          ],
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline"
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
         },
         "overrides": []
       },
@@ -145,7 +153,12 @@
           "fields": "/.*/"
         },
         "textMode": "value",
-        "colorMode": "background"
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 13
+        }
       }
     },
     {
@@ -158,8 +171,8 @@
       },
       "description": "Lines and pools under billed today that the stored forecast says will cross billed within 30, 60 and 90 days, before their term ends.\n\n**Source:** n360.forecast via n360.v_line_pace  \n**Filter:** Customer  \n**Window:** from the data-through day",
       "gridPos": {
-        "x": 8,
-        "y": 0,
+        "x": 0,
+        "y": 3,
         "w": 8,
         "h": 3
       },
@@ -207,9 +220,9 @@
       },
       "description": "Lines and pools already over billed (a pool counted once).\n\n**Source:** n360.v_line_pace  \n**Filter:** Customer  \n**Window:** start date to the data-through day",
       "gridPos": {
-        "x": 16,
-        "y": 0,
-        "w": 4,
+        "x": 8,
+        "y": 3,
+        "w": 8,
         "h": 3
       },
       "targets": [
@@ -244,7 +257,7 @@
                 "from": 1,
                 "to": 1000000000000000.0,
                 "result": {
-                  "color": "red",
+                  "color": "#F2A07B",
                   "index": 1
                 }
               }
@@ -278,9 +291,9 @@
       },
       "description": "Lines and pools whose last-30-day rate differs from their term average by more than 50% (flagged upstream in the forecast).\n\n**Source:** n360.forecast via n360.v_line_pace  \n**Filter:** Customer  \n**Window:** last 30 days against the term",
       "gridPos": {
-        "x": 20,
-        "y": 0,
-        "w": 4,
+        "x": 16,
+        "y": 3,
+        "w": 8,
         "h": 3
       },
       "targets": [
@@ -322,7 +335,7 @@
       "description": "One lane per line or pool: from the data-through day to the day the stored forecast says it runs out (uses up billed). Red: crosses billed soon (the red window of the pace rule). Blue: crosses billed before its term ends. Grey: runs out only after the term ends; dark after the term end (the change of shade marks the contract end). Lines already above billed, not measurable or not implemented have no runway and are not shown.\n\n**Source:** n360.forecast via n360.v_line_pace  \n**Filter:** Customer; lines with a runs-out date  \n**Window:** from the data-through day forward",
       "gridPos": {
         "x": 0,
-        "y": 3,
+        "y": 6,
         "w": 24,
         "h": 10
       },
@@ -335,7 +348,7 @@
           "editorType": "sql",
           "queryType": "timeseries",
           "format": 0,
-          "rawSql": "WITH lanes AS (\n                 SELECT concat(a.display_name, ' \u00b7 ', pc.label) AS lane, pc.data_through AS dt, pc.end_date AS term_end,\n                        pc.exhaust_date AS runs_out,\n                        multiIf(pc.runway = 'crosses soon', 3, pc.runway = 'crosses before term end', 2, 1) AS cat\n                 FROM n360.v_line_pace AS pc INNER JOIN n360.account AS a ON a.account = pc.account\n                 WHERE pc.account IN (${account:singlequote}) AND pc.exhaust_date IS NOT NULL),\n             times AS (SELECT DISTINCT t FROM (SELECT dt AS t FROM lanes UNION ALL SELECT term_end FROM lanes WHERE term_end >= dt\n                                               UNION ALL SELECT runs_out FROM lanes))\n        -- every lane gets a value at every date on the chart, so Grafana never fills a gap\n        SELECT toDateTime(times.t) AS time, lanes.lane AS lane,\n               toUInt8(multiIf(times.t >= lanes.runs_out, 0, times.t >= lanes.term_end, 9, lanes.cat)) AS state\n        FROM lanes CROSS JOIN times\n        ORDER BY time",
+          "rawSql": "WITH lanes AS (\n                 SELECT if(startsWith(pc.label, concat(a.display_name, ':')), concat(a.display_name, ' \u00b7 ', trimLeft(substring(pc.label, length(a.display_name) + 2))), concat(a.display_name, ' \u00b7 ', pc.label)) AS lane, pc.data_through AS dt, pc.end_date AS term_end,\n                        pc.exhaust_date AS runs_out,\n                        multiIf(pc.runway = 'crosses soon', 3, pc.runway = 'crosses before term end', 2, 1) AS cat\n                 FROM n360.v_line_pace AS pc INNER JOIN n360.account AS a ON a.account = pc.account\n                 WHERE pc.account IN (${account:singlequote}) AND pc.exhaust_date IS NOT NULL),\n             times AS (SELECT DISTINCT t FROM (SELECT dt AS t FROM lanes UNION ALL SELECT term_end FROM lanes WHERE term_end >= dt\n                                               UNION ALL SELECT runs_out FROM lanes))\n        -- every lane gets a value at every date on the chart, so Grafana never fills a gap\n        SELECT toDateTime(times.t) AS time, lanes.lane AS lane,\n               toUInt8(multiIf(times.t >= lanes.runs_out, 0, times.t >= lanes.term_end, 9, lanes.cat)) AS state\n        FROM lanes CROSS JOIN times\n        ORDER BY time",
           "refId": "A"
         }
       ],
@@ -348,22 +361,22 @@
               "options": {
                 "3": {
                   "text": "Crosses billed soon",
-                  "color": "red",
+                  "color": "#C3B0F2",
                   "index": 0
                 },
                 "2": {
                   "text": "Crosses billed before term end",
-                  "color": "blue",
+                  "color": "#E0D6F8",
                   "index": 1
                 },
                 "1": {
                   "text": "Runs out after term end",
-                  "color": "#8e8e8e",
+                  "color": "#B4B4B4",
                   "index": 2
                 },
                 "9": {
                   "text": "After the term end",
-                  "color": "#3d3d3d",
+                  "color": "#4A4A4A",
                   "index": 3
                 },
                 "0": {
@@ -377,7 +390,7 @@
           "displayName": "${__field.labels.lane}",
           "color": {
             "mode": "fixed",
-            "fixedColor": "#8e8e8e"
+            "fixedColor": "#B4B4B4"
           },
           "custom": {
             "spanNulls": true
@@ -408,7 +421,7 @@
       "description": "Every line and pool: use, rate (last 30 days / 30), the runs-out date from the stored forecast, and when the term ends. Note carries the forecast flags and says when a term has already ended. Click a line to open it (a pool opens its customer).\n\n**Source:** n360.forecast via n360.v_line_pace  \n**Filter:** Customer  \n**Window:** start date to the data-through day; forecast forward",
       "gridPos": {
         "x": 0,
-        "y": 13,
+        "y": 16,
         "w": 24,
         "h": 14
       },
@@ -421,7 +434,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT concat(a.display_name, ' \u00b7 ', pc.label) AS Line, pc.measure AS Measure, pc.used AS Used, pc.billed AS Billed,\n               round(pc.rate_per_day) AS `Per day`,\n               multiIf(pc.exhaust_date IS NOT NULL, concat(toString(toDayOfMonth(pc.exhaust_date)), ' ', formatDateTime(pc.exhaust_date, '%b %Y')), pc.runway = 'above billed', 'Already above billed', NULL) AS `Runs out`,\n               concat(toString(toDayOfMonth(pc.end_date)), ' ', formatDateTime(pc.end_date, '%b %Y')) AS `Term ends`, pc.runway AS Runway,\n               trim(BOTH '; ' FROM concat(if(pc.term_ended, 'Term already ended; ', ''), arrayStringConcat(pc.flags, '; '))) AS Note,\n               if(pc.entitlement = 'pool', concat('/d/n360-customer?var-account=', pc.account),\n                  concat('/d/n360-line?var-account=', pc.account, '&var-line=', pc.line_key)) AS drill\n        FROM n360.v_line_pace AS pc INNER JOIN n360.account AS a ON a.account = pc.account\n        WHERE pc.account IN (${account:singlequote}) ORDER BY pc.exhaust_date IS NULL, pc.exhaust_date",
+          "rawSql": "SELECT if(startsWith(pc.label, concat(a.display_name, ':')), concat(a.display_name, ' \u00b7 ', trimLeft(substring(pc.label, length(a.display_name) + 2))), concat(a.display_name, ' \u00b7 ', pc.label)) AS Line, pc.measure AS Measure, pc.used AS Used, pc.billed AS Billed,\n               round(pc.rate_per_day) AS `Per day`,\n               multiIf(pc.exhaust_date IS NOT NULL, concat(toString(toDayOfMonth(pc.exhaust_date)), ' ', formatDateTime(pc.exhaust_date, '%b %Y')), pc.runway = 'above billed', 'Already above billed', NULL) AS `Runs out`,\n               concat(toString(toDayOfMonth(pc.end_date)), ' ', formatDateTime(pc.end_date, '%b %Y')) AS `Term ends`, pc.runway AS Runway,\n               trim(BOTH '; ' FROM concat(if(pc.term_ended, 'Term already ended; ', ''), arrayStringConcat(pc.flags, '; '))) AS Note,\n               if(pc.entitlement = 'pool', concat('/d/n360-customer?var-account=', pc.account),\n                  concat('/d/n360-line?var-account=', pc.account, '&var-line=', pc.line_key)) AS drill\n        FROM n360.v_line_pace AS pc INNER JOIN n360.account AS a ON a.account = pc.account\n        WHERE pc.account IN (${account:singlequote}) ORDER BY pc.exhaust_date IS NULL, pc.exhaust_date",
           "refId": "A"
         }
       ],
@@ -508,7 +521,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -532,7 +545,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -556,7 +569,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -579,42 +592,42 @@
                     "options": {
                       "above billed": {
                         "text": "Already above billed",
-                        "color": "red",
+                        "color": "#F2A07B",
                         "index": 0
                       },
                       "crosses soon": {
                         "text": "Crosses billed soon",
-                        "color": "red",
+                        "color": "#C3B0F2",
                         "index": 1
                       },
                       "crosses before term end": {
                         "text": "Crosses before term end",
-                        "color": "blue",
+                        "color": "#C3B0F2",
                         "index": 2
                       },
                       "runs out after term end": {
                         "text": "Runs out after term end",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 3
                       },
                       "no use in the last 30 days": {
                         "text": "No use in the last 30 days",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 4
                       },
                       "not measurable": {
                         "text": "Not measurable",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 5
                       },
                       "not implemented": {
                         "text": "Not implemented",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 6
                       },
                       "not read": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 7
                       }
                     }
@@ -625,7 +638,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -636,6 +649,13 @@
                 "id": "custom.cellOptions",
                 "value": {
                   "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
                 }
               }
             ]
@@ -708,7 +728,7 @@
       "description": "Lines whose last-30-day rate is more than 50% away from their term average: rising, falling or stopped. The forecast uses the last 30 days, so a step change moves the runs-out date a lot.\n\n**Source:** n360.forecast via n360.v_line_pace  \n**Filter:** Customer; flagged lines  \n**Window:** last 30 days against the term",
       "gridPos": {
         "x": 0,
-        "y": 27,
+        "y": 30,
         "w": 24,
         "h": 6
       },
@@ -762,7 +782,7 @@
       "description": "How far the stored forecast was off: forecasts made 30, 60 and 90 days earlier against what was then used (mean absolute % error; lower is better). The forecast is evaluated as stored, never refitted. Shows once forecasts 30 days old are stored.\n\n**Source:** n360.v_forecast_accuracy (n360.forecast_history)  \n**Filter:** Customer; lines and pools with a billed amount  \n**Window:** every stored night",
       "gridPos": {
         "x": 0,
-        "y": 33,
+        "y": 36,
         "w": 24,
         "h": 13
       },
@@ -775,7 +795,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT Line, `30 days`, `60 days`, `90 days`, Forecasts FROM (\n            SELECT 0 AS o, concat(a.display_name, ' \u00b7 ', pc.label) AS Line,\n                   anyIf(fa.mape, fa.horizon_days = 30) AS `30 days`, anyIf(fa.mape, fa.horizon_days = 60) AS `60 days`,\n                   anyIf(fa.mape, fa.horizon_days = 90) AS `90 days`, maxIf(fa.forecasts, fa.horizon_days = 30) AS Forecasts\n            FROM n360.v_forecast_accuracy AS fa\n            INNER JOIN n360.v_line_pace AS pc ON pc.series_key = fa.series_key\n            INNER JOIN n360.account AS a ON a.account = fa.account\n            WHERE fa.account IN (${account:singlequote}) GROUP BY Line\n            UNION ALL\n            SELECT 1, 'All lines (weighted by forecasts)',\n                   round(sumIf(mape * forecasts, horizon_days = 30) / sumIf(forecasts, horizon_days = 30), 1),\n                   round(sumIf(mape * forecasts, horizon_days = 60) / sumIf(forecasts, horizon_days = 60), 1),\n                   round(sumIf(mape * forecasts, horizon_days = 90) / sumIf(forecasts, horizon_days = 90), 1),\n                   sumIf(forecasts, horizon_days = 30)\n            FROM n360.v_forecast_accuracy WHERE account IN (${account:singlequote}) HAVING sumIf(forecasts, horizon_days = 30) > 0\n        ) ORDER BY o, Line",
+          "rawSql": "SELECT Line, `30 days`, `60 days`, `90 days`, Forecasts FROM (\n            SELECT 0 AS o, if(startsWith(pc.label, concat(a.display_name, ':')), concat(a.display_name, ' \u00b7 ', trimLeft(substring(pc.label, length(a.display_name) + 2))), concat(a.display_name, ' \u00b7 ', pc.label)) AS Line,\n                   anyIf(fa.mape, fa.horizon_days = 30) AS `30 days`, anyIf(fa.mape, fa.horizon_days = 60) AS `60 days`,\n                   anyIf(fa.mape, fa.horizon_days = 90) AS `90 days`, maxIf(fa.forecasts, fa.horizon_days = 30) AS Forecasts\n            FROM n360.v_forecast_accuracy AS fa\n            INNER JOIN n360.v_line_pace AS pc ON pc.series_key = fa.series_key\n            INNER JOIN n360.account AS a ON a.account = fa.account\n            WHERE fa.account IN (${account:singlequote}) GROUP BY Line\n            UNION ALL\n            SELECT 1, 'All lines (weighted by forecasts)',\n                   round(sumIf(mape * forecasts, horizon_days = 30) / sumIf(forecasts, horizon_days = 30), 1),\n                   round(sumIf(mape * forecasts, horizon_days = 60) / sumIf(forecasts, horizon_days = 60), 1),\n                   round(sumIf(mape * forecasts, horizon_days = 90) / sumIf(forecasts, horizon_days = 90), 1),\n                   sumIf(forecasts, horizon_days = 30)\n            FROM n360.v_forecast_accuracy WHERE account IN (${account:singlequote}) HAVING sumIf(forecasts, horizon_days = 30) > 0\n        ) ORDER BY o, Line",
           "refId": "A"
         }
       ],
@@ -876,7 +896,7 @@
       "description": "Where each line's crossing date stood 7 and 30 stored nights ago, and how many days it has moved (negative = earlier). Empty where the forecast had no crossing date then (\"Not reported yet\" = no crossing before the term end, or not stored).\n\n**Source:** n360.v_forecast_drift (n360.forecast_history)  \n**Filter:** Customer; lines that cross billed now or did then  \n**Window:** stored nights",
       "gridPos": {
         "x": 0,
-        "y": 46,
+        "y": 49,
         "w": 24,
         "h": 8
       },
@@ -889,7 +909,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT concat(a.display_name, ' \u00b7 ', pc.label) AS Line,\n               concat(toString(toDayOfMonth(d.cross_now)), ' ', formatDateTime(d.cross_now, '%b %Y')) AS `Crosses billed`, concat(toString(toDayOfMonth(d.cross_7_nights_ago)), ' ', formatDateTime(d.cross_7_nights_ago, '%b %Y')) AS `7 nights ago`,\n               concat(toString(toDayOfMonth(d.cross_30_nights_ago)), ' ', formatDateTime(d.cross_30_nights_ago, '%b %Y')) AS `30 nights ago`, d.moved_7 AS `Moved, 7 nights`,\n               d.moved_30 AS `Moved, 30 nights`\n        FROM n360.v_forecast_drift AS d\n        INNER JOIN n360.v_line_pace AS pc ON pc.series_key = d.series_key\n        INNER JOIN n360.account AS a ON a.account = d.account\n        WHERE d.account IN (${account:singlequote}) ORDER BY ifNull(d.moved_7, 0)",
+          "rawSql": "SELECT if(startsWith(pc.label, concat(a.display_name, ':')), concat(a.display_name, ' \u00b7 ', trimLeft(substring(pc.label, length(a.display_name) + 2))), concat(a.display_name, ' \u00b7 ', pc.label)) AS Line,\n               concat(toString(toDayOfMonth(d.cross_now)), ' ', formatDateTime(d.cross_now, '%b %Y')) AS `Crosses billed`, concat(toString(toDayOfMonth(d.cross_7_nights_ago)), ' ', formatDateTime(d.cross_7_nights_ago, '%b %Y')) AS `7 nights ago`,\n               concat(toString(toDayOfMonth(d.cross_30_nights_ago)), ' ', formatDateTime(d.cross_30_nights_ago, '%b %Y')) AS `30 nights ago`, d.moved_7 AS `Moved, 7 nights`,\n               d.moved_30 AS `Moved, 30 nights`\n        FROM n360.v_forecast_drift AS d\n        INNER JOIN n360.v_line_pace AS pc ON pc.series_key = d.series_key\n        INNER JOIN n360.account AS a ON a.account = d.account\n        WHERE d.account IN (${account:singlequote}) ORDER BY ifNull(d.moved_7, 0)",
           "refId": "A"
         }
       ],
@@ -913,7 +933,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -937,7 +957,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -961,7 +981,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -985,7 +1005,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -1009,7 +1029,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -1046,7 +1066,7 @@
       "description": "Mean absolute % error of each model when backtested at weekly cutoffs over the loaded history (all lines and pools). The straight line stays the forecast of record; the challenger replaces it only if it has the better 30-day MAPE on most lines for 8 straight weeks AND Ryan approves (08). Run code/forecast/challenger.py to refresh; the full report is docs/10_CHALLENGER_BACKTEST.md.\n\n**Source:** n360.v_challenger_backtest (n360.forecast_challenger)  \n**Filter:** none (every customer)  \n**Window:** the newest backtest run",
       "gridPos": {
         "x": 0,
-        "y": 54,
+        "y": 57,
         "w": 24,
         "h": 6
       },
@@ -1125,7 +1145,7 @@
   "links": [
     {
       "type": "link",
-      "title": "Back to Portfolio overview",
+      "title": "Back to Overview",
       "url": "/d/n360-overview",
       "icon": "dashboard",
       "keepTime": true,

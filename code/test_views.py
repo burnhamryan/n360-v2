@@ -149,6 +149,50 @@ def main():
         check('Phase 2: top asks = the ask from 3 customers and the one from 2',
               asks == {'Export conversations to CSV': 3, 'SMS opt-out keywords': 2}, asks)
 
+    # Contract status (dashboard review, 25 Nov 2026): every v1.1 status from a planted synthetic case
+    st = {r['full_label']: r for r in q("SELECT full_label, status, toUInt8(renewal_risk) AS risk, used, pct_billed, "
+                                         "issue, toUInt8(needs_attention) AS na FROM n360.v_contract_status")}
+    want = {'Atlas Streaming · Chat': 'over billed', 'Bluebird Air · 3 lines, pooled entitlement': 'over billed',
+            'Harbor Telecom · Chat': 'will exceed', 'Kestrel Travel · Chat': 'will exceed', 'Willow Energy · Chat': 'below pace',
+            'Summit Games · Chat': 'on pace', 'Maple Clinics · Chat': 'too early', 'Maple Clinics · Voice': 'under review',
+            'Maple Clinics · Email': 'billed not recorded', 'Maple Clinics · SMS': 'unmapped',
+            'Pinecrest Retail · Voice': 'not built', 'Harbor Telecom · Voice': 'not measured'}
+    got = {k: st.get(k, {}).get('status') for k in want}
+    check('v_contract_status: each planted case has its v1.1 status', got == want, {k: v for k, v in got.items() if v != want[k]})
+    check('v_contract_status: one row per line not in a pool, and each pool once',
+          len(st) == int(q("SELECT count() AS n FROM n360.v_line_pace")[0]['n']), len(st))
+    check('Willow Energy Chat is at renewal risk (under half used, under 120 days left); nothing else is',
+          [k for k, r in st.items() if int(r['risk'])] == ['Willow Energy · Chat'], [k for k, r in st.items() if int(r['risk'])])
+    check('no reading is never zero: unmapped, not built and not measured lines have used NULL',
+          all(st[k]['used'] is None for k in ('Maple Clinics · SMS', 'Pinecrest Retail · Voice', 'Harbor Telecom · Voice')),
+          {k: st[k]['used'] for k in ('Maple Clinics · SMS', 'Pinecrest Retail · Voice', 'Harbor Telecom · Voice')})
+    check('ended terms are flagged as ended (Atlas, Lakeside)',
+          st['Atlas Streaming · Chat']['issue'] == 'Term ended' and st['Lakeside Insurance · Email']['issue'] == 'Term ended',
+          (st['Atlas Streaming · Chat']['issue'], st['Lakeside Insurance · Email']['issue']))
+    nights = q("SELECT status, count() AS n FROM n360.v_status_night WHERE data_date = (SELECT max(data_date) FROM "
+               "n360.forecast_history) GROUP BY status")
+    now = q("SELECT status, count() AS n FROM n360.v_contract_status WHERE series_key IN (SELECT series_key FROM "
+            "n360.forecast_history WHERE data_date = (SELECT max(data_date) FROM n360.forecast_history)) GROUP BY status")
+    check('v_status_night: the newest night equals today\'s status (one number, one value)',
+          sorted((r['status'], int(r['n'])) for r in nights) == sorted((r['status'], int(r['n'])) for r in now), (nights, now))
+    att = sorted((r['display_name'], r['issue']) for r in q('SELECT display_name, issue FROM n360.v_needs_attention'))
+    check('v_needs_attention: the planted items (over, will exceed, renewal risk, ended, a busy VA down 25%+)',
+          ('Willow Energy', 'Conversations down 33%') in att and ('Willow Energy', 'Renewal risk: 18% used') in att
+          and ('Harbor Telecom', 'Set to exceed billed') in att and ('Lakeside Insurance', 'Term ended') in att
+          and not any(c == 'Maple Clinics' for c, _ in att) and not any(c == 'Summit Games' for c, _ in att), att)
+    vc = {r['va_name']: r for r in q('SELECT va_name, containment_30, toUInt8(containment_down) AS cd, toUInt8(convs_down) AS cv '
+                                     'FROM n360.v_va_change')}
+    check('v_va_change: containment not read stays NULL (Summit NCW, conversation records reader)',
+          vc['Summit NCW']['containment_30'] is None, vc['Summit NCW'])
+    check('v_va_change: Orchid containment down 3+ points; Willow and Lakeside conversations down 10%+',
+          int(vc['Orchid Chat']['cd']) == 1 and int(vc['Willow Chat']['cv']) == 1 and int(vc['Lakeside Email']['cv']) == 1,
+          {k: (v['cd'], v['cv']) for k, v in vc.items() if int(v['cd']) or int(v['cv'])})
+    notes = [r['note'] for r in q("SELECT note FROM n360.v_customer_notes WHERE account = 'Maple Clinics' ORDER BY o")]
+    check('v_customer_notes: Maple Clinics notes the pending rule, the blank billed amount and the unmapped line',
+          len(notes) == 3 and 'not live yet' in notes[0], notes)
+    fresh = q('SELECT toUInt8(stale) AS stale, stamp FROM n360.v_freshness')
+    check('v_freshness: one stamp, "Usage to ..."', len(fresh) == 1 and fresh[0]['stamp'].startswith('Usage to '), fresh)
+
     print('VIEW TESTS PASSED' if not failed else f'{failed} VIEW TESTS FAILED')
     return 1 if failed else 0
 

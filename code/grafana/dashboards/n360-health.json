@@ -1,0 +1,1244 @@
+{
+  "uid": "n360-health",
+  "title": "N360 \u00b7 Customer health",
+  "tags": [
+    "n360"
+  ],
+  "editable": false,
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "utc",
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "csm",
+        "label": "CSM",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "n360-clickhouse"
+        },
+        "query": "SELECT DISTINCT csm_rocketlane FROM n360.account ORDER BY 1",
+        "definition": "SELECT DISTINCT csm_rocketlane FROM n360.account ORDER BY 1",
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "In one sentence",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "For the chosen CSMs: customers, lines below pace, VAs whose conversations fell 10% or more (last 30 days against the 30 before; proposed, n360.settings), and the biggest change in conversations of a VA with at least 300 conversations in the previous 30 days.\n\n**Source:** n360.v_contract_status, n360.v_va_change  \n**Filter:** CSM  \n**Window:** the 60 days to the data-through day",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 18,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "WITH (SELECT argMax(concat(va, ' conversations ', if(convs_change_pct < 0, 'down ', 'up '),\n                                   toString(abs(toInt32(round(convs_change_pct)))), '%'), abs(convs_change_pct))\n              FROM n360.v_va_change WHERE account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote})) AND convs_change_pct IS NOT NULL AND convs_prev_30 >= 300) AS biggest\n        SELECT concat(concat(toString((SELECT count() FROM n360.account WHERE account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote})))), if((SELECT count() FROM n360.account WHERE account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))) = 1, ' customer', ' customers')), ' \u00b7 ',\n                      toString((SELECT countIf(status = 'below pace') FROM n360.v_contract_status WHERE account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote})))), ' lines below pace \u00b7 ',\n                      toString((SELECT countIf(convs_down) FROM n360.v_va_change WHERE account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote})))), ' VAs with conversations down 10%+',\n                      if(biggest = '', '', concat(' \u00b7 biggest change: ', biggest))) AS sentence",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Nothing loaded yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "valueSize": 17
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Data",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "The last day of usage in this load, and the day it was loaded. Amber when the data is more than 2 days old (n360.settings stamp_stale_days): the numbers are the last good night's. Click for Pipeline health.\n\n**Source:** n360.v_freshness (n360.runs: loaded runs only)  \n**Filter:** none  \n**Window:** the latest load",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(stamp, if(stale, concat(' \u00b7 ', toString(days_old), ' days old'), '')) AS stamp FROM n360.v_freshness",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": ".* days old$",
+                "result": {
+                  "color": "#F0C25A",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline"
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 13
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Lines below pace",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Contract lines and pools more than 10 points behind their term (renewal risks included).\n\n**Source:** n360.v_status_night  \n**Filter:** CSM  \n**Window:** the last 30 stored nights",
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "WITH nightly AS (SELECT data_date AS night, toUInt64(countIf(status = 'below pace')) AS value FROM n360.v_status_night\n               WHERE account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote})) GROUP BY night),\n             (SELECT max(night) FROM nightly) AS newest,\n             (SELECT max(night) FROM nightly WHERE night <= newest - 30) AS ref_30,\n             (SELECT min(night) FROM nightly) AS oldest,\n             if(ref_30 IS NULL OR ref_30 = toDate(0), if(oldest < newest, oldest, NULL), ref_30) AS ref,\n             (SELECT any(value) FROM nightly WHERE night = newest) AS v_now,\n             (SELECT any(value) FROM nightly WHERE night = ref) AS v_then\n        SELECT toDateTime(night) AS time, value, if(ref IS NULL, 'no earlier night stored', concat(multiIf(v_now > v_then, concat('+', toString(v_now - v_then)), v_now < v_then, concat('\u2212', toString(v_then - v_now)), 'no change'), ' since ', toString(toDayOfMonth(ref)), ' ', formatDateTime(ref, '%b'))) AS change\n        FROM nightly WHERE night > newest - 30 ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "displayName": "${__field.labels.change}",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#7F9CC0"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "showPercentChange": false,
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      },
+      "links": [
+        {
+          "title": "Contracts: below pace",
+          "url": "/d/n360-contracts?var-status=below pace&var-status=renewal risk"
+        }
+      ],
+      "timeFrom": "35d",
+      "hideTimeOverride": true,
+      "n360Metric": "lines below pace"
+    },
+    {
+      "id": 4,
+      "title": "VAs with conversations down 10%+",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "VAs whose conversations in the last 30 days are 10% or more below the 30 days before (proposed, n360.settings health_convs_down_pct). A window with an unread day is not compared.\n\n**Source:** n360.v_va_change  \n**Filter:** CSM  \n**Window:** the 60 days to the data-through day",
+      "gridPos": {
+        "x": 6,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT countIf(convs_down) AS `last 30 days against the 30 before` FROM n360.v_va_change WHERE account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "VAs with containment down 3+ points",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "VAs whose containment (1 - handoffs / engaged, per VA) fell 3 points or more (proposed, n360.settings health_containment_down_pts). VAs without handoff data are not compared.\n\n**Source:** n360.v_va_change  \n**Filter:** CSM  \n**Window:** the 60 days to the data-through day",
+      "gridPos": {
+        "x": 12,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT countIf(containment_down) AS `last 30 days against the 30 before` FROM n360.v_va_change WHERE account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Open tickets",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Support tickets still open for these customers. The v2 tile counts P1 tickets; priority is not in the export yet, so every open ticket is counted. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** CSM  \n**Window:** all tickets",
+      "gridPos": {
+        "x": 18,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if((SELECT count() FROM n360.ps_ticket) = 0, NULL, countIf(status = 'open')) AS `priority not exported yet`\n        FROM n360.ps_ticket WHERE account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      },
+      "links": [
+        {
+          "title": "Requests",
+          "url": "/d/n360-requests?${__url_time_range}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Customers",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "One row per customer: its most urgent contract status and its lines by status, conversations over the last 30 days against the 30 before (a window with an unread day is \"Not reported yet\"), the biggest change among its VAs in a sentence (a containment point counted as 3% of conversations), target features used, and open tickets. Sorted by status urgency. Click a customer to open it.\n\n**Source:** n360.v_contract_status, n360.v_va_change, n360.v_feature_use, n360.ps_ticket  \n**Filter:** CSM  \n**Window:** the 60 days to the data-through day",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 24,
+        "h": 15
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "WITH st AS (SELECT account, argMin(if(renewal_risk, 'renewal risk', status), tuple(status_rank, -ifNull(pct_billed, 0))) AS worst,\n                           arrayStringConcat(arrayFilter(x -> x != '', [\n                               if(countIf(status = 'over billed') > 0, concat(toString(countIf(status = 'over billed')), ' over'), ''),\n                               if(countIf(status = 'will exceed') > 0, concat(toString(countIf(status = 'will exceed')), ' will exceed'), ''),\n                               if(countIf(renewal_risk) > 0, concat(toString(countIf(renewal_risk)), ' at risk'), ''),\n                               if(countIf(status = 'below pace' AND NOT renewal_risk) > 0,\n                                  concat(toString(countIf(status = 'below pace' AND NOT renewal_risk)), ' below'), ''),\n                               if(countIf(status IN ('on pace', 'ahead')) > 0, concat(toString(countIf(status IN ('on pace', 'ahead'))), ' on pace'), ''),\n                               if(countIf(status IN ('under review', 'billed not recorded', 'unmapped', 'not built', 'not measured', 'not read', 'too early')) > 0,\n                                  concat(toString(countIf(status IN ('under review', 'billed not recorded', 'unmapped', 'not built', 'not measured', 'not read', 'too early'))), ' no reading'), '')]),\n                               ' \u00b7 ') AS lines\n                    FROM n360.v_contract_status GROUP BY account),\n             vc AS (SELECT account, if(countIf(convs_30 IS NULL) > 0, NULL, sum(convs_30)) AS c30,\n                           if(countIf(convs_prev_30 IS NULL) > 0, NULL, sum(convs_prev_30)) AS cp30,\n                           argMax(concat(va, ': conversations ', if(convs_change_pct < 0, 'down ', 'up '),\n                                         toString(abs(toInt32(round(convs_change_pct)))), '%'), abs(ifNull(convs_change_pct, 0))) AS big_conv,\n                           max(abs(ifNull(convs_change_pct, 0))) AS big_conv_size,\n                           argMax(concat(va, ': containment ', if(containment_change_pts < 0, 'down ', 'up '),\n                                         toString(abs(containment_change_pts)), ' points'), abs(ifNull(containment_change_pts, 0))) AS big_cont,\n                           max(abs(ifNull(containment_change_pts, 0))) AS big_cont_size\n                    FROM n360.v_va_change GROUP BY account),\n             fu AS (SELECT account, if(countIf(used IS NOT NULL) = 0, NULL, concat(toString(countIf(used)), ' of ', toString(count()))) AS f\n                    FROM n360.v_feature_use GROUP BY account),\n             tk AS (SELECT account, countIf(status = 'open') AS open_t FROM n360.ps_ticket GROUP BY account)\n        SELECT a.display_name AS Customer, a.csm_rocketlane AS CSM, if(st.account = '', 'unbilled', st.worst) AS Status,\n               if(st.account = '', 'No contract line', st.lines) AS Lines,\n               vc.c30 AS `Conversations, 30 days`, round(100 * (vc.c30 - vc.cp30) / vc.cp30, 1) AS `vs previous 30`,\n               -- the bigger of the two changes, a conversations change weighted 1, a containment point weighted 3\n               if(vc.big_conv_size >= 3 * vc.big_cont_size, vc.big_conv, vc.big_cont) AS `Biggest change`,\n               fu.f AS `Target features`, if((SELECT count() FROM n360.ps_ticket) = 0, NULL, ifNull(tk.open_t, 0)) AS `Open tickets`,\n               a.account AS account\n        FROM n360.account AS a\n        LEFT JOIN st ON st.account = a.account LEFT JOIN vc ON vc.account = a.account\n        LEFT JOIN fu ON fu.account = a.account LEFT JOIN tk ON tk.account = a.account\n        WHERE a.csm_rocketlane IN (${csm:singlequote})\n        ORDER BY ifNull(st.worst, '') = '', indexOf(['over billed', 'will exceed', 'renewal risk', 'below pace', 'ahead', 'on pace', 'too early', 'under review', 'billed not recorded', 'unmapped', 'not built', 'not measured', 'not read'], st.worst), Customer",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "account"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "over billed": {
+                        "text": "Over billed",
+                        "color": "#F2A07B",
+                        "index": 0
+                      },
+                      "will exceed": {
+                        "text": "Will exceed",
+                        "color": "#C3B0F2",
+                        "index": 1
+                      },
+                      "renewal risk": {
+                        "text": "Renewal risk",
+                        "color": "#3E7CC4",
+                        "index": 2
+                      },
+                      "below pace": {
+                        "text": "Below pace",
+                        "color": "#9CC8EE",
+                        "index": 3
+                      },
+                      "ahead": {
+                        "text": "Ahead",
+                        "color": "#76C893",
+                        "index": 4
+                      },
+                      "on pace": {
+                        "text": "On pace",
+                        "color": "#76C893",
+                        "index": 5
+                      },
+                      "too early": {
+                        "text": "Too early to tell",
+                        "color": "#D3D3D3",
+                        "index": 6
+                      },
+                      "under review": {
+                        "text": "Under review",
+                        "color": "#B4B4B4",
+                        "index": 7
+                      },
+                      "billed not recorded": {
+                        "text": "Billed not recorded",
+                        "color": "#B4B4B4",
+                        "index": 8
+                      },
+                      "unmapped": {
+                        "text": "Unmapped",
+                        "color": "#B4B4B4",
+                        "index": 9
+                      },
+                      "not built": {
+                        "text": "Not built",
+                        "color": "#B4B4B4",
+                        "index": 10
+                      },
+                      "not measured": {
+                        "text": "Not measured",
+                        "color": "#B4B4B4",
+                        "index": 11
+                      },
+                      "not read": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 12
+                      },
+                      "unbilled": {
+                        "text": "Unbilled",
+                        "color": "text",
+                        "index": 13
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Conversations, 30 days"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vs previous 30"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Conversations, 30 days"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vs previous 30"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Target features"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Open tickets"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 170
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CSM"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 170
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Lines"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 230
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Conversations, 30 days"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vs previous 30"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Target features"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Open tickets"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open customer",
+                    "url": "/d/n360-customer?var-account=${__data.fields.account}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 8,
+      "title": "Conversations per week, last 26 weeks",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Each customer's conversations per complete week (Monday to Sunday), one line per customer, in shades of one colour (customers are not statuses). A week with an unread day is a gap. Hover for values.\n\n**Source:** n360.va_day  \n**Filter:** CSM  \n**Window:** the 26 complete weeks to the data-through day",
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT toDateTime(toMonday(d.day)) AS time, a.display_name AS customer,\n               if(countIf(d.conversations IS NULL) > 0, NULL, sum(d.conversations)) AS conversations\n        FROM n360.va_day AS d INNER JOIN n360.account AS a ON a.account = d.account\n        WHERE d.account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote})) AND d.day > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 182\n          AND toMonday(d.day) + 6 <= (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded')\n        GROUP BY time, customer ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "displayName": "${__field.labels.customer}",
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false,
+            "scaleDistribution": {
+              "type": "log",
+              "log": 10
+            }
+          },
+          "color": {
+            "mode": "shades",
+            "fixedColor": "#7F9CC0"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "timeFrom": "200d"
+    },
+    {
+      "id": 9,
+      "title": "VAs: last 30 days against the 30 before",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Every VA of the chosen CSMs' customers, flagged ones first. Containment is per VA, never across channels; \"Not reported yet\" where handoffs are not read. Flags: conversations down 10%+, containment down 3+ points (proposed). Click a VA or a customer to open it.\n\n**Source:** n360.v_va_change (n360.va_day)  \n**Filter:** CSM  \n**Window:** the 60 days to the data-through day",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 12
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT c.va AS VA, a.display_name AS Customer, c.convs_30 AS `Conversations, 30 days`,\n               c.convs_change_pct AS `vs previous 30`, c.containment_30 AS Containment,\n               c.containment_change_pts AS `Change (points)`,\n               arrayStringConcat(arrayFilter(x -> x != '', [if(c.convs_down, 'Conversations down', ''),\n                                                            if(c.containment_down, 'Containment down', '')]), ' \u00b7 ') AS Flag,\n               concat('/d/n360-va?var-account=', c.account, '&var-va=', toString(c.bot_id)) AS drill, c.account AS account\n        FROM n360.v_va_change AS c INNER JOIN n360.account AS a ON a.account = c.account\n        WHERE a.csm_rocketlane IN (${csm:singlequote})\n        ORDER BY c.convs_down OR c.containment_down DESC, abs(ifNull(c.convs_change_pct, 0)) DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "drill"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "account"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Conversations, 30 days"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vs previous 30"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Containment"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Change (points)"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Flag"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Conversations down": {
+                        "text": "Conversations down",
+                        "color": "#D9695F",
+                        "index": 0
+                      },
+                      "Containment down": {
+                        "text": "Containment down",
+                        "color": "#D9695F",
+                        "index": 1
+                      },
+                      "Conversations down \u00b7 Containment down": {
+                        "text": "Conversations and containment down",
+                        "color": "#D9695F",
+                        "index": 2
+                      },
+                      "": {
+                        "text": "",
+                        "color": "text",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Conversations, 30 days"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vs previous 30"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Containment"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Change (points)"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VA"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 170
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Flag"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 240
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VA"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open VA",
+                    "url": "${__data.fields.drill}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open customer",
+                    "url": "/d/n360-customer?var-account=${__data.fields.account}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm"
+      }
+    }
+  ],
+  "links": [
+    {
+      "type": "link",
+      "title": "Back to Overview",
+      "url": "/d/n360-overview",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    }
+  ]
+}

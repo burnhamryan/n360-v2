@@ -26,12 +26,18 @@
 | Production: self-hosted on AWS (one EC2 server, Docker, open source: ClickHouse, Grafana OSS, Caddy); Grafana sign-in with Google | 25 Nov 2026 |
 | Loads run from Ryan's laptop through a Session Manager tunnel for now; server-side loads later (`server_loads`) | 25 Nov 2026 |
 
+| Dashboards rebuilt to the v2 redesign: sentence + freshness stamp on every page, the v1.1 contract statuses and colours (one palette, no red), new Customer health page, uids unchanged (`docs/16_DASHBOARD_GAPS.md`) | 25 Nov 2026 |
+
 ## Proposed (build as settings; Ryan approves)
 
 | Item | Proposal |
 |---|---|
 | Pace colours (values in `n360.settings`) | Green ≤ term + 10 pts; amber > term + 10 or crossing ≤ 60 d; red > 100% or crossing ≤ 30 d; grey not measurable / not implemented / not read |
 | Anomaly thresholds | Same weekday 8 weeks; z ≤ −4 / ≥ 4; min median 20; provisional 3 days |
+| Contract statuses (`v_contract_status`, values in `n360.settings`) | Below / ahead of pace ±10 points of term; too early < 30 days in; renewal risk < 50% used with ≤ 120 days left (docs/16, D2) |
+| Needs attention (`v_needs_attention`) | Over billed, will exceed, renewal risk, term ended within 90 days, or a VA with 1,000+ conversations down 25%+ (D3) |
+| Customer health flags | VA conversations down 10%+; containment down 3+ points (last 30 days against the 30 before) (D4) |
+| Target features | V8 playbooks, authoring tool, analytics assistant, MCP servers, supervisory rules; "3+" customers (D5) |
 | Alert routing and timing | As in `05_ANOMALY_AND_FORECAST.md`; alerts paused until needed (`11_ALERTS.md`) |
 | Challenger adoption bar | Better 30-day MAPE on most lines for 8 straight weeks, plus Ryan's approval |
 

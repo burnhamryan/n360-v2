@@ -27,23 +27,70 @@
         "multi": false,
         "includeAll": false,
         "refresh": 1
+      },
+      {
+        "name": "va",
+        "label": "VA",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "n360-clickhouse"
+        },
+        "query": "SELECT toString(v.bot_id), concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')')\n        FROM n360.va AS v WHERE v.account IN (${account:singlequote}) ORDER BY 2",
+        "definition": "SELECT toString(v.bot_id), concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')')\n        FROM n360.va AS v WHERE v.account IN (${account:singlequote}) ORDER BY 2",
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 1
+      },
+      {
+        "name": "period",
+        "label": "Period",
+        "type": "custom",
+        "query": "Week : week, Day : day, Month : month",
+        "options": [
+          {
+            "text": "Week",
+            "value": "week",
+            "selected": true
+          },
+          {
+            "text": "Day",
+            "value": "day",
+            "selected": false
+          },
+          {
+            "text": "Month",
+            "value": "month",
+            "selected": false
+          }
+        ],
+        "current": {
+          "text": "Week",
+          "value": "week"
+        },
+        "multi": false,
+        "includeAll": false
       }
     ]
   },
   "panels": [
     {
       "id": 1,
-      "title": "Data through",
+      "title": "In one sentence",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Last day included in this load (the nightly window ends at 23:59 UTC that day).\n\n**Source:** n360.runs, written by load.py only after every data check passes  \n**Filter:** loaded runs only; the latest  \n**Window:** the latest load",
+      "description": "The customer's most urgent line or pool (statuses from n360.v_contract_status, proposed thresholds), how many VAs it runs, its next term end and its CSM.\n\n**Source:** n360.v_contract_status, n360.va, n360.account  \n**Filter:** Customer  \n**Window:** the latest load",
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 6,
+        "w": 18,
         "h": 3
       },
       "targets": [
@@ -55,19 +102,17 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT formatDateTime(window_end, '%e %b %Y') AS data_through\n        FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
+          "rawSql": "WITH (SELECT argMin(tuple(line_label, if(renewal_risk, 'renewal risk', status), pct_billed, pct_term, days_left, cross_date),\n                                tuple(status_rank, -ifNull(pct_billed, 0))) AS w\n                 FROM n360.v_contract_status WHERE account IN (${account:singlequote})) AS ws,\n             (SELECT count() FROM n360.v_contract_status WHERE account IN (${account:singlequote})) AS n_lines,\n             (SELECT minIf(end_date, days_left >= 0) FROM n360.v_contract_status WHERE account IN (${account:singlequote})) AS next_end,\n             (SELECT count() FROM n360.va WHERE account IN (${account:singlequote})) AS n_vas\n        SELECT concat(a.display_name, ': ',\n                      if(n_lines = 0, 'no contract line (unbilled)', multiIf(\n                          ws.2 = 'over billed', concat(ws.1, ' is over billed (', toString(round(ws.3)), '%)'),\n                          ws.2 = 'will exceed', concat(ws.1, ' is set to exceed billed on ', concat(toString(toDayOfMonth(ws.6)), ' ', formatDateTime(ws.6, '%b %Y'))),\n                          ws.2 = 'renewal risk', concat(ws.1, ' is at renewal risk: ', toString(round(ws.3)), '% used, ',\n                                                        toString(ws.5), ' days left'),\n                          ws.2 = 'below pace', concat(ws.1, ' is below pace: ', toString(round(ws.3)), '% used, ',\n                                                      toString(round(ws.4)), '% of the term gone'),\n                          ws.2 IN ('on pace', 'ahead'), 'every line on pace',\n                          ws.2 = 'too early', 'too early to tell',\n                          'no line has a reading yet')),\n                      ' \u00b7 ', concat(toString(n_vas), if(n_vas = 1, ' VA', ' VAs')),\n                      if(next_end = toDate(0) OR n_lines = 0, '', concat(' \u00b7 next term end ', concat(toString(toDayOfMonth(next_end)), ' ', formatDateTime(next_end, '%b %Y')),\n                         ' (', toString(dateDiff('day', (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded'), next_end)), ' days)')),\n                      ' \u00b7 CSM ', a.csm_rocketlane) AS sentence\n        FROM n360.account AS a WHERE a.account IN (${account:singlequote})",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet",
-          "links": [
-            {
-              "title": "Pipeline health",
-              "url": "/d/n360-pipeline?${__url_time_range}"
-            }
-          ]
+          "noValue": "Nothing loaded yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
         },
         "overrides": []
       },
@@ -79,129 +124,23 @@
           "fields": "/.*/"
         },
         "textMode": "value",
-        "colorMode": "none"
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "valueSize": 17
+        }
       }
     },
     {
       "id": 2,
-      "title": "Last night",
+      "title": "Data",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Result of the latest nightly run. A stopped night leaves the previous good night on screen.\n\n**Source:** n360.runs (load.py writes one row per night, loaded or not)  \n**Filter:** none  \n**Window:** the latest run",
-      "gridPos": {
-        "x": 6,
-        "y": 0,
-        "w": 6,
-        "h": 3
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "n360-clickhouse"
-          },
-          "editorType": "sql",
-          "queryType": "table",
-          "format": 1,
-          "rawSql": "SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "Not reported yet",
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "loaded": {
-                  "text": "Loaded",
-                  "color": "green",
-                  "index": 0
-                },
-                "failed_checks": {
-                  "text": "Stopped: data checks failed",
-                  "color": "red",
-                  "index": 1
-                }
-              }
-            }
-          ]
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "/.*/"
-        },
-        "textMode": "value",
-        "colorMode": "background"
-      }
-    },
-    {
-      "id": 3,
-      "title": "Contract lines",
-      "type": "stat",
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "n360-clickhouse"
-      },
-      "description": "Contract lines on the entitlement sheet for this customer, and how many have no usage to show: not implemented (contracted, nothing built) or not measurable (unit the platform does not count).\n\n**Source:** n360.contract_line  \n**Filter:** Customer  \n**Window:** the latest load",
-      "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 6,
-        "h": 3
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "n360-clickhouse"
-          },
-          "editorType": "sql",
-          "queryType": "table",
-          "format": 1,
-          "rawSql": "SELECT count() AS `Contract lines`, countIf(measure = 'not implemented') AS `Not implemented`,\n               countIf(measure = 'not measurable') AS `Not measurable`\n        FROM n360.contract_line WHERE account IN (${account:singlequote})",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "Not reported yet"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "/.*/"
-        },
-        "textMode": "value_and_name",
-        "colorMode": "none",
-        "text": {
-          "titleSize": 12,
-          "valueSize": 26
-        }
-      }
-    },
-    {
-      "id": 4,
-      "title": "Anomalies, 7 settled days",
-      "type": "stat",
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "n360-clickhouse"
-      },
-      "description": "VA-days flagged on the 7 newest settled days, and flags on the newest 3 days (provisional: may still change, never an alert).\n\n**Source:** n360.v_va_day_anomaly via n360.v_customer_attention  \n**Filter:** Customer  \n**Window:** the 7 newest settled days; provisional = the newest 3 days",
+      "description": "The last day of usage in this load, and the day it was loaded. Amber when the data is more than 2 days old (n360.settings stamp_stale_days): the numbers are the last good night's. Click for Pipeline health.\n\n**Source:** n360.v_freshness (n360.runs: loaded runs only)  \n**Filter:** none  \n**Window:** the latest load",
       "gridPos": {
         "x": 18,
         "y": 0,
@@ -217,13 +156,35 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT drops_silences_7d AS `Drops or silences`, spikes_7d AS Spikes, provisional_flags AS Provisional\n        FROM n360.v_customer_attention WHERE account IN (${account:singlequote})",
+          "rawSql": "SELECT concat(stamp, if(stale, concat(' \u00b7 ', toString(days_old), ' days old'), '')) AS stamp FROM n360.v_freshness",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet"
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": ".* days old$",
+                "result": {
+                  "color": "#F0C25A",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline"
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
         },
         "overrides": []
       },
@@ -234,28 +195,29 @@
           ],
           "fields": "/.*/"
         },
-        "textMode": "value_and_name",
-        "colorMode": "none",
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
         "text": {
-          "titleSize": 12,
-          "valueSize": 26
+          "valueSize": 13
         }
       }
     },
     {
-      "id": 5,
-      "title": "Worst line",
+      "id": 3,
+      "title": "Contract status (most urgent line)",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "The most off-pace line or pool (red, then amber, then the larger pace gap), in its own measure.\n\n**Source:** n360.v_customer_attention (from n360.v_line_pace)  \n**Filter:** Customer  \n**Window:** start date to the data-through day",
+      "description": "The status of this customer's most urgent line or pool, and which one it is. Colours: the contract status palette (Contracts).\n\n**Source:** n360.v_contract_status  \n**Filter:** Customer  \n**Window:** the latest load",
       "gridPos": {
         "x": 0,
         "y": 3,
-        "w": 8,
-        "h": 3
+        "w": 6,
+        "h": 5
       },
       "targets": [
         {
@@ -266,100 +228,207 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT if(worst_entitlement = 'pool', 'Pooled entitlement', worst_label) AS Line, pct_billed AS `% of billed`, pct_term AS `% of term`, pace AS Pace\n        FROM n360.v_customer_attention WHERE account IN (${account:singlequote})",
+          "rawSql": "SELECT concat(arrayElement(['Over billed', 'Will exceed', 'Renewal risk', 'Below pace', 'Ahead', 'On pace', 'Too early to tell', 'Under review', 'Billed not recorded', 'Unmapped', 'Not built', 'Not measured', 'Not reported yet'], indexOf(['over billed', 'will exceed', 'renewal risk', 'below pace', 'ahead', 'on pace', 'too early', 'under review', 'billed not recorded', 'unmapped', 'not built', 'not measured', 'not read'], argMin(if(renewal_risk, 'renewal risk', status), tuple(status_rank, -ifNull(pct_billed, 0))))),\n                      ' \u00b7 ', argMin(line_label, tuple(status_rank, -ifNull(pct_billed, 0)))) AS status\n        FROM n360.v_contract_status WHERE account IN (${account:singlequote}) HAVING count() > 0",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No contract line (unbilled)",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^Over billed.*",
+                "result": {
+                  "color": "#F2A07B",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^Will exceed.*",
+                "result": {
+                  "color": "#C3B0F2",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^Renewal risk.*",
+                "result": {
+                  "color": "#3E7CC4",
+                  "index": 2
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^Below pace.*",
+                "result": {
+                  "color": "#9CC8EE",
+                  "index": 3
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^Ahead.*",
+                "result": {
+                  "color": "#76C893",
+                  "index": 4
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^On pace.*",
+                "result": {
+                  "color": "#76C893",
+                  "index": 5
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^Too early to tell.*",
+                "result": {
+                  "color": "#D3D3D3",
+                  "index": 6
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^Under review.*",
+                "result": {
+                  "color": "#B4B4B4",
+                  "index": 7
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^Billed not recorded.*",
+                "result": {
+                  "color": "#B4B4B4",
+                  "index": 8
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^Unmapped.*",
+                "result": {
+                  "color": "#B4B4B4",
+                  "index": 9
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^Not built.*",
+                "result": {
+                  "color": "#B4B4B4",
+                  "index": 10
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^Not measured.*",
+                "result": {
+                  "color": "#B4B4B4",
+                  "index": 11
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^Not reported yet.*",
+                "result": {
+                  "color": "#B4B4B4",
+                  "index": 12
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "valueSize": 24
+        }
+      },
+      "n360MayBeEmpty": "an unbilled customer"
+    },
+    {
+      "id": 4,
+      "title": "VAs on V8 or later",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "VAs whose newest weekly configuration read shows engine V8 or later. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.v_va_config_latest  \n**Filter:** Customer  \n**Window:** the newest read per VA",
+      "gridPos": {
+        "x": 6,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if(count() = 0, NULL, concat(toString(countIf(current_engine)), ' of ', toString(count()))) AS vas\n        FROM n360.v_va_config_latest WHERE account IN (${account:singlequote})",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "noValue": "Not reported yet",
+          "mappings": [],
           "color": {
             "mode": "fixed",
             "fixedColor": "text"
           }
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "% of billed"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "percent"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "% of term"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "percent"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Pace"
-            },
-            "properties": [
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "red": {
-                        "text": "Red",
-                        "color": "red",
-                        "index": 0
-                      },
-                      "amber": {
-                        "text": "Amber",
-                        "color": "orange",
-                        "index": 1
-                      },
-                      "green": {
-                        "text": "Green",
-                        "color": "green",
-                        "index": 2
-                      },
-                      "not measurable": {
-                        "text": "Not measurable",
-                        "color": "#8e8e8e",
-                        "index": 3
-                      },
-                      "not implemented": {
-                        "text": "Not implemented",
-                        "color": "#8e8e8e",
-                        "index": 4
-                      },
-                      "not read": {
-                        "text": "Not reported yet",
-                        "color": "#8e8e8e",
-                        "index": 5
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "options": {
         "reduceOptions": {
@@ -368,28 +437,84 @@
           ],
           "fields": "/.*/"
         },
-        "textMode": "value_and_name",
-        "colorMode": "value",
+        "textMode": "value",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
         "text": {
-          "titleSize": 12,
-          "valueSize": 18
+          "valueSize": 24
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Target features used",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Target features this customer used in the last 30 days (proposed list: V8 playbooks, authoring tool, analytics assistant, MCP servers, supervisory rules). Which ones: Adoption, below. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.v_feature_use  \n**Filter:** Customer  \n**Window:** the 30 days to the data-through day",
+      "gridPos": {
+        "x": 12,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if(countIf(used IS NOT NULL) = 0, NULL, concat(toString(countIf(used)), ' of ', toString(count()))) AS f\n        FROM n360.v_feature_use WHERE account IN (${account:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "valueSize": 24
         }
       }
     },
     {
       "id": 6,
-      "title": "Total used against billed",
+      "title": "Open tickets",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Used against billed across this customer's lines and pools, only when they share one measure and one term (rules 2 and 5): never across different measures or contracts. Not implemented, not measurable and unread lines are left out. A pool counts once.\n\n**Source:** n360.v_line_pace  \n**Filter:** Customer; lines and pools with a % of billed  \n**Window:** start date to the data-through day",
+      "description": "Support tickets still open for this customer (\"None open\": tickets are exported and none is open; \"Not reported yet\": no ticket export). Priority is not exported yet. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** Customer  \n**Window:** all tickets",
       "gridPos": {
-        "x": 8,
+        "x": 18,
         "y": 3,
-        "w": 8,
-        "h": 3
+        "w": 6,
+        "h": 5
       },
       "targets": [
         {
@@ -400,64 +525,20 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT if(same, sum(used), NULL) AS Used, if(same, sum(billed), NULL) AS Billed,\n               if(same, round(100 * sum(used) / sum(billed), 1), NULL) AS `% of billed`,\n               if(same, any(measure), 'Not added up: lines differ in measure or term') AS Measure\n        FROM (SELECT *, (SELECT uniqExact(measure, start_date, end_date) = 1 FROM n360.v_line_pace\n                         WHERE account IN (${account:singlequote}) AND pct_billed IS NOT NULL) AS same\n              FROM n360.v_line_pace WHERE account IN (${account:singlequote}) AND pct_billed IS NOT NULL)\n        GROUP BY same",
+          "rawSql": "SELECT if((SELECT count() FROM n360.ps_ticket) = 0, NULL,\n                  if(countIf(status = 'open') = 0, 'None open', toString(countIf(status = 'open')))) AS t\n        FROM n360.ps_ticket WHERE account IN (${account:singlequote})",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not added up"
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Used"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "locale"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Billed"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "locale"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "% of billed"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "percent"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              }
-            ]
+          "noValue": "Not reported yet",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
           }
-        ]
+        },
+        "overrides": []
       },
       "options": {
         "reduceOptions": {
@@ -466,96 +547,29 @@
           ],
           "fields": "/.*/"
         },
-        "textMode": "value_and_name",
+        "textMode": "value",
         "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
         "text": {
-          "titleSize": 12,
-          "valueSize": 18
+          "valueSize": 24
         }
-      },
-      "n360MayBeEmpty": "a customer with no measured line"
+      }
     },
     {
       "id": 7,
-      "title": "Main line, last 30 days",
-      "type": "stat",
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "n360-clickhouse"
-      },
-      "description": "The line or pool with the most use: its rate per day over the last 30 days (the stored forecast's rate), and whether that rate is a step change from its term average (more than 50% different, flagged upstream).\n\n**Source:** n360.forecast via n360.v_line_pace  \n**Filter:** Customer  \n**Window:** last 30 days to the data-through day",
-      "gridPos": {
-        "x": 16,
-        "y": 3,
-        "w": 8,
-        "h": 3
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "n360-clickhouse"
-          },
-          "editorType": "sql",
-          "queryType": "table",
-          "format": 1,
-          "rawSql": "SELECT argMax(if(entitlement = 'pool', 'Pooled entitlement', label), used) AS Line, argMax(round(rate_per_day), used) AS `Per day`,\n               argMax(ifNull(step_change, 'none'), used) AS `Step change`\n        FROM n360.v_line_pace WHERE account IN (${account:singlequote}) AND rate_per_day IS NOT NULL",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "Not reported yet"
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Per day"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "locale"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "/.*/"
-        },
-        "textMode": "value_and_name",
-        "colorMode": "none",
-        "text": {
-          "titleSize": 12,
-          "valueSize": 18
-        }
-      },
-      "n360MayBeEmpty": "a customer with no forecast"
-    },
-    {
-      "id": 8,
-      "title": "Contract lines",
+      "title": "Notes",
       "type": "table",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Every contract line not in a pool, in its own measure. A not implemented or not measurable line shows grey and \"Not reported yet\": it has no usage, never zero. Forecast to horizon and Runs out are the stored forecast (straight line at the last-30-day rate). Click a line to open it.\n\n**Source:** n360.v_line_pace (n360.v_line_status, n360.forecast)  \n**Filter:** Customer; lines not in a pool (pools below)  \n**Window:** start date to the data-through day; forecast to its horizon",
+      "description": "Pinned facts about this customer's contracts, from the contract data: pools, signed SOW terms, contract rules (live or pending), lines with no reading, ended terms, VAs on no contract.\n\n**Source:** n360.v_customer_notes (n360.pool, n360.contract_line, n360.rule, n360.v_contract_status, n360.va)  \n**Filter:** Customer  \n**Window:** the latest load",
       "gridPos": {
         "x": 0,
-        "y": 6,
-        "w": 24,
-        "h": 7
+        "y": 8,
+        "w": 12,
+        "h": 5
       },
       "targets": [
         {
@@ -566,16 +580,53 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT label AS Line, measure AS Measure, used AS Used, billed AS Billed, pct_billed AS `% of billed`,\n               pace AS Pace, pct_term AS `% of term`, forecast_m3 AS `Forecast to horizon`,\n               multiIf(exhaust_date IS NOT NULL, concat(toString(toDayOfMonth(exhaust_date)), ' ', formatDateTime(exhaust_date, '%b %Y')), pct_billed > 100, 'Already above billed', NULL) AS `Runs out`,\n               concat('/d/n360-line?var-account=', account, '&var-line=', line_key) AS drill\n        FROM n360.v_line_pace WHERE account IN (${account:singlequote}) AND entitlement = 'line'\n        ORDER BY pace_rank DESC, label",
+          "rawSql": "SELECT note AS Note FROM n360.v_customer_notes WHERE account IN (${account:singlequote}) ORDER BY o",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "All lines are pooled: see Pooled entitlement below",
-          "custom": {
-            "align": "auto"
-          }
+          "noValue": "No notes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": false,
+        "cellHeight": "sm"
+      },
+      "n360MayBeEmpty": "a customer with nothing to note"
+    },
+    {
+      "id": 8,
+      "title": "Needs attention",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Items from the Overview's Needs attention list for this customer (same rule, proposed thresholds). Click one to open it.\n\n**Source:** n360.v_needs_attention  \n**Filter:** Customer  \n**Window:** the latest load",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT subject AS `Line or VA`, issue AS Issue, concat(toString(toDayOfMonth(issue_date)), ' ', formatDateTime(issue_date, '%b %Y')) AS `Date`, drill\n        FROM n360.v_needs_attention WHERE account IN (${account:singlequote}) ORDER BY issue_date",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Nothing needs attention"
         },
         "overrides": [
           {
@@ -593,6 +644,209 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Issue"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 210
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Date"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 115
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Line or VA"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open",
+                    "url": "${__data.fields.drill}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "n360MayBeEmpty": "nothing needs attention"
+    },
+    {
+      "id": 9,
+      "title": "Contract lines",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Every line and pool, in its own contract measure; a pool's lines are listed under it for information, never against billed. The bar is % of billed (full at 100%; the number is the true %). At term end = the stored forecast's rate carried to the term end. Grey statuses have no reading (\"Not reported yet\", never zero). Click a line to open it.\n\n**Source:** n360.v_contract_status, n360.v_line_status  \n**Filter:** Customer  \n**Window:** start date to the data-through day",
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT Line, Status, `% of billed`, `% of term`, Used, Billed, `At term end`, `Term ends`, `Days left`, Measure, drill\n        FROM (\n            SELECT 0 AS o, status_rank AS r, line_label AS Line, if(renewal_risk, 'renewal risk', status) AS Status, pct_billed AS `% of billed`,\n                   pct_term AS `% of term`, used AS Used, billed AS Billed, forecast_end_pct AS `At term end`,\n                   concat(toString(toDayOfMonth(end_date)), ' ', formatDateTime(end_date, '%b %Y')) AS `Term ends`, days_left AS `Days left`, measure AS Measure, drill\n            FROM n360.v_contract_status WHERE account IN (${account:singlequote})\n            UNION ALL\n            SELECT 1, 99, concat('   in the pool: ', l.channel), 'in pool', NULL, NULL, s.consumed, NULL, NULL,\n                   concat(toString(toDayOfMonth(l.end_date)), ' ', formatDateTime(l.end_date, '%b %Y')), NULL, l.measure, concat('/d/n360-line?var-account=', l.account, '&var-line=', l.line_key)\n            FROM n360.v_line_status AS s INNER JOIN n360.contract_line AS l ON l.line_key = s.line_key\n            WHERE s.account IN (${account:singlequote}) AND s.pool_id IS NOT NULL)\n        ORDER BY o, r, Line",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No contract line (unbilled customer)"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "drill"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "over billed": {
+                        "text": "Over billed",
+                        "color": "#F2A07B",
+                        "index": 0
+                      },
+                      "will exceed": {
+                        "text": "Will exceed",
+                        "color": "#C3B0F2",
+                        "index": 1
+                      },
+                      "renewal risk": {
+                        "text": "Renewal risk",
+                        "color": "#3E7CC4",
+                        "index": 2
+                      },
+                      "below pace": {
+                        "text": "Below pace",
+                        "color": "#9CC8EE",
+                        "index": 3
+                      },
+                      "ahead": {
+                        "text": "Ahead",
+                        "color": "#76C893",
+                        "index": 4
+                      },
+                      "on pace": {
+                        "text": "On pace",
+                        "color": "#76C893",
+                        "index": 5
+                      },
+                      "too early": {
+                        "text": "Too early to tell",
+                        "color": "#D3D3D3",
+                        "index": 6
+                      },
+                      "under review": {
+                        "text": "Under review",
+                        "color": "#B4B4B4",
+                        "index": 7
+                      },
+                      "billed not recorded": {
+                        "text": "Billed not recorded",
+                        "color": "#B4B4B4",
+                        "index": 8
+                      },
+                      "unmapped": {
+                        "text": "Unmapped",
+                        "color": "#B4B4B4",
+                        "index": 9
+                      },
+                      "not built": {
+                        "text": "Not built",
+                        "color": "#B4B4B4",
+                        "index": 10
+                      },
+                      "not measured": {
+                        "text": "Not measured",
+                        "color": "#B4B4B4",
+                        "index": 11
+                      },
+                      "not read": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 12
+                      },
+                      "in pool": {
+                        "text": "In the pool",
+                        "color": "text",
+                        "index": 13
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "Used"
             },
             "properties": [
@@ -625,22 +879,6 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Forecast to horizon"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "locale"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
               "options": "% of billed"
             },
             "properties": [
@@ -650,7 +888,30 @@
               },
               {
                 "id": "decimals",
-                "value": 1
+                "value": 0
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#7F9CC0"
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
               }
             ]
           },
@@ -673,108 +934,59 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Pace"
+              "options": "% of term"
             },
             "properties": [
               {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "red": {
-                        "text": "Red",
-                        "color": "red",
-                        "index": 0
-                      },
-                      "amber": {
-                        "text": "Amber",
-                        "color": "orange",
-                        "index": 1
-                      },
-                      "green": {
-                        "text": "Green",
-                        "color": "green",
-                        "index": 2
-                      },
-                      "not measurable": {
-                        "text": "Not measurable",
-                        "color": "#8e8e8e",
-                        "index": 3
-                      },
-                      "not implemented": {
-                        "text": "Not implemented",
-                        "color": "#8e8e8e",
-                        "index": 4
-                      },
-                      "not read": {
-                        "text": "Not reported yet",
-                        "color": "#8e8e8e",
-                        "index": 5
-                      }
-                    }
-                  },
-                  {
-                    "type": "special",
-                    "options": {
-                      "match": "null",
-                      "result": {
-                        "text": "Not reported yet",
-                        "color": "#8e8e8e",
-                        "index": 0
-                      }
-                    }
-                  }
-                ]
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "At term end"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
               },
               {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
+                "id": "decimals",
+                "value": 1
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Pace"
+              "options": "At term end"
             },
             "properties": [
               {
-                "id": "custom.width",
-                "value": 70
+                "id": "decimals",
+                "value": 0
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Measure"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 190
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Used"
+              "options": "Days left"
             },
             "properties": [
               {
                 "id": "mappings",
                 "value": [
                   {
-                    "type": "special",
+                    "type": "range",
                     "options": {
-                      "match": "null",
+                      "from": -100000,
+                      "to": -1,
                       "result": {
-                        "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "text": "Ended",
                         "index": 0
                       }
                     }
@@ -797,8 +1009,7 @@
                     "options": {
                       "match": "null",
                       "result": {
-                        "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "text": "",
                         "index": 0
                       }
                     }
@@ -810,7 +1021,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Forecast to horizon"
+              "options": "At term end"
             },
             "properties": [
               {
@@ -821,8 +1032,7 @@
                     "options": {
                       "match": "null",
                       "result": {
-                        "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "text": "",
                         "index": 0
                       }
                     }
@@ -834,7 +1044,76 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Runs out"
+              "options": "Billed"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% of term"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Days left"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used"
             },
             "properties": [
               {
@@ -846,12 +1125,120 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
                   }
                 ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Line"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 140
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% of billed"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% of term"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 135
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Billed"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "At term end"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Term ends"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 115
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Days left"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
               }
             ]
           },
@@ -874,23 +1261,25 @@
           }
         ]
       },
-      "options": {},
-      "n360MayBeEmpty": "a customer whose lines are all pooled"
+      "options": {
+        "cellHeight": "sm"
+      },
+      "n360MayBeEmpty": "an unbilled customer"
     },
     {
-      "id": 9,
-      "title": "Pooled entitlement",
-      "type": "table",
+      "id": 10,
+      "title": "% of billed over the term",
+      "type": "timeseries",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "One billed amount shared by several lines of this customer. Use is compared with billed only at the pool; each line's own use is shown for information, never against billed. Shown only for customers with a pool.\n\n**Source:** n360.v_line_pace, n360.v_line_status (consumption_mapping.json \"pools\")  \n**Filter:** Customer  \n**Window:** start date to the data-through day",
+      "description": "Each line or pool's running total as % of its billed amount, from its start date (a pool as one line). The dashed line is 100% of billed. Days not read add nothing. Lines with no reading are left out.\n\n**Source:** n360.line_day, n360.v_contract_status  \n**Filter:** Customer; lines and pools with a billed amount  \n**Window:** each term from its start date",
       "gridPos": {
         "x": 0,
-        "y": 13,
-        "w": 24,
-        "h": 6
+        "y": 19,
+        "w": 12,
+        "h": 9
       },
       "targets": [
         {
@@ -899,217 +1288,119 @@
             "uid": "n360-clickhouse"
           },
           "editorType": "sql",
-          "queryType": "table",
-          "format": 1,
-          "rawSql": "SELECT label AS Entitlement, used AS Used, toNullable(billed) AS Billed, pct_billed AS `% of billed`,\n               pace AS Pace, pct_term AS `% of term`\n        FROM (SELECT 0 AS o, label, used, billed, pct_billed, pace, pct_term\n              FROM n360.v_line_pace WHERE account IN (${account:singlequote}) AND entitlement = 'pool'\n              UNION ALL\n              SELECT 1, concat('  ', l.channel, ' (in the pool)'), s.consumed, NULL, NULL, NULL, NULL\n              FROM n360.v_line_status AS s INNER JOIN n360.contract_line AS l ON l.line_key = s.line_key\n              WHERE s.account IN (${account:singlequote}) AND s.pool_id IS NOT NULL)\n        ORDER BY o, label",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "WITH ent AS (\n            SELECT l.series_key AS sk, if(l.pool_id IS NULL, c1.line_label, c2.line_label) AS lab,\n                   if(l.pool_id IS NULL, c1.billed, c2.billed) AS b, if(l.pool_id IS NULL, l.start_date, c2.start_date) AS st\n            FROM n360.contract_line AS l\n            LEFT JOIN (SELECT line_key, line_label, billed FROM n360.v_contract_status WHERE entitlement = 'line') AS c1\n                   ON c1.line_key = l.line_key\n            LEFT JOIN (SELECT account, pool_id, line_label, billed, start_date FROM n360.v_contract_status\n                       WHERE entitlement = 'pool') AS c2 ON c2.account = l.account AND c2.pool_id = l.pool_id\n            WHERE l.account IN (${account:singlequote})),\n             daily AS (SELECT d.day AS day, ent.lab AS lab, any(ent.b) AS b, sum(d.measured) AS m\n                       FROM n360.line_day AS d INNER JOIN ent ON ent.sk = d.series_key\n                       WHERE d.kind = 'line' AND d.day >= ent.st AND ent.b > 0 GROUP BY day, lab)\n        SELECT toDateTime(day) AS time, lab AS line,\n               round(100 * sum(m) OVER (PARTITION BY lab ORDER BY day ROWS UNBOUNDED PRECEDING) / b, 1) AS pct\n        FROM daily ORDER BY time",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "No pooled entitlement for this customer",
+          "noValue": "Not reported yet",
+          "unit": "percent",
+          "decimals": 0,
+          "min": 0,
+          "displayName": "${__field.labels.line}",
           "custom": {
-            "align": "auto"
+            "lineWidth": 2,
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#6E6E6E",
+                "value": 100
+              }
+            ]
+          },
+          "color": {
+            "mode": "shades",
+            "fixedColor": "#7F9CC0"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "n360MayBeEmpty": "no line with a billed amount",
+      "n360Reference": true,
+      "timeFrom": "1y"
+    },
+    {
+      "id": 11,
+      "title": "Conversations, and containment",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Conversations per day, week or month (Period picker) for the VAs chosen in the VA picker. The newest period is faded (\"Still counting\") while it is not over or holds days that may still settle. The line is containment (1 - handoffs / engaged, right axis), drawn only when the chosen VAs share one channel: containment is never added up across channels. Pick one VA to see its own.\n\n**Source:** n360.va_day, n360.va  \n**Filter:** Customer; VA  \n**Window:** dashboard time range, by the Period picker",
+      "gridPos": {
+        "x": 12,
+        "y": 19,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "WITH (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') AS dt,\n             (SELECT anomaly_provisional_days FROM n360.settings) AS settling\n        SELECT toDateTime(b) AS time,\n               if(partial, NULL, if(countIf(d.conversations IS NULL) > 0, NULL, sum(d.conversations))) AS Conversations,\n               if(partial, if(countIf(d.conversations IS NULL) > 0, NULL, sum(d.conversations)), NULL) AS `Still counting`,\n               -- containment only when the chosen VAs share one channel (never across channels)\n               if(uniqExact(arrayStringConcat(v.channels, ',')) = 1 AND sum(d.engaged) > 0 AND countIf(d.handoffs IS NULL) = 0,\n                  round(100 * (1 - sum(d.handoffs) / sum(d.engaged)), 1), NULL) AS `Containment %`\n        FROM (SELECT *, multiIf(${period:singlequote} = 'day', day, ${period:singlequote} = 'month', toStartOfMonth(day), toMonday(day)) AS b,\n                     multiIf(${period:singlequote} = 'day', day, ${period:singlequote} = 'month', toLastDayOfMonth(day), toMonday(day) + 6) AS b_end\n              FROM n360.va_day) AS d\n        INNER JOIN n360.va AS v ON v.bot_id = d.bot_id\n        WHERE d.account IN (${account:singlequote}) AND toString(d.bot_id) IN (${va:singlequote}) AND $__dateFilter(d.day)\n        GROUP BY b, b_end > dt OR b_end > dt - settling AS partial ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 85,
+            "lineWidth": 1,
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "barAlignment": 1
           }
         },
         "overrides": [
           {
             "matcher": {
               "id": "byName",
-              "options": "Used"
+              "options": "Conversations"
             },
             "properties": [
               {
-                "id": "unit",
-                "value": "locale"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Billed"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "locale"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "% of billed"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "percent"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "% of term"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "percent"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Billed"
-            },
-            "properties": [
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "special",
-                    "options": {
-                      "match": "null",
-                      "result": {
-                        "text": "At the pool",
-                        "color": "transparent",
-                        "index": 0
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "% of billed"
-            },
-            "properties": [
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "special",
-                    "options": {
-                      "match": "null",
-                      "result": {
-                        "text": "At the pool",
-                        "color": "transparent",
-                        "index": 0
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "% of term"
-            },
-            "properties": [
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "special",
-                    "options": {
-                      "match": "null",
-                      "result": {
-                        "text": "At the pool",
-                        "color": "transparent",
-                        "index": 0
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Pace"
-            },
-            "properties": [
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "red": {
-                        "text": "Red",
-                        "color": "red",
-                        "index": 0
-                      },
-                      "amber": {
-                        "text": "Amber",
-                        "color": "orange",
-                        "index": 1
-                      },
-                      "green": {
-                        "text": "Green",
-                        "color": "green",
-                        "index": 2
-                      },
-                      "not measurable": {
-                        "text": "Not measurable",
-                        "color": "#8e8e8e",
-                        "index": 3
-                      },
-                      "not implemented": {
-                        "text": "Not implemented",
-                        "color": "#8e8e8e",
-                        "index": 4
-                      },
-                      "not read": {
-                        "text": "Not reported yet",
-                        "color": "#8e8e8e",
-                        "index": 5
-                      }
-                    }
-                  },
-                  {
-                    "type": "special",
-                    "options": {
-                      "match": "null",
-                      "result": {
-                        "text": "At the pool",
-                        "color": "transparent",
-                        "index": 0
-                      }
-                    }
-                  }
-                ]
-              },
-              {
-                "id": "custom.cellOptions",
+                "id": "color",
                 "value": {
-                  "type": "color-background"
+                  "mode": "fixed",
+                  "fixedColor": "#7F9CC0"
                 }
               }
             ]
@@ -1117,106 +1408,76 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Pace"
+              "options": "Still counting"
             },
             "properties": [
               {
-                "id": "custom.width",
-                "value": 90
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#C3D2E6"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Containment %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#4A4A4A"
+                }
               }
             ]
           }
         ]
       },
-      "options": {},
-      "n360MayBeEmpty": "a customer with no pool"
-    },
-    {
-      "id": 10,
-      "title": "Used per week, per line",
-      "type": "timeseries",
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "n360-clickhouse"
-      },
-      "description": "Each line's contract measure per week, one series per line (never added up across lines). Not measurable and not implemented lines have no usage and are left out. A week with an unread day is a gap. Complete weeks only.\n\n**Source:** n360.line_day with n360.contract_line  \n**Filter:** Customer; measured lines  \n**Window:** dashboard time range, complete weeks (Monday start)",
-      "gridPos": {
-        "x": 0,
-        "y": 18,
-        "w": 12,
-        "h": 9
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "n360-clickhouse"
-          },
-          "editorType": "sql",
-          "queryType": "timeseries",
-          "format": 0,
-          "rawSql": "SELECT toDateTime(toMonday(d.day)) AS time, concat(l.channel, if(l.sheet_customer != l.account, concat(' (', l.sheet_customer, ')'), '')) AS line,\n               if(countIf(d.measured IS NULL) > 0, NULL, sum(d.measured)) AS used\n        FROM n360.line_day AS d INNER JOIN n360.contract_line AS l ON l.series_key = d.series_key\n        WHERE d.kind = 'line' AND d.account IN (${account:singlequote}) AND l.measure NOT IN ('not measurable', 'not implemented')\n          AND $__dateFilter(d.day) AND toMonday(d.day) >= toDate($__fromTime) AND toMonday(d.day) + 6 <= (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded')\n        GROUP BY time, line ORDER BY time",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "Not reported yet",
-          "unit": "locale",
-          "decimals": 0,
-          "displayName": "${__field.labels.line}",
-          "custom": {
-            "spanNulls": false,
-            "lineWidth": 2
-          }
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
         },
-        "overrides": []
-      },
-      "options": {}
-    },
-    {
-      "id": 11,
-      "title": "Containment per VA (weekly)",
-      "type": "timeseries",
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "n360-clickhouse"
-      },
-      "description": "containment = 1 - handoffs / engaged conversations, per VA and week. One line per VA, so channels are never combined. VAs whose handoffs are not read (conversation records reader) are not shown, rather than shown as zero.\n\n**Source:** the platform daily conversation aggregate table (n360.va_day, n360.va)  \n**Filter:** Customer; VAs with handoff data; weeks with engaged conversations  \n**Window:** dashboard time range, by week (Monday start)",
-      "gridPos": {
-        "x": 12,
-        "y": 18,
-        "w": 12,
-        "h": 9
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "n360-clickhouse"
-          },
-          "editorType": "sql",
-          "queryType": "timeseries",
-          "format": 0,
-          "rawSql": "SELECT toDateTime(toMonday(d.day)) AS time, concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')') AS va,\n               1 - sum(d.handoffs) / sum(d.engaged) AS containment\n        FROM n360.va_day AS d INNER JOIN n360.va AS v ON v.bot_id = d.bot_id\n        WHERE d.account IN (${account:singlequote}) AND d.handoffs IS NOT NULL AND $__dateFilter(d.day)\n        GROUP BY time, va HAVING sum(d.engaged) > 0 ORDER BY time",
-          "refId": "A"
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
         }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "Not reported yet",
-          "unit": "percentunit",
-          "min": 0,
-          "max": 1,
-          "decimals": 1,
-          "displayName": "${__field.labels.va}",
-          "custom": {
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
-      "options": {}
+      }
     },
     {
       "id": 12,
@@ -1226,12 +1487,12 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Every VA of this customer. Containment = 1 - handoffs / engaged, per VA; \"Not reported yet\" where handoffs are not read (conversation records reader), never 0% or 100%. Flags = drops, silences and spikes on settled days; provisional = the newest 3 days. Click a VA to open it.\n\n**Source:** n360.va, n360.va_day, n360.v_va_day_anomaly  \n**Filter:** Customer  \n**Window:** the 30 days to the data-through day",
+      "description": "Every VA of this customer: engine and coverage (V8 playbooks against legacy intents, from the newest weekly configuration read), conversations and containment over the last 30 days against the 30 before. Containment is per VA, never across channels; \"Not reported yet\" where handoffs are not read. Flags: conversations down 10%+ or containment down 3+ points (proposed, n360.settings). Click a VA to open it.\n\n**Source:** n360.v_va_change (n360.va_day), n360.v_va_config_latest  \n**Filter:** Customer  \n**Window:** the 60 days to the data-through day; the newest configuration read",
       "gridPos": {
         "x": 0,
-        "y": 27,
+        "y": 28,
         "w": 24,
-        "h": 6
+        "h": 5
       },
       "targets": [
         {
@@ -1242,16 +1503,13 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')') AS VA, toString(v.region) AS Region, toString(v.consumption_source) AS Reader,\n               if(countIf(d.conversations IS NULL) > 0, NULL, sum(d.conversations)) AS `Conversations, 30 days`,\n               if(countIf(d.handoffs IS NOT NULL) = 0, NULL, 1 - sumIf(d.handoffs, d.handoffs IS NOT NULL) / sumIf(d.engaged, d.handoffs IS NOT NULL)) AS `Containment, 30 days`,\n               any(f.n_settled) AS `Flags, 30 days`, any(f.n_provisional) AS `Provisional`,\n               concat('/d/n360-va?var-account=', v.account, '&var-va=', toString(v.bot_id)) AS drill\n        FROM n360.va AS v\n        LEFT JOIN n360.va_day AS d ON d.bot_id = v.bot_id AND d.day > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 30\n        LEFT JOIN (SELECT bot_id, countIf(NOT provisional) AS n_settled, countIf(provisional) AS n_provisional\n                   FROM n360.v_va_day_anomaly WHERE kind != 'normal' AND day > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 30 GROUP BY bot_id) AS f\n               ON f.bot_id = v.bot_id\n        WHERE v.account IN (${account:singlequote})\n        GROUP BY v.bot_id, v.account, v.va_name, v.channels, v.region, v.consumption_source ORDER BY VA",
+          "rawSql": "SELECT c.va AS VA, cfg.engine_version AS Engine, if(cfg.bot_id IS NULL, NULL, if(cfg.current_engine, 'V8 or later', 'Older'))\n                   AS `Engine status`, cfg.v8_playbooks AS `V8 playbooks`, cfg.legacy_intents AS `Legacy intents`,\n               c.convs_30 AS `Conversations, 30 days`, c.convs_change_pct AS `vs previous 30`,\n               c.containment_30 AS Containment, c.containment_change_pts AS `Change (points)`,\n               arrayStringConcat(arrayFilter(x -> x != '', [if(c.convs_down, 'Conversations down', ''),\n                                                            if(c.containment_down, 'Containment down', '')]), ' \u00b7 ') AS Flag,\n               concat('/d/n360-va?var-account=', c.account, '&var-va=', toString(c.bot_id)) AS drill\n        FROM n360.v_va_change AS c\n        LEFT JOIN (SELECT toNullable(bot_id) AS bot_id, engine_version, current_engine, v8_playbooks, legacy_intents\n                   FROM n360.v_va_config_latest) AS cfg ON cfg.bot_id = c.bot_id\n        WHERE c.account IN (${account:singlequote}) ORDER BY `Conversations, 30 days` DESC",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet",
-          "custom": {
-            "align": "auto"
-          }
+          "noValue": "Not reported yet"
         },
         "overrides": [
           {
@@ -1285,12 +1543,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Flags, 30 days"
+              "options": "vs previous 30"
             },
             "properties": [
               {
                 "id": "unit",
-                "value": "locale"
+                "value": "percent"
               },
               {
                 "id": "decimals",
@@ -1301,12 +1559,12 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Provisional"
+              "options": "Containment"
             },
             "properties": [
               {
                 "id": "unit",
-                "value": "locale"
+                "value": "percent"
               },
               {
                 "id": "decimals",
@@ -1317,17 +1575,135 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Containment, 30 days"
+              "options": "Change (points)"
             },
             "properties": [
-              {
-                "id": "unit",
-                "value": "percentunit"
-              },
               {
                 "id": "decimals",
                 "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Engine status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "V8 or later": {
+                        "text": "V8 or later",
+                        "color": "#76C893",
+                        "index": 0
+                      },
+                      "Older": {
+                        "text": "Older",
+                        "color": "#F0C25A",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
               },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Flag"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Conversations down": {
+                        "text": "Conversations down",
+                        "color": "#D9695F",
+                        "index": 0
+                      },
+                      "Containment down": {
+                        "text": "Containment down",
+                        "color": "#D9695F",
+                        "index": 1
+                      },
+                      "Conversations down \u00b7 Containment down": {
+                        "text": "Conversations and containment down",
+                        "color": "#D9695F",
+                        "index": 2
+                      },
+                      "": {
+                        "text": "",
+                        "color": "text",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Engine"
+            },
+            "properties": [
               {
                 "id": "mappings",
                 "value": [
@@ -1337,7 +1713,55 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "V8 playbooks"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Legacy intents"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -1361,12 +1785,132 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
                   }
                 ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vs previous 30"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Containment"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Change (points)"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VA"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 200
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Engine"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Engine status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Flag"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 230
               }
             ]
           },
@@ -1389,10 +1933,223 @@
           }
         ]
       },
-      "options": {}
+      "options": {
+        "cellHeight": "sm"
+      }
     },
     {
       "id": 13,
+      "title": "Target features",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Which target features this customer used in the last 30 days (proposed list). Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.v_feature_use  \n**Filter:** Customer  \n**Window:** the 30 days to the data-through day",
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT feature AS Feature, if(used IS NULL, NULL, if(used, 'Used', 'Not used')) AS `Last 30 days`\n        FROM n360.v_feature_use WHERE account IN (${account:singlequote}) ORDER BY feature",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last 30 days"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Used": {
+                        "text": "Used",
+                        "color": "#76C893",
+                        "index": 0
+                      },
+                      "Not used": {
+                        "text": "Not used",
+                        "color": "#D3D3D3",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 14,
+      "title": "Playbooks, last 31 days",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Executions per playbook. \"Built, not run\" = authored and live but run 0 times (v1.1 \"Authored, not live\"). Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.playbook_day  \n**Filter:** Customer  \n**Window:** the 31 days to the data-through day",
+      "gridPos": {
+        "x": 8,
+        "y": 33,
+        "w": 16,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT pb.playbook AS Playbook, concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')') AS VA, sum(pb.executions) AS Executions,\n               if(sum(pb.executions) = 0, 'Built, not run', 'Running') AS Status\n        FROM n360.playbook_day AS pb INNER JOIN n360.va AS v ON v.bot_id = pb.bot_id\n        WHERE pb.account IN (${account:singlequote}) AND pb.day > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 31\n        GROUP BY pb.playbook, v.va_name, v.channels ORDER BY Executions, Playbook",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No playbook data for this customer"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Executions"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Built, not run": {
+                        "text": "Built, not run",
+                        "color": "#F0C25A",
+                        "index": 0
+                      },
+                      "Running": {
+                        "text": "Running",
+                        "color": "text",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm"
+      },
+      "n360MayBeEmpty": "no playbook data"
+    },
+    {
+      "id": 15,
       "title": "Recent anomalies",
       "type": "table",
       "datasource": {
@@ -1402,8 +2159,8 @@
       "description": "Days a VA went silent, dropped (z of -4 or lower) or spiked (4 or higher) against the same weekday over the previous 8 weeks. Provisional days (the newest 3) may still change and never alert.\n\n**Source:** n360.v_va_day_anomaly  \n**Filter:** Customer; flagged days only  \n**Window:** the 30 days to the data-through day",
       "gridPos": {
         "x": 0,
-        "y": 33,
-        "w": 24,
+        "y": 40,
+        "w": 12,
         "h": 6
       },
       "targets": [
@@ -1415,7 +2172,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT concat(toString(toDayOfMonth(a.day)), ' ', formatDateTime(a.day, '%b %Y')) AS Day, concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')') AS VA, a.kind AS Kind, a.actual AS Actual, a.expected AS Expected,\n               a.z AS z, if(a.provisional, 'Provisional', 'Settled') AS Status\n        FROM n360.v_va_day_anomaly AS a INNER JOIN n360.va AS v ON v.bot_id = a.bot_id\n        WHERE a.account IN (${account:singlequote}) AND a.kind != 'normal' AND a.day > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 30\n        ORDER BY a.day DESC",
+          "rawSql": "SELECT concat(toString(toDayOfMonth(a.day)), ' ', formatDateTime(a.day, '%b %Y')) AS Day, concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')') AS VA, a.kind AS Kind, a.actual AS Actual, a.expected AS Expected,\n               if(a.provisional, 'Provisional', 'Settled') AS State\n        FROM n360.v_va_day_anomaly AS a INNER JOIN n360.va AS v ON v.bot_id = a.bot_id\n        WHERE a.account IN (${account:singlequote}) AND a.kind != 'normal' AND a.day > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 30\n        ORDER BY a.day DESC",
           "refId": "A"
         }
       ],
@@ -1459,7 +2216,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Status"
+              "options": "Kind"
             },
             "properties": [
               {
@@ -1468,15 +2225,31 @@
                   {
                     "type": "value",
                     "options": {
-                      "Provisional": {
-                        "text": "Provisional",
-                        "color": "orange",
+                      "drop": {
+                        "text": "Drop",
+                        "color": "#D9695F",
                         "index": 0
                       },
-                      "Settled": {
-                        "text": "Settled",
-                        "color": "red",
+                      "went silent": {
+                        "text": "Went silent",
+                        "color": "#D9695F",
                         "index": 1
+                      },
+                      "spike": {
+                        "text": "Spike",
+                        "color": "#5E93DB",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
                       }
                     }
                   }
@@ -1487,27 +2260,64 @@
                 "value": {
                   "type": "color-text"
                 }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "State"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Settled": {
+                        "text": "Settled",
+                        "color": "text",
+                        "index": 0
+                      },
+                      "Provisional": {
+                        "text": "Provisional",
+                        "color": "#B4B4B4",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
               }
             ]
           }
         ]
       },
-      "options": {},
+      "options": {
+        "cellHeight": "sm"
+      },
       "n360MayBeEmpty": "a customer with no flags"
     },
     {
-      "id": 14,
+      "id": 16,
       "title": "Requests",
       "type": "table",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "This customer's support tickets; area and ask are tagged by hand (\"Not tagged yet\" until then). Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** Customer  \n**Window:** all tickets",
+      "description": "This customer's support tickets, open first; area and ask are tagged by hand (\"Not tagged yet\" until then). Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** Customer  \n**Window:** all tickets",
       "gridPos": {
-        "x": 0,
-        "y": 39,
-        "w": 24,
+        "x": 12,
+        "y": 40,
+        "w": 12,
         "h": 6
       },
       "targets": [
@@ -1519,7 +2329,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT concat(toString(toDayOfMonth(opened)), ' ', formatDateTime(opened, '%b %Y')) AS Opened, title AS Title, product_area AS Area, ask AS Ask, status AS Status\n        FROM n360.ps_ticket WHERE account IN (${account:singlequote}) ORDER BY opened DESC",
+          "rawSql": "SELECT concat(toString(toDayOfMonth(opened)), ' ', formatDateTime(opened, '%b %Y')) AS Opened, title AS Title, product_area AS Area, ask AS Ask, status AS Status\n        FROM n360.ps_ticket WHERE account IN (${account:singlequote}) ORDER BY status = 'open' DESC, opened DESC",
           "refId": "A"
         }
       ],
@@ -1543,7 +2353,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not tagged yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -1567,7 +2377,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not tagged yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -1575,17 +2385,43 @@
                 ]
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Opened"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
           }
         ]
       },
-      "options": {},
+      "options": {
+        "cellHeight": "sm"
+      },
       "n360MayBeEmpty": "a customer with no tickets"
     }
   ],
   "links": [
     {
       "type": "link",
-      "title": "Back to Portfolio overview",
+      "title": "Back to Overview",
       "url": "/d/n360-overview",
       "icon": "dashboard",
       "keepTime": true,

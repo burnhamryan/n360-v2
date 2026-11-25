@@ -46,18 +46,18 @@
   },
   "panels": [
     {
-      "id": 1,
-      "title": "Data through",
+      "id": 10,
+      "title": "In one sentence",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Last day included in this load (the nightly window ends at 23:59 UTC that day).\n\n**Source:** n360.runs, written by load.py only after every data check passes  \n**Filter:** loaded runs only; the latest  \n**Window:** the latest load",
+      "description": "This VA's conversations over the last 30 days against the 30 before, its containment (per VA only), and the newest scored day against its own normal.\n\n**Source:** n360.v_va_change, n360.v_va_day_anomaly  \n**Filter:** VA  \n**Window:** the 60 days to the data-through day",
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 4,
+        "w": 18,
         "h": 3
       },
       "targets": [
@@ -69,19 +69,17 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT formatDateTime(window_end, '%e %b %Y') AS data_through\n        FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
+          "rawSql": "SELECT concat(c.va, ': ', if(c.convs_30 IS NULL, 'conversations not reported for every day of the last 30',\n                      concat(if(c.convs_30 IS NULL, NULL, if(c.convs_30 >= 1000000, concat(toString(intDiv(c.convs_30, 1000000)), ',', leftPad(toString(intDiv(c.convs_30, 1000) % 1000), 3, '0'), ',', leftPad(toString(c.convs_30 % 1000), 3, '0')), if(c.convs_30 >= 1000, concat(toString(intDiv(c.convs_30, 1000)), ',', leftPad(toString(c.convs_30 % 1000), 3, '0')), toString(c.convs_30)))), ' conversations in 30 days',\n                             if(c.convs_change_pct IS NULL, '', concat(' (', if(c.convs_change_pct >= 0, '+', ''),\n                                toString(round(c.convs_change_pct)), '% on the 30 before)')))),\n                      ' \u00b7 containment ', if(c.containment_30 IS NULL, 'not reported (no handoff data)',\n                                            concat(toString(round(c.containment_30)), '%')),\n                      ' \u00b7 newest scored day: ', ifNull(a.k, 'not scored')) AS sentence\n        FROM n360.v_va_change AS c\n        LEFT JOIN (SELECT bot_id, toNullable(concat(argMax(kind, day), if(argMax(provisional, day), ' (provisional)', ''))) AS k\n                   FROM n360.v_va_day_anomaly GROUP BY bot_id) AS a ON a.bot_id = c.bot_id\n        WHERE toString(c.bot_id) IN (${va:singlequote})",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet",
-          "links": [
-            {
-              "title": "Pipeline health",
-              "url": "/d/n360-pipeline?${__url_time_range}"
-            }
-          ]
+          "noValue": "Nothing loaded yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
         },
         "overrides": []
       },
@@ -93,22 +91,27 @@
           "fields": "/.*/"
         },
         "textMode": "value",
-        "colorMode": "none"
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "valueSize": 17
+        }
       }
     },
     {
-      "id": 2,
-      "title": "Last night",
+      "id": 11,
+      "title": "Data",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Result of the latest nightly run. A stopped night leaves the previous good night on screen.\n\n**Source:** n360.runs (load.py writes one row per night, loaded or not)  \n**Filter:** none  \n**Window:** the latest run",
+      "description": "The last day of usage in this load, and the day it was loaded. Amber when the data is more than 2 days old (n360.settings stamp_stale_days): the numbers are the last good night's. Click for Pipeline health.\n\n**Source:** n360.v_freshness (n360.runs: loaded runs only)  \n**Filter:** none  \n**Window:** the latest load",
       "gridPos": {
-        "x": 4,
+        "x": 18,
         "y": 0,
-        "w": 4,
+        "w": 6,
         "h": 3
       },
       "targets": [
@@ -120,7 +123,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
+          "rawSql": "SELECT concat(stamp, if(stale, concat(' \u00b7 ', toString(days_old), ' days old'), '')) AS stamp FROM n360.v_freshness",
           "refId": "A"
         }
       ],
@@ -129,21 +132,26 @@
           "noValue": "Not reported yet",
           "mappings": [
             {
-              "type": "value",
+              "type": "regex",
               "options": {
-                "loaded": {
-                  "text": "Loaded",
-                  "color": "green",
+                "pattern": ".* days old$",
+                "result": {
+                  "color": "#F0C25A",
                   "index": 0
-                },
-                "failed_checks": {
-                  "text": "Stopped: data checks failed",
-                  "color": "red",
-                  "index": 1
                 }
               }
             }
-          ]
+          ],
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline"
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
         },
         "overrides": []
       },
@@ -155,7 +163,12 @@
           "fields": "/.*/"
         },
         "textMode": "value",
-        "colorMode": "background"
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 13
+        }
       }
     },
     {
@@ -168,9 +181,9 @@
       },
       "description": "The newest scored day for this VA. Provisional (newest 3 days) may still change. \"Not scored\": the VA has under 8 weeks of history or under 20 conversations on a typical weekday.\n\n**Source:** n360.v_va_day_anomaly  \n**Filter:** VA  \n**Window:** the newest scored day",
       "gridPos": {
-        "x": 8,
-        "y": 0,
-        "w": 4,
+        "x": 0,
+        "y": 3,
+        "w": 6,
         "h": 3
       },
       "targets": [
@@ -200,37 +213,37 @@
                 },
                 "Not scored": {
                   "text": "Not scored",
-                  "color": "#8e8e8e",
+                  "color": "#B4B4B4",
                   "index": 1
                 },
                 "Went silent": {
                   "text": "Went silent",
-                  "color": "red",
+                  "color": "#D9695F",
                   "index": 2
                 },
                 "Went silent (provisional)": {
                   "text": "Went silent (provisional)",
-                  "color": "orange",
+                  "color": "rgba(217, 105, 95, 0.35)",
                   "index": 3
                 },
                 "Drop": {
                   "text": "Drop",
-                  "color": "red",
+                  "color": "#D9695F",
                   "index": 4
                 },
                 "Drop (provisional)": {
                   "text": "Drop (provisional)",
-                  "color": "orange",
+                  "color": "rgba(217, 105, 95, 0.35)",
                   "index": 5
                 },
                 "Spike": {
                   "text": "Spike",
-                  "color": "red",
+                  "color": "#5E93DB",
                   "index": 6
                 },
                 "Spike (provisional)": {
                   "text": "Spike (provisional)",
-                  "color": "orange",
+                  "color": "rgba(94, 147, 219, 0.35)",
                   "index": 7
                 }
               }
@@ -264,9 +277,9 @@
       },
       "description": "Conversations started in the 30 days to the data-through day. \"Not reported yet\" if any day was not read.\n\n**Source:** n360.va_day  \n**Filter:** VA  \n**Window:** the 30 days to the data-through day",
       "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 4,
+        "x": 6,
+        "y": 3,
+        "w": 6,
         "h": 3
       },
       "targets": [
@@ -315,9 +328,9 @@
       },
       "description": "Expected conversations for the newest scored day: the median of the same weekday over the previous 8 weeks.\n\n**Source:** n360.v_va_day_anomaly  \n**Filter:** VA  \n**Window:** previous 8 weeks, same weekday",
       "gridPos": {
-        "x": 16,
-        "y": 0,
-        "w": 4,
+        "x": 12,
+        "y": 3,
+        "w": 6,
         "h": 3
       },
       "targets": [
@@ -366,9 +379,9 @@
       },
       "description": "1 - handoffs / engaged, for this VA only. \"Not reported yet\" where handoffs are not read.\n\n**Source:** n360.va_day  \n**Filter:** VA  \n**Window:** the 30 days to the data-through day",
       "gridPos": {
-        "x": 20,
-        "y": 0,
-        "w": 4,
+        "x": 18,
+        "y": 3,
+        "w": 6,
         "h": 3
       },
       "targets": [
@@ -418,7 +431,7 @@
       "description": "Each day's conversations (line), the expected value for that weekday (dots) and the range within which a day is not flagged (shaded: expected +/- 4 spreads). Flags: red settled, orange provisional. Days not scored have no expected value; days not read are gaps.\n\n**Source:** n360.va_day, n360.v_va_day_anomaly  \n**Filter:** VA  \n**Window:** dashboard time range, daily",
       "gridPos": {
         "x": 0,
-        "y": 3,
+        "y": 6,
         "w": 24,
         "h": 10
       },
@@ -459,7 +472,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "blue"
+                  "fixedColor": "#7F9CC0"
                 }
               }
             ]
@@ -482,7 +495,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "#8e8e8e"
+                  "fixedColor": "#B4B4B4"
                 }
               }
             ]
@@ -509,7 +522,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "#8e8e8e"
+                  "fixedColor": "#B4B4B4"
                 }
               },
               {
@@ -536,7 +549,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "#8e8e8e"
+                  "fixedColor": "#B4B4B4"
                 }
               },
               {
@@ -567,7 +580,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "red"
+                  "fixedColor": "#D9695F"
                 }
               }
             ]
@@ -590,7 +603,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "orange"
+                  "fixedColor": "rgba(217, 105, 95, 0.35)"
                 }
               }
             ]
@@ -610,7 +623,7 @@
       "description": "Every flagged day for this VA in the time range. Provisional days may still change.\n\n**Source:** n360.v_va_day_anomaly  \n**Filter:** VA; flagged days  \n**Window:** dashboard time range",
       "gridPos": {
         "x": 0,
-        "y": 13,
+        "y": 16,
         "w": 12,
         "h": 10
       },
@@ -691,6 +704,63 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Kind"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "drop": {
+                        "text": "Drop",
+                        "color": "#D9695F",
+                        "index": 0
+                      },
+                      "went silent": {
+                        "text": "Went silent",
+                        "color": "#D9695F",
+                        "index": 1
+                      },
+                      "spike": {
+                        "text": "Spike",
+                        "color": "#5E93DB",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "z"
             },
             "properties": [
@@ -712,14 +782,14 @@
                   {
                     "type": "value",
                     "options": {
-                      "Provisional": {
-                        "text": "Provisional",
-                        "color": "orange",
-                        "index": 0
-                      },
                       "Settled": {
                         "text": "Settled",
-                        "color": "red",
+                        "color": "text",
+                        "index": 0
+                      },
+                      "Provisional": {
+                        "text": "Provisional",
+                        "color": "#B4B4B4",
                         "index": 1
                       }
                     }
@@ -750,7 +820,7 @@
       "description": "Where this VA's counts come from, and its newest weekly configuration read (Phase 2: \"Not reported yet\" until that read is in the export).\n\n**Source:** n360.va, n360.va_day, n360.v_va_config_latest  \n**Filter:** VA  \n**Window:** the latest load; the newest configuration read",
       "gridPos": {
         "x": 12,
-        "y": 13,
+        "y": 16,
         "w": 12,
         "h": 10
       },
@@ -799,7 +869,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -829,7 +899,7 @@
     },
     {
       "type": "link",
-      "title": "Back to Portfolio overview",
+      "title": "Back to Overview",
       "url": "/d/n360-overview",
       "icon": "dashboard",
       "keepTime": true,

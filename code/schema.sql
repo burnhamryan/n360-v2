@@ -315,7 +315,22 @@ SELECT
     14  AS pace_change_days,         -- alert / anomaly v2: crossing date moved this many days earlier overnight
     10  AS containment_drop_pts,     -- anomaly v2: weekly containment this many points below its 8-week median
     200 AS containment_min_engaged,  -- ... on at least this many engaged that week
-    20  AS measure_gap_pts;          -- anomaly v2: measure / engaged ratio this many points from its usual level
+    20  AS measure_gap_pts,          -- anomaly v2: measure / engaged ratio this many points from its usual level
+    -- contract status and attention (dashboard review, 25 Nov 2026): PROPOSED, from the v2 redesign spec; Ryan to approve
+    10  AS status_pace_pts,          -- ahead / below pace: % of billed this many points above / below % of term
+    30  AS status_too_early_days,    -- too early to tell: fewer days into the term than this
+    50  AS renewal_risk_pct,         -- renewal risk: under this % of billed used ...
+    120 AS renewal_risk_days,        -- ... with this many days or fewer left
+    90  AS decision_window_days,     -- decisions due: terms ending within this many days
+    30  AS ending_soon_days,         -- overview: lines ending within this many days
+    90  AS ended_recent_days,        -- needs attention: a term that ended within this many days
+    1000 AS attention_va_min_convs,  -- needs attention: a VA with at least this many conversations (previous 30 days) ...
+    25  AS attention_va_drop_pct,    -- ... down this % or more (last 30 days against the 30 before)
+    10  AS health_convs_down_pct,    -- customer health: VA conversations down this % or more
+    3   AS health_containment_down_pts, -- customer health: VA containment down this many points or more
+    50  AS containment_low_pct,      -- adoption: VAs containing under this %
+    3   AS target_features_min,      -- adoption: customers using at least this many target features
+    2   AS stamp_stale_days;         -- freshness stamp turns amber when the data is more than this many days old
 
 
 CREATE OR REPLACE VIEW n360.v_line_status AS
@@ -753,3 +768,214 @@ SELECT model, horizon_days, count() AS forecasts,
 FROM n360.forecast_challenger
 WHERE run_id = (SELECT argMax(run_id, run_at) FROM n360.forecast_challenger) AND actual > 0
 GROUP BY model, horizon_days;
+
+-- ───────────────────────── contract status and attention (dashboard review, 25 Nov 2026) ─────────────────────
+-- The v1.1 page's contract statuses, decided HERE and nowhere else; dashboards only map a status to its colour.
+-- Thresholds are PROPOSED (n360.settings). One row per entitlement: every line not in a pool, and each pool once.
+--   not built            the line is contracted but nothing is implemented (measure 'not implemented')
+--   not measured         the contract unit is one the platform does not count (measure 'not measurable')
+--   billed not recorded  the billed amount is blank on the sheet and the line is not in a pool
+--   unmapped             no VA is mapped to the line yet
+--   under review         the line's contract rule is not live yet (pending or blocked): measured on engaged for now
+--   not read             no use was read for the line
+--   over billed          used is above billed
+--   will exceed          the stored forecast crosses billed before the term ends
+--   too early            fewer than status_too_early_days into the term
+--   ahead / below pace   % of billed more than status_pace_pts above / below % of term
+--   on pace              otherwise
+-- renewal_risk (a flag on top): under renewal_risk_pct used with renewal_risk_days or fewer left in the term.
+CREATE OR REPLACE VIEW n360.v_contract_status AS
+WITH (SELECT status_pace_pts FROM n360.settings) AS pace_pts,
+     (SELECT status_too_early_days FROM n360.settings) AS early_days,
+     (SELECT renewal_risk_pct FROM n360.settings) AS risk_pct,
+     (SELECT renewal_risk_days FROM n360.settings) AS risk_days,
+     (SELECT decision_window_days FROM n360.settings) AS window_days,
+     (SELECT ended_recent_days FROM n360.settings) AS ended_days,
+     lines AS (SELECT l.line_key AS lk, l.rule_id AS rid, l.billed IS NULL AS no_billed, ifNull(m.n, 0) = 0 AS no_va
+               FROM n360.contract_line AS l
+               LEFT JOIN (SELECT line_key, toNullable(count()) AS n FROM n360.line_va GROUP BY line_key) AS m
+                      ON m.line_key = l.line_key),
+     rules AS (SELECT rule_id AS rid, status AS rstatus FROM n360.rule)
+SELECT p.account AS account, a.display_name AS display_name, a.csm_rocketlane AS csm, p.entitlement AS entitlement,
+       p.line_key AS line_key, p.pool_id AS pool_id, p.series_key AS series_key, p.label AS label,
+       -- customer · line; a pool's name usually repeats the customer ("Bluebird Air: 3 lines ..."): not twice
+       if(startsWith(p.label, concat(a.display_name, ':')), trimLeft(substring(p.label, length(a.display_name) + 2)), p.label)
+           AS line_label,
+       concat(a.display_name, ' · ', line_label) AS full_label,
+       p.measure AS measure, p.used AS used, p.billed AS billed,
+       p.pct_billed AS pct_billed, p.pct_term AS pct_term, p.start_date AS start_date, p.end_date AS end_date,
+       p.data_through AS data_through, dateDiff('day', p.data_through, p.end_date) AS days_left,
+       dateDiff('day', p.start_date, p.data_through) + 1 AS days_in, p.term_ended AS term_ended,
+       p.cross_date AS cross_date, p.rate_per_day AS rate_per_day,
+       -- forecast at term end: the stored forecast's rate carried to the end of the term (never refitted)
+       if(p.billed > 0 AND p.rate_per_day IS NOT NULL,
+          round(100 * (p.used + p.rate_per_day * greatest(dateDiff('day', p.data_through, p.end_date), 0)) / p.billed, 1),
+          NULL) AS forecast_end_pct,
+       multiIf(p.measure = 'not implemented', 'not built',
+               p.measure = 'not measurable', 'not measured',
+               p.entitlement = 'line' AND ln.no_billed, 'billed not recorded',
+               p.entitlement = 'line' AND ln.no_va, 'unmapped',
+               p.entitlement = 'line' AND ln.rid IS NOT NULL AND ifNull(r.rstatus, '') != 'active', 'under review',
+               p.pct_billed IS NULL, 'not read',
+               p.pct_billed > 100, 'over billed',
+               p.cross_date IS NOT NULL, 'will exceed',
+               days_in < early_days, 'too early',
+               p.pct_billed - p.pct_term > pace_pts, 'ahead',
+               p.pct_term - p.pct_billed > pace_pts, 'below pace',
+               'on pace') AS status,
+       status IN ('below pace', 'on pace', 'ahead', 'too early') AND p.pct_billed < risk_pct
+           AND days_left BETWEEN 0 AND risk_days AS renewal_risk,
+       -- urgency order for every sorted list: over, will exceed, renewal risk, below, ahead, on pace, then no reading
+       multiIf(status = 'over billed', 1, status = 'will exceed', 2, renewal_risk, 3, status = 'below pace', 4,
+               status = 'ahead', 5, status = 'on pace', 6, status = 'too early', 7, status = 'under review', 8,
+               status = 'billed not recorded', 9, status = 'unmapped', 10, status = 'not built', 11,
+               status = 'not measured', 12, 13) AS status_rank,
+       -- what needs a decision: at most 6 words, plus the date it is about
+       multiIf(p.term_ended, 'Term ended',
+               status = 'over billed', 'Over billed',
+               status = 'will exceed', 'Set to exceed billed',
+               renewal_risk, concat('Renewal risk: ', toString(round(p.pct_billed)), '% used'),
+               days_left BETWEEN 0 AND window_days, 'Term ends soon', '') AS issue,
+       multiIf(p.term_ended, p.end_date, status = 'over billed', p.data_through, status = 'will exceed', p.cross_date,
+               p.end_date) AS issue_date,
+       (p.term_ended AND dateDiff('day', p.end_date, p.data_through) <= ended_days)
+           OR status IN ('over billed', 'will exceed') OR renewal_risk AS needs_attention,
+       needs_attention OR days_left BETWEEN 0 AND window_days AS decision_due,
+       if(p.entitlement = 'pool', concat('/d/n360-customer?var-account=', p.account),
+          concat('/d/n360-line?var-account=', p.account, '&var-line=', p.line_key)) AS drill
+FROM n360.v_line_pace AS p
+INNER JOIN n360.account AS a ON a.account = p.account
+LEFT JOIN lines AS ln ON ln.lk = p.line_key
+LEFT JOIN rules AS r ON r.rid = ln.rid;   -- no join_use_nulls (25.8 ignores it in a view): unmatched = false / ''
+
+CREATE OR REPLACE VIEW n360.v_status_night AS
+-- The contract status as it stood each stored night (from the forecast of record as stored that night), for tiles'
+-- "change since" and the status-over-time chart. Same rules as v_contract_status; states that do not move night to
+-- night (not built, not measured, billed not recorded, unmapped, under review) are taken as they are today.
+-- Lines with no forecast (no use, no billed) have no row.
+WITH (SELECT status_pace_pts FROM n360.settings) AS pace_pts,
+     (SELECT status_too_early_days FROM n360.settings) AS early_days,
+     (SELECT renewal_risk_pct FROM n360.settings) AS risk_pct,
+     (SELECT renewal_risk_days FROM n360.settings) AS risk_days
+SELECT h.data_date AS data_date, h.data_date - 1 AS data_through, s.account AS account, s.series_key AS series_key,
+       s.entitlement AS entitlement, round(100 * h.consumed / h.billed, 2) AS pct_billed,
+       round(100 * least(greatest(dateDiff('day', s.start_date, h.data_date - 1) + 1, 0), dateDiff('day', s.start_date, s.end_date) + 1)
+             / (dateDiff('day', s.start_date, s.end_date) + 1), 1) AS pct_term,
+       dateDiff('day', h.data_date - 1, s.end_date) AS days_left,
+       multiIf(s.status IN ('not built', 'not measured', 'billed not recorded', 'unmapped', 'under review'), s.status,
+               h.data_date - 1 < s.start_date, 'not started',
+               pct_billed > 100, 'over billed',
+               h.cross_date IS NOT NULL, 'will exceed',
+               dateDiff('day', s.start_date, h.data_date - 1) + 1 < early_days, 'too early',
+               pct_billed - pct_term > pace_pts, 'ahead',
+               pct_term - pct_billed > pace_pts, 'below pace',
+               'on pace') AS status,
+       status IN ('below pace', 'on pace', 'ahead', 'too early') AND pct_billed < risk_pct
+           AND days_left BETWEEN 0 AND risk_days AS renewal_risk
+FROM n360.forecast_history AS h
+INNER JOIN n360.v_contract_status AS s ON s.series_key = h.series_key
+WHERE h.billed > 0;
+
+CREATE OR REPLACE VIEW n360.v_va_change AS
+-- Each VA: the last 30 days against the 30 before (conversations, containment), and the flags health and attention
+-- read. A window with any day not read is NULL (not read), never a lower number.
+WITH (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') AS dt,
+     (SELECT health_convs_down_pct FROM n360.settings) AS down_pct,
+     (SELECT health_containment_down_pts FROM n360.settings) AS cont_pts,
+     (SELECT attention_va_min_convs FROM n360.settings) AS min_convs,
+     (SELECT attention_va_drop_pct FROM n360.settings) AS drop_pct
+SELECT v.account AS account, v.bot_id AS bot_id, concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')') AS va,
+       v.va_name AS va_name, arrayStringConcat(v.channels, ', ') AS channel,
+       if(countIf(d.day > dt - 30) < 30 OR countIf(d.day > dt - 30 AND d.conversations IS NULL) > 0, NULL,
+          sumIf(d.conversations, d.day > dt - 30)) AS convs_30,
+       if(countIf(d.day <= dt - 30 AND d.conversations IS NULL) > 0 OR countIf(d.day <= dt - 30) < 30, NULL,
+          sumIf(d.conversations, d.day <= dt - 30)) AS convs_prev_30,
+       if(convs_prev_30 > 0, round(100 * (convs_30 - convs_prev_30) / convs_prev_30, 1), NULL) AS convs_change_pct,
+       if(sumIf(d.engaged, d.day > dt - 30 AND d.handoffs IS NOT NULL) > 0,
+          round(100 * (1 - sumIf(d.handoffs, d.day > dt - 30 AND d.handoffs IS NOT NULL)
+                         / sumIf(d.engaged, d.day > dt - 30 AND d.handoffs IS NOT NULL)), 1), NULL) AS containment_30,
+       if(sumIf(d.engaged, d.day <= dt - 30 AND d.handoffs IS NOT NULL) > 0,
+          round(100 * (1 - sumIf(d.handoffs, d.day <= dt - 30 AND d.handoffs IS NOT NULL)
+                         / sumIf(d.engaged, d.day <= dt - 30 AND d.handoffs IS NOT NULL)), 1), NULL) AS containment_prev_30,
+       round(containment_30 - containment_prev_30, 1) AS containment_change_pts,
+       ifNull(convs_change_pct <= -down_pct, false) AS convs_down,
+       ifNull(containment_change_pts <= -cont_pts, false) AS containment_down,
+       ifNull(convs_prev_30 >= min_convs AND convs_change_pct <= -drop_pct, false) AS attention_drop,
+       dt AS data_through
+FROM n360.va AS v
+LEFT JOIN n360.va_day AS d ON d.bot_id = v.bot_id AND d.day > dt - 60 AND d.day <= dt
+GROUP BY v.account, v.bot_id, v.va_name, v.channels;   -- a VA with no days joins one empty row: day 1970, counts NULL
+
+CREATE OR REPLACE VIEW n360.v_needs_attention AS
+-- One row per thing needing attention (v2 rule, PROPOSED thresholds in n360.settings): a line or pool over billed,
+-- set to exceed, at renewal risk, or whose term ended recently; or a busy VA whose conversations fell sharply.
+SELECT account, display_name, csm, 'line' AS kind, full_label AS subject, issue, issue_date, status, status_rank AS rank, drill
+FROM n360.v_contract_status WHERE needs_attention
+UNION ALL
+SELECT c.account, a.display_name, a.csm_rocketlane, 'va', c.va,
+       concat('Conversations down ', toString(toInt32(round(-c.convs_change_pct))), '%'), c.data_through, 'conversations down', 3,
+       concat('/d/n360-va?var-account=', c.account, '&var-va=', toString(c.bot_id))
+FROM n360.v_va_change AS c INNER JOIN n360.account AS a ON a.account = c.account
+WHERE c.attention_drop;
+
+CREATE OR REPLACE VIEW n360.v_freshness AS
+-- The freshness stamp on every dashboard: data through, when it was loaded, and whether it is stale (amber).
+WITH (SELECT stamp_stale_days FROM n360.settings) AS stale_days
+SELECT toDate(r.window_end) AS data_through, r.loaded_at AS loaded_at,
+       dateDiff('day', data_through, today()) AS days_old, days_old > stale_days AS stale,
+       concat('Usage to ', toString(toDayOfMonth(data_through)), ' ', formatDateTime(data_through, '%b %Y'),
+              ' · loaded ', toString(toDayOfMonth(toDate(r.loaded_at))), ' ', formatDateTime(r.loaded_at, '%b')) AS stamp
+FROM (SELECT window_end, loaded_at FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC, data_date DESC LIMIT 1) AS r;
+
+-- ───────────────────────── adoption and health (dashboard review; Phase 2 tables, PROPOSED) ───────────────────
+CREATE OR REPLACE VIEW n360.v_feature_use AS
+-- Target features per customer, used in the last 30 days (PROPOSED list; the v1.1 page also counts Testing,
+-- Calibration and Recipes, which no export carries yet). One row per customer and feature; used NULL = not reported
+-- (no rows for that customer in the source table).
+WITH (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') AS dt,
+     src AS (
+        SELECT account, 'V8 playbooks' AS feature, sum(executions) > 0 AS u FROM n360.playbook_day WHERE day > dt - 30 GROUP BY account
+        UNION ALL SELECT account, 'Authoring tool', sum(authoring_sessions) > 0 FROM n360.cortex_day
+            WHERE user_type = 'customer' AND day > dt - 30 GROUP BY account
+        UNION ALL SELECT account, 'Analytics assistant', sum(questions) > 0 FROM n360.explorer_day
+            WHERE user_type = 'customer' AND day > dt - 30 GROUP BY account
+        UNION ALL SELECT account, 'MCP servers', sum(mcp_servers_live) > 0 FROM n360.v_va_config_latest GROUP BY account
+        UNION ALL SELECT account, 'Supervisory rules', sum(supervisory_rules_on) > 0 FROM n360.v_va_config_latest GROUP BY account),
+     feats AS (SELECT arrayJoin(['V8 playbooks', 'Authoring tool', 'Analytics assistant', 'MCP servers', 'Supervisory rules']) AS feature)
+SELECT a.account AS account, f.feature AS feature,
+       if(s.found = 1, toNullable(s.u), NULL) AS used
+FROM n360.account AS a CROSS JOIN feats AS f
+LEFT JOIN (SELECT account, feature, toBool(max(u)) AS u, 1 AS found FROM src GROUP BY account, feature) AS s
+       ON s.account = a.account AND s.feature = f.feature;
+
+CREATE OR REPLACE VIEW n360.v_customer_notes AS
+-- Notes pinned to a customer's header (v2 "pinned customer notes"), written from the contract data: pools, signed SOW
+-- terms, contract rules (live or pending), lines with no reading, ended terms, VAs on no contract. Plain words.
+SELECT account, kind, note, o FROM (
+    SELECT p.account AS account, 'pool' AS kind,
+           concat('Pooled entitlement: ', toString(length(p.line_keys)), ' lines share one billed amount of ',
+                  formatReadableQuantity(p.billed), '. Use is compared with billed only at the pool.') AS note, 1 AS o
+    FROM n360.pool AS p
+    UNION ALL
+    SELECT l.account, 'sow', concat(l.channel, ': a signed SOW sets the contract unit (', l.unit, ').'), 2
+    FROM n360.contract_line AS l WHERE l.unit != ''
+    UNION ALL
+    SELECT l.account, 'rule', concat(l.channel, ': measured by a contract rule, ', r.label,
+                                     if(r.status = 'active', '.', ' (not live yet: measured on engaged until it is).')), 3
+    FROM n360.contract_line AS l INNER JOIN n360.rule AS r ON r.rule_id = l.rule_id
+    UNION ALL
+    SELECT c.account, 'no reading', concat(c.line_label, ': ', multiIf(
+               c.status = 'not built', 'contracted, nothing implemented yet.',
+               c.status = 'not measured', 'the contract unit is one the platform does not count.',
+               c.status = 'billed not recorded', 'no billed amount on the entitlement sheet.',
+               c.status = 'unmapped', 'no VA is mapped to this line yet.',
+               'no use read yet.')), 4
+    FROM n360.v_contract_status AS c WHERE c.status IN ('not built', 'not measured', 'billed not recorded', 'unmapped', 'not read')
+    UNION ALL
+    SELECT c.account, 'ended', concat(c.line_label, ': the term ended on ', toString(toDayOfMonth(c.end_date)), ' ',
+                                      formatDateTime(c.end_date, '%b %Y'), '.'), 5
+    FROM n360.v_contract_status AS c WHERE c.term_ended
+    UNION ALL
+    SELECT v.account, 'unbilled', concat(v.va_name, ' is on no contract line (unbilled).'), 6
+    FROM n360.va AS v WHERE NOT v.on_contract
+);

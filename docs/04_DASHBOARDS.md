@@ -1,14 +1,23 @@
 # 04 · Dashboards
 
-**All eleven built 24 Nov 2026 on synthetic data (Phase 2 tables are a proposed design). Differences from
-the specs are noted under each heading.** Eleven dashboards in Grafana 13.3.1 OSS, linked so a reader starts at the portfolio and clicks
-down to one customer, one contract line, one VA.** Each spec is what `build_dashboards.py` must
-generate. One is built (Contracts); ten are yours to build.
+**25 Nov 2026: rebuilt to the v2 redesign (`docs/15_DASHBOARD_REVIEW_HANDOFF.md`). `docs/16_DASHBOARD_GAPS.md` is now
+the reference for page structure, statuses and colours. Where it differs from the specs below, docs/16 wins.** The
+per-dashboard sections below are the original specs. They still describe what each panel measures and where it
+comes from.
 
-Designs for 7 of them (Portfolio, Customer, Contract line, VA, Forecast, Anomalies, Pipeline
-health) exist at the company with real data and are **awaiting Ryan's approval**. They are not in
-this pack because they contain real customer data; their layout is described below in enough
-detail to build from. Build against the spec. Ryan will reconcile with the approved designs.
+Twelve dashboards in Grafana 13.3.1 OSS (the eleven below plus **Customer health**, `n360-health`). They are linked,
+so a reader starts at the Overview and clicks down to one customer, one contract line, one VA. Each spec is what
+`build_dashboards.py` must generate.
+
+**Every page** starts with two things: a sentence that answers the page's question, and the freshness stamp. The v2
+pages (Overview, Contracts, Customer health, Customer, Adoption, Requests) then show:
+1. four tiles, each with a reference;
+2. one lead chart;
+3. one action list;
+4. tables.
+
+**Contract status** comes from `n360.v_contract_status`. It has the v1.1 page's 11 statuses plus renewal risk and
+replaces the red/amber/green pace on every screen. The dashboards only map a status to its colour.
 
 ## Drill-down map
 
@@ -27,7 +36,7 @@ detail to build from. Build against the spec. Ryan will reconcile with the appro
 | Item | Rule |
 |---|---|
 | Folder, uid | Folder "N360"; uid `n360-<name>`, never changed (links depend on it) |
-| Header | "Data through" stat, last load status, link back to Portfolio overview |
+| Header | The page's sentence and the freshness stamp ("Usage to … · loaded …", amber when old; links to Pipeline health); link back to the Overview |
 | Variables | `account`, `line`, `va` as needed, from ClickHouse; time range default 90 days |
 | Drill-down | Data links on table rows and series: `/d/<uid>?var-<name>=${__data.fields.<column>}&${__url_time_range}`. Every target has a "Back to" link |
 | Colour | Green, amber, red only for a stated meaning. Empty = grey "Not reported yet", never red |
@@ -37,7 +46,7 @@ detail to build from. Build against the spec. Ryan will reconcile with the appro
 | Layout | Fixed grid positions (Grafana 13.3 defaults to auto grid; N360 sets positions so builds match designs) |
 | Theme | Grafana dark |
 
-## Pace colours (PROPOSED, awaiting Ryan)
+## Pace colours (superseded 25 Nov 2026 by the contract statuses in docs/16; `v_line_pace` still feeds the alert rules)
 
 | Colour | Rule |
 |---|---|
