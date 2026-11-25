@@ -52,7 +52,7 @@
           "noDataState": "OK",
           "execErrState": "Error",
           "for": "0s",
-          "isPaused": false,
+          "isPaused": true,
           "annotations": {
             "summary": "The latest nightly run was stopped by a data check; dashboards still show the previous good night.",
             "description": "Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views."
@@ -109,7 +109,7 @@
           "noDataState": "Alerting",
           "execErrState": "Error",
           "for": "0s",
-          "isPaused": false,
+          "isPaused": true,
           "annotations": {
             "summary": "No loaded run with data through yesterday, checked from 10:00 ET.",
             "description": "Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views."
@@ -166,7 +166,7 @@
           "noDataState": "OK",
           "execErrState": "Error",
           "for": "0s",
-          "isPaused": false,
+          "isPaused": true,
           "annotations": {
             "summary": "A source is 2 or more days behind the data-through day (thresholds in n360.settings).",
             "description": "Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views."
@@ -223,7 +223,7 @@
           "noDataState": "OK",
           "execErrState": "Error",
           "for": "0s",
-          "isPaused": false,
+          "isPaused": true,
           "annotations": {
             "summary": "A VA went silent or dropped on the newest settled day (provisional days never alert). Pass to the account CSM after a look.",
             "description": "Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views."
@@ -280,7 +280,7 @@
           "noDataState": "OK",
           "execErrState": "Error",
           "for": "0s",
-          "isPaused": false,
+          "isPaused": true,
           "annotations": {
             "summary": "Several customers were flagged in the same direction on the newest settled day: one event.",
             "description": "Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views."
@@ -337,7 +337,7 @@
           "noDataState": "OK",
           "execErrState": "Error",
           "for": "0s",
-          "isPaused": false,
+          "isPaused": true,
           "annotations": {
             "summary": "A line or pool went above 100% of billed since the night before.",
             "description": "Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views."
@@ -394,7 +394,7 @@
           "noDataState": "OK",
           "execErrState": "Error",
           "for": "0s",
-          "isPaused": false,
+          "isPaused": true,
           "annotations": {
             "summary": "A line now crosses billed within the red window (n360.settings), or its crossing date moved more than the set number of days earlier overnight.",
             "description": "Rule source: code/grafana/build_alerts.py. Data: N360 ClickHouse views."

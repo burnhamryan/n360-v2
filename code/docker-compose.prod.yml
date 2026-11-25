@@ -1,0 +1,61 @@
+# Production layer (AWS or any always-on host), on top of docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml [--profile public] up -d
+# - Restarts on failure or reboot; capped log files.
+# - ClickHouse and Grafana still listen on 127.0.0.1 only: loads and admin go through an SSH or AWS Session
+#   Manager tunnel (code/ops/tunnel.sh), never an open port.
+# - Profile "public": Caddy serves Grafana on https://$N360_DOMAIN (Let's Encrypt certificate, renewed
+#   automatically) and people sign in with Google (Grafana OSS auth.google), limited to GOOGLE_ALLOWED_DOMAINS.
+#   Everyone who signs in is a Viewer; promote an admin with code/ops/grafana_admin.sh.
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "20m", max-file: "5" }
+
+services:
+  clickhouse:
+    restart: unless-stopped
+    logging: *logging
+
+  grafana:
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      GF_SERVER_DOMAIN: ${N360_DOMAIN:-localhost}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000/}
+      GF_SECURITY_COOKIE_SECURE: ${GRAFANA_COOKIE_SECURE:-false}
+      GF_SECURITY_COOKIE_SAMESITE: lax
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_ORG_CREATE: "false"
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: Viewer
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      # Google sign-in (open source). Off unless GOOGLE_CLIENT_ID is set.
+      GF_AUTH_GOOGLE_ENABLED: ${GOOGLE_AUTH_ENABLED:-false}
+      GF_AUTH_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GF_AUTH_GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GF_AUTH_GOOGLE_SCOPES: openid email profile
+      GF_AUTH_GOOGLE_ALLOWED_DOMAINS: ${GOOGLE_ALLOWED_DOMAINS:-}
+      GF_AUTH_GOOGLE_HOSTED_DOMAIN: ${GOOGLE_HOSTED_DOMAIN:-}
+      GF_AUTH_GOOGLE_ALLOW_SIGN_UP: "true"           # a first Google sign-in creates the user (as Viewer)
+      GF_AUTH_GOOGLE_USE_PKCE: "true"
+      # With Google on, hide the password form (the admin password still works through the tunnel's API)
+      GF_AUTH_DISABLE_LOGIN_FORM: ${GOOGLE_AUTH_ENABLED:-false}
+
+  caddy:
+    image: caddy:2.10.2
+    container_name: n360-caddy
+    profiles: [public]
+    restart: unless-stopped
+    logging: *logging
+    depends_on: [grafana]
+    ports:
+      - "80:80"        # Let's Encrypt HTTP challenge, then redirects to HTTPS
+      - "443:443"
+    environment:
+      N360_DOMAIN: ${N360_DOMAIN:-}     # required with the public profile (stack.sh adds it only when set)
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

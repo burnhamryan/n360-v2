@@ -40,3 +40,54 @@ jobs:
           python-version: '3.12'
       - run: pip install clickhouse-connect==1.13.0
       - run: bash code/ci.sh server
+
+  ops:
+    name: Ops scripts (nightly load, backup, restore) against ClickHouse + S3 (moto)
+    runs-on: ubuntu-24.04
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8
+        ports: ['8123:8123']
+        env:
+          CLICKHOUSE_USER: n360
+          CLICKHOUSE_PASSWORD: ci-loader
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+        options: >-
+          --health-cmd "wget -qO- http://localhost:8123/ping"
+          --health-interval 5s --health-retries 30
+    env:
+      CH_URL: http://localhost:8123
+      N360_CH_PASSWORD: ci-loader
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://localhost:9000
+      N360_TEST_BUCKET: s3://n360-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install clickhouse-connect==1.13.0 awscli==1.46.3 "moto[server]==5.2.6"
+      - run: |
+          (moto_server -H 127.0.0.1 -p 9000 > moto.log 2>&1 &)
+          for i in $(seq 30); do curl -s localhost:9000 > /dev/null && break; sleep 1; done
+          aws s3 mb "$N360_TEST_BUCKET"
+      - run: bash code/ops/test_ops.sh
+
+  infra:
+    name: Infrastructure code (Terraform, shell scripts, production compose)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.17.2
+      - run: terraform -chdir=infra/aws/terraform fmt -check -recursive
+      - run: terraform -chdir=infra/aws/terraform init -backend=false -input=false
+      - run: terraform -chdir=infra/aws/terraform validate
+      - run: shellcheck -x code/ops/*.sh infra/aws/host/*.sh
+      - run: |
+          cp code/.env.example code/.env
+          docker compose -f code/docker-compose.yml -f code/docker-compose.prod.yml config -q
+          N360_DOMAIN=n360.example.com docker compose -f code/docker-compose.yml -f code/docker-compose.prod.yml --profile public config -q

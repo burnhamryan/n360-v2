@@ -80,14 +80,17 @@ def checks(text):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--rows', required=True)
+    ap.add_argument('--rows', help='the export folder (rows/*.ndjson + run.json)')
+    ap.add_argument('--schema-only', action='store_true',
+                    help='create or update the databases, tables and views, load nothing (new server, before a restore)')
     ap.add_argument('--url', default='http://localhost:8123')
     ap.add_argument('--user', default='default')
     ap.add_argument('--password')
     ap.add_argument('--chdb', help='path for an embedded chdb database (testing)')
     a = ap.parse_args()
+    if not a.rows and not a.schema_only:
+        ap.error('--rows is required (or --schema-only)')
 
-    run = json.load(open(os.path.join(a.rows, 'run.json')))
     ch = CH(a)
     schema = open(os.path.join(HERE, 'schema.sql')).read()
     for db in ['n360', 'n360_next']:
@@ -95,6 +98,10 @@ def main():
             if db == 'n360_next' and st.upper().startswith(('CREATE VIEW', 'CREATE OR REPLACE VIEW')):
                 continue
             ch.cmd(st.replace('n360.', f'{db}.').replace('DATABASE IF NOT EXISTS n360', f'DATABASE IF NOT EXISTS {db}'))
+    if a.schema_only:
+        print('SCHEMA READY (n360, n360_next): nothing loaded')
+        return 0
+    run = json.load(open(os.path.join(a.rows, 'run.json')))
 
     for t in SWAP:
         ch.cmd(f'TRUNCATE TABLE n360_next.{t}')

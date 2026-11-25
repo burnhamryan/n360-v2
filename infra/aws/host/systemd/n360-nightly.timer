@@ -1,0 +1,10 @@
+[Unit]
+Description=N360: check S3 for new exports every hour (only when SERVER_LOADS=true)
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

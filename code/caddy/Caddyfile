@@ -1,0 +1,7 @@
+# HTTPS in front of Grafana. Caddy gets and renews the certificate for $N360_DOMAIN from Let's Encrypt
+# (the domain's DNS must point at this server, ports 80 and 443 open). Grafana itself is never exposed.
+{$N360_DOMAIN} {
+	encode gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy grafana:3000
+}
