@@ -1,102 +1,202 @@
-# N360 analytics — handoff pack
+# N360
 
-**Read this file first, then `docs/07_WORKING_RULES.md`, then the backlog.**
+N360 shows, for every enterprise customer, how much of each signed contract is being used, how fast, when it will
+run out, whether anything unusual is happening, and which customers are at risk.
 
-You (a Claude instance) are continuing the build of N360's analytics layer for Ryan Burnham.
-This pack is everything needed to keep building **without any real company data**: the design,
-the generic code, and a synthetic data generator that reproduces every edge case the real data has.
+It is **ClickHouse 25.8** for storage and **Grafana 13.3.1 OSS** for dashboards. Every dashboard is generated from
+code. Everything in this repository runs on **synthetic data**; real data only ever lives on your own machine or
+server.
 
-## What N360 is, in one paragraph
+![The Overview dashboard, on synthetic data](docs/screenshots/01-overview.png)
 
-N360 tracks, per enterprise customer, how much of each signed contract is being used, how fast,
-when it will run out, and whether anything unusual is happening. A nightly pipeline (at Ryan's
-company, not in this pack) pulls usage from production systems, applies each contract's billing
-rules, and writes the results. This project moves the *output* side from a hand-built web page to
-**ClickHouse (storage, time-series) + Grafana 13.3.1 OSS (dashboards defined as code)**, with
-anomaly detection and forecasting built in.
+## Try it in five minutes
 
-## Boundary: what you must not do
-
-- **No real data, ever.** Use `sample_data/generate_synthetic.py`. If a task seems to need real
-  customer names, numbers, hostnames, tickets or documents, stop and write it up as a question
-  for Ryan instead.
-- **No access to company systems.** You don't connect to any company database, tracker, drive or
-  chat. Ryan carries your work back and applies it himself.
-- **Don't invent business facts.** Contract terms, rule definitions and thresholds marked
-  *proposed* are Ryan's to decide. Build the mechanism with the value as a setting, and list the
-  open question.
-
-## What exists (all in this pack, all tested on synthetic data on 24 Nov 2026)
-
-| Piece | File | State |
-|---|---|---|
-| ClickHouse schema: 13 tables + 5 Phase 2 tables (proposed), 13 views | `code/schema.sql` | Done, tested on synthetic |
-| View tests (synthetic edge cases) | `code/test_views.py` | Run in CI on both engines (B5) |
-| Data checks run before every load (8) | `code/checks.sql` | Done, all pass on synthetic |
-| Loader: stage → check → atomic swap | `code/load.py` | Done (server or embedded `chdb`); Phase 2 files loaded only when present |
-| Local stack: ClickHouse 25.8 + Grafana 13.3.1, localhost only | `code/docker-compose.yml`, `code/init/`, `code/grafana/provisioning/` | Started and tested in Linux Docker 24 Nov 2026 (B1); not yet on the Mac |
-| Dashboard generator: **all 11 dashboards** | `code/grafana/build_dashboards.py` → `code/grafana/dashboards/*.json` | Built and rendered in Grafana 13.3.1 with plugin 4.23.5 on synthetic data; every drill-down link clicked. Phase 2 (Adoption, Requests) on a proposed design |
-| Building-block test | `code/grafana/test_build.py` | Settings written once; description shape; sample header, links and colours run and render |
-| Panel query test | `code/grafana/test_panels.py` | Runs every panel and variable query with macros expanded |
-| Synthetic data, one night or N nights | `sample_data/generate_synthetic.py` (`--nights`, `--bad-night`, `--forecast-backfill`, `--stale`) | Done; 14 nights → 13 loaded, 1 refused |
-| Forecast history and accuracy (B15–B16) | `forecast_history`, `v_forecast_accuracy` | Built; Forecast panels 6.5, 6.6 |
-| Alert rules as code (B18) | `code/grafana/build_alerts.py` → `provisioning/alerting/`; `test_alerts.py` | Built and tested; **paused** (not needed yet). Configure and switch on per `docs/11_ALERTS.md` |
-| Anomaly review log (B19) | `code/review_anomaly.py`, `anomaly_log` | Built; Anomalies feed and weekly flag quality |
-| Anomaly detection v2 (B20) | `v_anomaly_v2` | Built; planted cases caught, no false positives |
-| AWS, self-hosted (open source) | `infra/aws/terraform`, `infra/aws/host`, `code/docker-compose.prod.yml`, `code/ops/` | Built; tested on synthetic data and against moto; **not yet run in a real AWS account**. Runbook: `docs/12_AWS.md` |
-| Ops: nightly load, backup, restore, tunnel | `code/ops/*.sh` | Tested end to end (ClickHouse + S3); in CI |
-| Challenger forecast (B21) | `code/forecast/challenger.py`, `docs/10_CHALLENGER_BACKTEST.md` | Backtest only; the forecast of record is unchanged |
-| CI | `.github/workflows/ci.yml`, `code/ci.sh` | Steps pass locally (chdb and server 25.8); not yet run on GitHub |
-| Chat with the data | `docs/09_CHAT.md`, `chat/`, `code/grafana/mcp_service_account.sh` | Tested on synthetic through Grafana; real data is an open question |
-
-## The docs
-
-| File | What it covers |
-|---|---|
-| `docs/01_ARCHITECTURE.md` | Flow, layers, why ClickHouse and Grafana, load and swap, how real data enters at the company |
-| `docs/02_DATA_CONTRACT.md` | Every table and column, keys, NULL rules, row format, the 8 checks |
-| `docs/03_METRICS.md` | Every metric: definition, formula, grain; words allowed on screen |
-| `docs/04_DASHBOARDS.md` | All 11 dashboards, panel by panel, drill-downs, conventions, design notes |
-| `docs/05_ANOMALY_AND_FORECAST.md` | Methods, thresholds (some proposed), what's planned |
-| `docs/06_BACKLOG.md` | What to build next, in order, with acceptance criteria |
-| `docs/07_WORKING_RULES.md` | How Ryan wants work done. Non-negotiable |
-| `docs/08_DECISIONS.md` | Decided, proposed, and open questions |
-| `docs/11_ALERTS.md` | Alert rules: off for now; how to switch on, set recipients and timing |
-| `docs/10_CHALLENGER_BACKTEST.md` | Challenger vs straight-line backtest (synthetic), regenerated by `code/forecast/challenger.py` |
-| `docs/17_RISK_RESEARCH.md` | Risk dashboard: market research, the 12 signals, what is built, decisions open |
-| `docs/23_RISK_MODEL_REVIEW_BRIEF.md` | Brief for an independent review of the risk model: what to read, how to run it, the questions to answer |
-| `docs/22_RISK_MODEL_BACKTEST.md` | The risk model's backtest on a known-truth synthetic history (regenerated by the commands at its top) |
-| `docs/21_RISK_MODEL.md` | The customer risk model: features, scorecard, probability, backtest, how to run, test and change it |
-| `docs/20_DATADOG_LANGFUSE.md` | Plan: Datadog and Langfuse in Grafana OSS (Infinity data source for live panels, nightly readers for risk signals) |
-| `docs/19_SALESFORCE_LIVE.md` | Connecting to live Salesforce: the nightly pipeline (integration user) and Claude questions (hosted MCP), admin checklist |
-| `docs/18_SALESFORCE.md` | Reading Salesforce (read-only): what is read, credentials, running it, open questions |
-| `docs/16_DASHBOARD_GAPS.md` | Dashboard review: what was wrong, the v2 page structure, the contract statuses and colours, decisions for Ryan |
-| `docs/15_DASHBOARD_REVIEW_HANDOFF.md` | The review brief: v1.1 page and v2 spec, condensed |
-| `docs/13_LAPTOP_POC.md` | **Start here for real data on your Mac**: set up, load every night, look |
-| `docs/12_AWS.md` | Running N360 on AWS: create, load from the laptop, Google sign-in, backups, upgrades |
-| `docs/09_CHAT.md` | Chatting with the data through Grafana's MCP server: setup, locks, test |
-
-## First 15 minutes
+No server needed. This generates synthetic data, checks it, loads it into an embedded database and builds the
+dashboards:
 
 ```bash
-pip install chdb clickhouse-connect
+pip install chdb==4.5.1 clickhouse-connect==1.13.0
+```
+```bash
 python3 sample_data/generate_synthetic.py --out sample_data/rows
-python3 code/load.py --rows sample_data/rows --chdb /tmp/n360    # expect 8 × PASS, then LOADED
-python3 code/grafana/build_dashboards.py                          # writes code/grafana/dashboards/*.json
+```
+```bash
+python3 code/load.py --rows sample_data/rows --chdb /tmp/n360
+```
+```bash
+python3 code/grafana/build_dashboards.py
 ```
 
-Then with Docker:
+The load prints one `PASS` per data check, then `LOADED`.
+
+To see the dashboards, start ClickHouse and Grafana with Docker:
 
 ```bash
-cd code && cp .env.example .env && docker compose up -d
-python3 load.py --rows ../sample_data/rows --user n360 --password <N360_CH_PASSWORD from .env>
-# open http://localhost:3000 → folder N360
+cd code && cp .env.example .env
 ```
 
-## How your work gets back to Ryan
+Set your own three passwords in `.env` (it is never committed), then:
 
-Deliver changes as files with the **same paths** as this pack, plus a short `CHANGES.md` (what
-changed, why, how you tested it on synthetic data, any open question). Keep table and column
-names unchanged unless the backlog says otherwise: the company pipeline writes these exact names,
-and a rename there is Ryan's decision. Ryan reviews, copies the files into the company repository,
-and runs them against real data himself.
+```bash
+docker compose up -d
+```
+```bash
+set -a && . ./.env && set +a
+python3 load.py --rows ../sample_data/rows --user n360 --password "$N360_CH_PASSWORD"
+```
+
+Open http://localhost:3000, sign in as `admin` with `GRAFANA_ADMIN_PASSWORD`, and open the **N360** folder.
+
+## Where to go next
+
+| You want to | Read |
+|---|---|
+| Run it on your Mac with real exports, every night | [docs/13_LAPTOP_POC.md](docs/13_LAPTOP_POC.md) |
+| Run it on AWS | [docs/12_AWS.md](docs/12_AWS.md) |
+| Hand the project to another Claude | [docs/14_WORK_CLAUDE_HANDOFF.md](docs/14_WORK_CLAUDE_HANDOFF.md), then [docs/07_WORKING_RULES.md](docs/07_WORKING_RULES.md) |
+| Know what a number means | [docs/03_METRICS.md](docs/03_METRICS.md) |
+| Know what is decided and what is still open | [docs/08_DECISIONS.md](docs/08_DECISIONS.md) |
+
+## The dashboards
+
+All 14 are in the Grafana folder **N360**. Screenshots on synthetic data are in
+[docs/screenshots](docs/screenshots).
+
+| Dashboard | What it answers |
+|---|---|
+| **Overview** | What needs attention today, across every customer |
+| **Contracts** | The status of every contract line: on track, behind, running out, renewal at risk |
+| **Contract line** | One line: use against the term, forecast, the VAs behind it |
+| **Customer** | One customer: contracts, usage, notes |
+| **Customer health** | Which customers' usage or containment is moving the wrong way |
+| **VA** | One virtual agent: conversations, containment, configuration |
+| **Forecast and runway** | When each line runs out, and how accurate past forecasts were |
+| **Anomalies** | Drops, spikes and silences, with a review log |
+| **Containment** | Containment by customer and VA |
+| **Adoption** | Which product features each customer uses (proposed design) |
+| **Requests** | Open support tickets (proposed design) |
+| **Risk** | Twelve risk signals per customer, for CSMs and customer architects |
+| **Risk model** | Health score, chance of churn or downsell at renewal, and why |
+| **Pipeline health** | Every night's load: loaded or refused, and how fresh each source is |
+
+Panel-by-panel detail is in [docs/04_DASHBOARDS.md](docs/04_DASHBOARDS.md).
+
+## How it works
+
+1. **A nightly export** writes one folder of row files. At the company, a pipeline outside this repository does
+   this. Here, `sample_data/generate_synthetic.py` stands in for it.
+2. **`code/load.py`** stages the rows, runs the checks in `code/checks.sql`, and swaps the new data in only if every
+   check passes. A bad night is refused and yesterday's data stays.
+3. **`code/schema.sql`** holds every table, view and setting. Thresholds are settings, not code.
+4. **`code/grafana/build_dashboards.py`** generates every dashboard. Never edit the JSON by hand; change the
+   generator and run it again.
+5. **Optional extras** run after the load: the Salesforce reader, the risk signals and the risk model.
+
+More in [docs/01_ARCHITECTURE.md](docs/01_ARCHITECTURE.md).
+
+## What is in the repository
+
+| Path | What |
+|---|---|
+| `code/schema.sql`, `code/checks.sql`, `code/load.py` | Tables, views and settings; the pre-load checks; the loader |
+| `code/grafana/` | Dashboard and alert generators, the generated JSON, Grafana provisioning, their tests |
+| `code/risk/`, `code/risk_register.py` | The customer risk model; the CSM risk register and rating |
+| `code/salesforce/` | Read-only Salesforce reader, with a fake Salesforce for tests |
+| `code/forecast/`, `code/review_anomaly.py` | Challenger forecast backtest; anomaly review log |
+| `code/ops/` | Nightly load, backup, restore, tunnel |
+| `code/docker-compose.yml`, `code/clickhouse/`, `code/init/` | The local stack, its memory limits and the read-only Grafana user |
+| `code/docker-compose.prod.yml`, `infra/aws/` | The production layer and Terraform for AWS |
+| `chat/` | Asking questions of the data through Grafana's MCP server |
+| `sample_data/` | Synthetic data generators: nightly rows, Salesforce records, a risk history with a known truth |
+| `docs/` | Everything below |
+
+## Tests
+
+One command runs everything on synthetic data: 14 nights (one broken on purpose), every view, every dashboard
+panel query, the alert rules, the Salesforce reader and the risk model.
+
+```bash
+code/ci.sh chdb
+```
+
+`code/ci.sh server` runs the same against a ClickHouse server. GitHub Actions runs both on every push
+(`.github/workflows/ci.yml`).
+
+## Status
+
+Tested on synthetic data only unless a line says otherwise.
+
+| Area | State |
+|---|---|
+| Schema, loader, checks, 14 dashboards | Built and tested. Running on a Mac with real exports. |
+| Anomaly detection, forecast, forecast accuracy | Built and tested. Some thresholds are proposed ([docs/05](docs/05_ANOMALY_AND_FORECAST.md)). |
+| Alerts | Built and tested, switched off ([docs/11](docs/11_ALERTS.md)). |
+| AWS | Built and tested against a mock. Not yet run in a real AWS account. |
+| Salesforce reader | Built and tested against a fake Salesforce. Not yet connected to a live org ([docs/19](docs/19_SALESFORCE_LIVE.md)). |
+| Risk signals and register | Built and tested. Signal thresholds are proposed. |
+| Risk model | Built and tested. Health and bands are usable. The chance at renewal is an expert estimate until real outcomes exist, and a review has open findings ([docs/21](docs/21_RISK_MODEL.md)). |
+| Datadog, Langfuse | Planned only ([docs/20](docs/20_DATADOG_LANGFUSE.md)). |
+
+## Rules
+
+- **No real data in this repository, ever.** No customer names, numbers, hostnames, tickets or documents. Use the
+  synthetic generators.
+- **Never commit `.env`, tokens or passwords.**
+- **Don't invent business facts.** A contract term, rule or threshold that isn't decided goes in as a setting marked
+  *proposed*, with the open question in [docs/08_DECISIONS.md](docs/08_DECISIONS.md).
+- **Keep table names, column names and dashboard uids unchanged.** The company pipeline writes these exact names.
+- **Never edit dashboard JSON by hand.** Change `build_dashboards.py` and regenerate.
+- **Versions are pinned.** Change one on purpose, not by accident.
+
+The full working rules are in [docs/07_WORKING_RULES.md](docs/07_WORKING_RULES.md).
+
+## All the docs
+
+**Design**
+
+| Doc | What it covers |
+|---|---|
+| [01 Architecture](docs/01_ARCHITECTURE.md) | The flow, the layers, why ClickHouse and Grafana, load and swap |
+| [02 Data contract](docs/02_DATA_CONTRACT.md) | Every table and column, keys, NULL rules, the checks |
+| [03 Metrics](docs/03_METRICS.md) | Every metric: definition, formula, grain, the words allowed on screen |
+| [04 Dashboards](docs/04_DASHBOARDS.md) | Every dashboard, panel by panel, with drill-downs |
+| [05 Anomaly and forecast](docs/05_ANOMALY_AND_FORECAST.md) | Methods and thresholds |
+| [16 Dashboard review](docs/16_DASHBOARD_GAPS.md) | The v2 page structure, contract statuses and colours |
+
+**Running it**
+
+| Doc | What it covers |
+|---|---|
+| [13 Laptop](docs/13_LAPTOP_POC.md) | Set up on a Mac, load every night, look |
+| [12 AWS](docs/12_AWS.md) | Create, load, Google sign-in, backups, upgrades |
+| [11 Alerts](docs/11_ALERTS.md) | Switching alerts on, recipients, timing |
+| [09 Chat](docs/09_CHAT.md) | Asking questions of the data through Grafana's MCP server |
+
+**Risk**
+
+| Doc | What it covers |
+|---|---|
+| [17 Risk research](docs/17_RISK_RESEARCH.md) | Market research, the twelve signals, what is built |
+| [21 Risk model](docs/21_RISK_MODEL.md) | Features, scorecard, probability, how to run, test and change it |
+| [22 Risk model backtest](docs/22_RISK_MODEL_BACKTEST.md) | The backtest on a synthetic history with a known truth |
+| [23 Risk model review brief](docs/23_RISK_MODEL_REVIEW_BRIEF.md) | For an independent reviewer |
+
+**Connections**
+
+| Doc | What it covers |
+|---|---|
+| [18 Salesforce](docs/18_SALESFORCE.md) | What is read, credentials, running the reader |
+| [19 Salesforce, live](docs/19_SALESFORCE_LIVE.md) | Connecting a live org: the nightly reader and Claude questions |
+| [20 Datadog and Langfuse](docs/20_DATADOG_LANGFUSE.md) | The plan for both in Grafana OSS |
+
+**Project**
+
+| Doc | What it covers |
+|---|---|
+| [06 Backlog](docs/06_BACKLOG.md) | What to build next, with acceptance criteria |
+| [07 Working rules](docs/07_WORKING_RULES.md) | How work is done here |
+| [08 Decisions](docs/08_DECISIONS.md) | Decided, proposed and open |
+| [10 Challenger backtest](docs/10_CHALLENGER_BACKTEST.md) | The challenger forecast against the straight line |
+| [14 Handoff](docs/14_WORK_CLAUDE_HANDOFF.md) | Bringing another Claude up to speed |
+| [15 Dashboard review brief](docs/15_DASHBOARD_REVIEW_HANDOFF.md) | The brief behind the v2 dashboards |
+| [CHANGES.md](CHANGES.md) | What changed, newest first |
