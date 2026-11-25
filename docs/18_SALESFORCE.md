@@ -19,7 +19,7 @@ JSON, never the code.
 | `sf_account` | Account | Id, Name, Owner.Name, Type, LastActivityDate | all |
 | `sf_opportunity` | Opportunity | Id, AccountId, Name, Type, StageName, ForecastCategoryName, CloseDate, Amount, IsClosed, IsWon, NextStep, Owner.Name, LastActivityDate | closing within the last 2 years or later |
 | `sf_contract` | Contract | Id, AccountId, ContractNumber, Status, StartDate, EndDate, ContractTerm | all |
-| `sf_activity` | Task + Event | Id, AccountId, ActivityDate, Type, TaskSubtype / EventSubtype, Subject, Status, Owner.Name, IsClosed | last 365 days, with an account |
+| `sf_activity` | Task + Event | Id, AccountId, ActivityDate, Type, TaskSubtype / EventSubtype, Subject, Status, Owner.Name, IsClosed | last 730 days, with an account (the risk model rebuilds past dates: "days since the last executive meeting" a year ago needs the year before it) |
 
 The reader works out four values itself, all set in the same JSON:
 - **Renewal** = the opportunity Type is one of `renewal_opportunity_types` (default `Renewal`).
@@ -85,6 +85,13 @@ copy stays live.
 - every opportunity, contract and activity names an account.
 
 Every pull is logged in `n360.sf_runs`.
+
+**After a pull, run `code/readiness.py`.** It says how many customers are linked, whether renewals and contact were
+recognised, and which labels your org uses, so the settings in `salesforce.json` can be checked against them.
+
+**Past renewal dates come from here too.** The export keeps today's contract lines. For a past date that no line
+covers, the risk model takes the close date of the account's next renewal opportunity, open or closed. That is how
+last year's renewals become something the model can learn from.
 
 ## Data handling
 

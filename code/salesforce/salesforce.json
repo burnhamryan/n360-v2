@@ -27,13 +27,13 @@
       "fields": {"activity_id": "Id", "sf_account_id": "AccountId", "activity_date": "ActivityDate", "type": "Type",
                  "subtype": "TaskSubtype", "subject": "Subject", "status": "Status", "owner": "Owner.Name",
                  "is_closed": "IsClosed"},
-      "where": "ActivityDate = LAST_N_DAYS:365 AND AccountId != null"
+      "where": "ActivityDate = LAST_N_DAYS:730 AND AccountId != null"
     },
     "event": {
       "sobject": "Event",
       "fields": {"activity_id": "Id", "sf_account_id": "AccountId", "activity_date": "ActivityDate", "type": "Type",
                  "subtype": "EventSubtype", "subject": "Subject", "owner": "Owner.Name"},
-      "where": "ActivityDate = LAST_N_DAYS:365 AND AccountId != null"
+      "where": "ActivityDate = LAST_N_DAYS:730 AND AccountId != null"
     }
   },
   "renewal_opportunity_types": ["Renewal"],

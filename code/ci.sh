@@ -113,6 +113,13 @@ M=(python3 "$ROOT/code/risk/risk_model.py" "${CONN[@]}")
   || { echo "FAIL: a rebuild replaced features the nightly run stored"; exit 1; }
 "${M[@]}" score > /dev/null
 python3 "$ROOT/code/test_views.py" "${PANEL_CONN[@]}"
+# the readiness report runs on everything loaded, and prints no customer name
+python3 "$ROOT/code/readiness.py" "${CONN[@]}" > "$WORK/readiness.txt"
+grep -q "^TO DO, in order" "$WORK/readiness.txt" || { cat "$WORK/readiness.txt"; echo "FAIL: readiness report incomplete"; exit 1; }
+if grep -qE "Willow|Harbor|Lakeside|Northwind|Juniper|Maple|Kestrel|Atlas|Orchid|Summit|Pinecrest|Bluebird|Cedar|Globex" "$WORK/readiness.txt"; then
+  echo "FAIL: the readiness report printed a customer name"; exit 1
+fi
+echo "OK   readiness report: $(tail -1 "$WORK/readiness.txt"); no customer names"
 
 # Challenger forecast backtest (B21): writes n360.forecast_challenger; the forecast of record must not change
 before=$(sql "SELECT groupBitXor(cityHash64(formatRow('TSV', *))) FROM n360.forecast")

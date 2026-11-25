@@ -89,6 +89,9 @@ def report_md(res, cfg, title='Risk model backtest'):
     if 'methods' not in res:
         return '\n'.join(out + [res.get('note', 'No result.'), ''] + ([labels_text(res['labels']), ''] if 'labels' in res else []))
     f = lambda v, p=3: '-' if v is None else f'{v:.{p}f}'  # noqa: E731
+    if res['events'] < cfg['probability']['stages']['calibrate']:
+        out += [f"**Too few renewals to judge: {res['events']} lost out of {res['renewals']}.** The figures below are shown "
+                "so the plumbing can be checked; read none of them as how good the model is.", '']
     top = f"{cfg['backtest']['top_share']:.0%}"
     out += [f"Scored out of time: {res['renewals']} renewals, {res['events']} of them lost (base rate {res['base_rate']:.1%}), "
             f"from {res['snapshots_scored']} snapshots ({res['period'][0]} to {res['period'][1]}). Each renewal is judged "

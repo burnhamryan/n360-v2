@@ -65,6 +65,84 @@ http://localhost:3000 → N360 → **Overview**. Then **Pipeline health** shows 
 Optional, once enough nights are in: `python3 code/forecast/challenger.py --user n360 --password "$N360_CH_PASSWORD"`
 (challenger backtest; changes nothing else).
 
+## 6. Get the risk model running on real data
+
+Do these in order, from `~/Documents/Github/n360` with `.env` loaded
+(`source .venv/bin/activate && set -a && . code/.env && set +a`).
+
+**1. See what is missing.** The report prints counts, dates and shares only, never a customer name or amount. It
+does print the labels your Salesforce uses (opportunity types, forecast categories, task subtypes). Read it before
+pasting it anywhere.
+
+```bash
+python3 code/readiness.py --user n360 --password "$N360_CH_PASSWORD"
+```
+
+**2. Pull Salesforce** (docs/18). Any Salesforce access token works: set `SF_INSTANCE_URL` and `SF_ACCESS_TOKEN`
+however you get them. Salesforce data changes slowly, so pulling by hand every week or two is enough; leave
+`N360_SALESFORCE` unset so the nightly run does not try with an expired token. One way to get a token is your own
+login through the Salesforce CLI (`brew install sf` once):
+
+```bash
+sf org login web --alias company
+```
+```bash
+export SF_INSTANCE_URL=$(sf org display --target-org company --json | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['instanceUrl'])")
+export SF_ACCESS_TOKEN=$(sf org display --target-org company --json | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['accessToken'])")
+```
+```bash
+python3 code/salesforce/sf_pull.py --out ~/n360-work/salesforce
+```
+```bash
+python3 code/salesforce/load_salesforce.py --rows ~/n360-work/salesforce --user n360 --password "$N360_CH_PASSWORD"
+```
+
+The pull reads, read-only: accounts, opportunities closing in the last two years or later, contracts, and tasks and
+events from the last two years. It changes nothing in Salesforce.
+
+**3. Link the names.** Run the report again. If customers are not linked to a Salesforce account, see which:
+
+```bash
+docker exec n360-clickhouse clickhouse-client --user n360 --password "$N360_CH_PASSWORD" --query "SELECT sf_name FROM n360.v_sf_unlinked"
+```
+
+Add each pair to `account_overrides` in `code/salesforce/salesforce.json` (Salesforce name → N360 customer), then
+pull and load again. If the report says there are no renewal opportunities, or no activity counts as contact, fix
+the matching setting in the same file (the report says which).
+
+**4. Rebuild the risk features** as far back as the usage history allows. The report says where it starts; begin
+168 days after that (the 12-week volume change needs two 12-week spans):
+
+```bash
+python3 code/risk/risk_model.py --user n360 --password "$N360_CH_PASSWORD" features --from 2025-07-01 --every 7 --overwrite
+```
+
+Past renewals are found from Salesforce renewal opportunities when the contract line has gone from the export.
+
+**5. Set the expected loss rate.** In `code/risk/risk_model.json`, set `prior_mean_rate` to renewals lost ÷ renewals
+due over the last two or three years, and bump `version`.
+
+**6. Train, adopt, score.**
+
+```bash
+python3 code/risk/risk_model.py --user n360 --password "$N360_CH_PASSWORD" train
+```
+
+`train` prints a run id, how past renewals were labelled, and a verdict. With few outcomes it stays at the expert
+prior; adopting it still fixes the chance at renewal on your own customers.
+
+```bash
+python3 code/risk/risk_model.py --user n360 --password "$N360_CH_PASSWORD" adopt --run RUN_ID
+```
+```bash
+python3 code/risk/risk_model.py --user n360 --password "$N360_CH_PASSWORD" score --as-of all
+```
+
+**7. Keep it fed.** Pull Salesforce again every week or two (step 2). Between pulls, "days since the last contact"
+misses calls logged since, so it can read up to a pull's age too high. For unattended nightly pulls, ask the admin
+for an integration user (docs/19) and set `N360_SALESFORCE=1` in `code/.env`.
+Ask CSMs to rate their customers and use the risk register (docs/17): both count in the score.
+
 ## Every night after
 
 ```bash

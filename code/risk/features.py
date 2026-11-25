@@ -156,6 +156,15 @@ CONTACT = """
     FROM n360.v_sf_account AS s LEFT JOIN n360.sf_activity AS a ON a.sf_account_id = s.sf_account_id
     WHERE s.account != '' GROUP BY s.account"""
 
+# The renewal date when no contract line covers the date: the close date of the account's next Salesforce renewal
+# opportunity on or after the date, open or closed. Past dates need this: the export keeps today's contract lines, so
+# a renewal that happened last year has no line, but its opportunity is still in Salesforce (closed won or lost).
+# A renewal's date is a contract fact, known in advance; the outcome is never read here.
+SF_RENEWAL = """
+    SELECT s.account AS account, dateDiff('day', {D}, min(o.close_date)) AS sf_days_to_renewal
+    FROM n360.v_sf_account AS s INNER JOIN n360.sf_opportunity AS o ON o.sf_account_id = s.sf_account_id
+    WHERE s.account != '' AND o.is_renewal AND o.close_date >= {D} GROUP BY s.account"""
+
 # current state only (pit: false): the renewal opportunity as Salesforce holds it now
 RENEWAL_FORECAST = """
     WITH (SELECT risk_safe_forecast_categories FROM n360.settings) AS safe,
@@ -167,10 +176,7 @@ RENEWAL_FORECAST = """
                    has(lost, argMinIf(ifNull(o.forecast_category, ''), o.close_date, NOT o.is_closed AND o.close_date >= {D} - 30)), 1.0,
                    has(safe, argMinIf(ifNull(o.forecast_category, ''), o.close_date, NOT o.is_closed AND o.close_date >= {D} - 30)), 0.0,
                    0.5) AS renewal_forecast_risk,
-           sumIf(ifNull(o.amount, 0), NOT o.is_closed AND o.close_date >= {D}) AS renewal_amount,
-           -- the next open renewal's close date: the renewal date only for a customer with no dated contract line
-           if(countIf(NOT o.is_closed AND o.close_date >= {D}) = 0, NULL,
-              dateDiff('day', {D}, minIf(o.close_date, NOT o.is_closed AND o.close_date >= {D}))) AS sf_days_to_renewal
+           sumIf(ifNull(o.amount, 0), NOT o.is_closed AND o.close_date >= {D}) AS renewal_amount
     FROM n360.v_sf_account AS s INNER JOIN n360.sf_opportunity AS o ON o.sf_account_id = s.sf_account_id
     WHERE s.account != '' AND o.is_renewal GROUP BY s.account"""
 
@@ -206,7 +212,8 @@ QUERIES = [(PACE, ['pace_gap_pts', 'forecast_end_pct'], False), (RENEWAL, ['days
            (FEATURES_USED, ['features_used'], False), (BUILD, ['build_change_pct'], False),
            (CONFIG_AGE, ['weeks_config_unchanged'], False), (CONTACT, ['days_since_contact', 'days_since_exec'], False),
            (PULSE, ['csm_pulse'], False), (REGISTER, ['open_churn_risks'], False),
-           (RENEWAL_FORECAST, ['renewal_forecast_risk', 'renewal_amount', 'sf_days_to_renewal'], True), (TICKETS, ['open_tickets', 'oldest_open_ticket_days'], True),
+           (SF_RENEWAL, ['sf_days_to_renewal'], False),
+           (RENEWAL_FORECAST, ['renewal_forecast_risk', 'renewal_amount'], True), (TICKETS, ['open_tickets', 'oldest_open_ticket_days'], True),
            (DATA_GAPS, ['data_gaps'], True)]
 
 # zero, not "not reported", when the source is loaded but has no row for a customer (nothing flagged, no ticket...).
@@ -253,7 +260,7 @@ def build(ch, as_of, newest=None):
     for r in rows.values():
         sf = r.pop('sf_days_to_renewal', None)
         if r.get('days_to_renewal') is None and sf is not None:
-            r['days_to_renewal'] = sf                       # no dated contract line: the open Salesforce renewal's date
+            r['days_to_renewal'] = sf                       # no contract line covers the date: the Salesforce renewal's
     return list(rows.values())
 
 
