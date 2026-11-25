@@ -37,7 +37,7 @@ is_s3() { case "$1" in s3://*) return 0 ;; *) return 1 ;; esac; }
 
 ls_dirs() {   # ls_dirs LOCATION: names of the subfolders
   if is_s3 "$1"; then aws s3 ls "${1%/}/" | awk '$1 == "PRE" {sub("/$", "", $2); print $2}'
-  else find "$1" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null; fi
+  else find "$1" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sed 's|.*/||'; fi     # BSD (macOS) find has no -printf
 }
 
 get() {   # get SRC DEST: copy one file (S3 or local)
