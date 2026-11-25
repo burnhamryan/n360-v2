@@ -32,7 +32,11 @@ if [ "${N360_SALESFORCE:-0}" = 1 ]; then
     set +e
     "$PYTHON" "$ROOT/code/salesforce/load_salesforce.py" --rows "$sfdir" --url "$CH_URL" --user "$CH_USER" --password "$CH_PASSWORD"
     rc=$?; set -e
-    [ $rc -eq 0 ] && log "Salesforce: LOADED" || log "Salesforce: not loaded (exit $rc); the previous copy stays live"
+    if [ "$rc" -eq 0 ]; then
+      log "Salesforce: LOADED"
+    else
+      log "Salesforce: not loaded (exit $rc); the previous copy stays live"
+    fi
   else
     log "Salesforce: pull failed; the previous copy stays live"
   fi
