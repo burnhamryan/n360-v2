@@ -121,6 +121,18 @@ definition changes `rule_hash`.
 | `v_freshness` | The freshness stamp: data through, loaded, stale (amber) |
 | `v_feature_use` | Target features per customer used in the last 30 days (Phase 2; NULL = not reported) |
 | `v_customer_notes` | Notes pinned to a customer's header, written from the contract data |
+| `v_sf_account`, `v_sf_unlinked` | Salesforce account → N360 account (override, else same name); Salesforce accounts not linked |
+| `v_risk_signal` | One row per customer and risk signal: lens (CSM / CA), level (risk / watch / fine / not reported), reason in words. Rules in `n360.settings` (docs/17) |
+| `v_risk_customer` | One row per customer: worst signal overall and per lens, reasons, next renewal date and amount |
+| `v_risk_register`, `v_risk_pulse` | Each register entry as it stands now (past due, age); each customer's newest CSM rating (expired after 30 days) |
+
+**Salesforce copy** (`code/salesforce/load_salesforce.py`, read-only, docs/18):
+- Tables: `sf_account`, `sf_opportunity`, `sf_contract`, `sf_activity`.
+- Each pull is staged, checked and swapped whole, and logged in `sf_runs`.
+
+**Risk tables** (append-only, never swapped):
+- `risk_register` and `risk_pulse`, written by `code/risk_register.py`.
+- `risk_history`: every signal each loaded night.
 
 ## Keys and joins
 

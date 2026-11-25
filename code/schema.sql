@@ -330,7 +330,23 @@ SELECT
     3   AS health_containment_down_pts, -- customer health: VA containment down this many points or more
     50  AS containment_low_pct,      -- adoption: VAs containing under this %
     3   AS target_features_min,      -- adoption: customers using at least this many target features
-    2   AS stamp_stale_days;         -- freshness stamp turns amber when the data is more than this many days old
+    2   AS stamp_stale_days,         -- freshness stamp turns amber when the data is more than this many days old
+    -- risk dashboard (25 Nov 2026): PROPOSED, docs/17_RISK_RESEARCH.md; no published market standard for most of these
+    120 AS risk_renewal_window_days, -- renewals this close count as "at-risk renewals" and show on the runway
+    30  AS risk_contact_watch_days,  -- no customer contact (Salesforce) for this many days: watch
+    60  AS risk_contact_risk_days,   -- ... risk (GitLab's non-engagement play fires at 60 days)
+    180 AS risk_exec_watch_days,     -- no executive meeting for this many days: watch
+    ['Commit', 'Closed'] AS risk_safe_forecast_categories,   -- a renewal inside the decision window not in these: watch
+    ['Omitted'] AS risk_lost_forecast_categories,            -- an open renewal in these: risk
+    180 AS risk_renewal_lost_days,   -- a renewal closed lost within this many days: risk
+    10  AS risk_volume_watch_pct,    -- customer conversations down this % (last 30 days against the 30 before): watch
+    25  AS risk_volume_risk_pct,     -- ... risk
+    80  AS risk_concentration_pct,   -- one VA carries this share of a customer's conversations (2+ VAs): watch
+    8   AS risk_stale_config_weeks,  -- no configuration change on any of a customer's VAs for this many weeks: watch
+    30  AS risk_ticket_age_days,     -- oldest open ticket older than this: watch
+    3   AS risk_open_tickets,        -- this many open tickets or more: watch
+    50  AS risk_building_drop_pct,   -- customer authoring + assistant use down this %: watch
+    30  AS risk_pulse_valid_days;    -- a CSM's rating counts for this many days, then shows as expired
 
 
 CREATE OR REPLACE VIEW n360.v_line_status AS
@@ -979,3 +995,501 @@ SELECT account, kind, note, o FROM (
     SELECT v.account, 'unbilled', concat(v.va_name, ' is on no contract line (unbilled).'), 6
     FROM n360.va AS v WHERE NOT v.on_contract
 );
+
+-- ───────────────────────── Salesforce (25 Nov 2026): read-only copy, loaded by code/salesforce/load_salesforce.py ─────────
+-- What sf_pull.py reads is set in code/salesforce/salesforce.json (standard objects). Each pull replaces these tables
+-- whole (stage, check, swap, like the nightly load); sf_runs logs every pull. Linked to N360 accounts by name
+-- (v_sf_account), with overrides in salesforce.json where names differ.
+CREATE TABLE IF NOT EXISTS n360.sf_account
+(
+    sf_account_id       String,
+    name                String,
+    owner               Nullable(String),
+    type                Nullable(String),
+    last_activity_date  Nullable(Date),
+    account_hint        String,                                 -- N360 account key from salesforce.json overrides ('' = match by name)
+    run_id              UUID
+)
+ENGINE = MergeTree ORDER BY sf_account_id;
+
+CREATE TABLE IF NOT EXISTS n360.sf_opportunity
+(
+    opp_id              String,
+    sf_account_id       Nullable(String),
+    name                String,
+    type                Nullable(String),
+    stage               Nullable(String),
+    forecast_category   Nullable(String),
+    close_date          Nullable(Date),
+    amount              Nullable(Float64),
+    is_closed           Bool,
+    is_won              Bool,
+    is_renewal          Bool,                                   -- type in salesforce.json renewal_opportunity_types
+    next_step           Nullable(String),
+    owner               Nullable(String),
+    last_activity_date  Nullable(Date),
+    run_id              UUID
+)
+ENGINE = MergeTree ORDER BY opp_id;
+
+CREATE TABLE IF NOT EXISTS n360.sf_contract
+(
+    contract_id         String,
+    sf_account_id       Nullable(String),
+    number              Nullable(String),
+    status              Nullable(String),
+    start_date          Nullable(Date),
+    end_date            Nullable(Date),
+    term_months         Nullable(UInt16),
+    run_id              UUID
+)
+ENGINE = MergeTree ORDER BY contract_id;
+
+CREATE TABLE IF NOT EXISTS n360.sf_activity
+(
+    activity_id         String,
+    sf_account_id       Nullable(String),
+    kind                Enum8('task' = 1, 'event' = 2),
+    activity_date       Nullable(Date),
+    type                Nullable(String),
+    subtype             Nullable(String),
+    subject             Nullable(String),
+    status              Nullable(String),
+    owner               Nullable(String),
+    is_closed           Bool,
+    is_contact          Bool,                                   -- a past event, or a closed call/email task (salesforce.json)
+    is_executive        Bool,                                   -- a contact whose subject names an executive meeting (keywords)
+    run_id              UUID
+)
+ENGINE = MergeTree ORDER BY activity_id;
+
+CREATE TABLE IF NOT EXISTS n360.sf_runs
+(
+    run_id              UUID,
+    pulled_at           DateTime('UTC'),
+    loaded_at           DateTime('UTC') DEFAULT now(),
+    status              Enum8('loaded' = 1, 'failed_checks' = 2),
+    checks_failed       Array(String),
+    row_counts          Map(String, UInt64),
+    unmatched_accounts  Array(String)                           -- Salesforce accounts with no N360 account (by name)
+)
+ENGINE = MergeTree ORDER BY loaded_at;
+
+CREATE OR REPLACE VIEW n360.v_sf_account AS
+-- Salesforce account -> N360 account: the override in salesforce.json, else the same name (case-insensitive) as the N360
+-- account key or display name. account = '' when not linked (listed in sf_runs.unmatched_accounts).
+SELECT s.sf_account_id AS sf_account_id, s.name AS sf_name, s.owner AS owner,
+       multiIf(s.account_hint != '', s.account_hint, m.account != '', m.account, '') AS account
+FROM n360.sf_account AS s
+LEFT JOIN (SELECT lower(account) AS k, account FROM n360.account
+           UNION DISTINCT SELECT lower(display_name), account FROM n360.account) AS m ON m.k = lower(s.name);
+
+
+-- ───────────────────────── risk (25 Nov 2026): register, CSM rating, signals, history ─────────────────────────
+-- Written only by code/risk_register.py (CSMs); never swapped by a load. Append-only: the newest row per risk wins.
+CREATE TABLE IF NOT EXISTS n360.risk_register
+(
+    risk_id     String,
+    account     LowCardinality(String),
+    reason      LowCardinality(String),                    -- one of risk_register.py REASONS
+    impact      LowCardinality(String),                    -- churn | downsell | contraction
+    owner       LowCardinality(String),
+    due         Nullable(Date),
+    status      Enum8('open' = 1, 'closed' = 2),
+    outcome     LowCardinality(String),                    -- when closed: saved | churned | downsold | no action | invalid
+    note        String,
+    by          LowCardinality(String),
+    at          DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = MergeTree ORDER BY (risk_id, at);
+
+CREATE TABLE IF NOT EXISTS n360.risk_pulse
+(
+    account     LowCardinality(String),
+    level       Enum8('green' = 1, 'amber' = 2, 'red' = 3),
+    note        String,
+    by          LowCardinality(String),
+    at          DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = MergeTree ORDER BY (account, at);
+
+CREATE TABLE IF NOT EXISTS n360.risk_history          -- every signal as it stood each loaded night (load.py copies it)
+(
+    data_date   Date,
+    account     LowCardinality(String),
+    signal      LowCardinality(String),
+    lens        LowCardinality(String),
+    level       LowCardinality(String)
+)
+ENGINE = MergeTree PARTITION BY toYYYYMM(data_date) ORDER BY (account, signal, data_date);
+
+CREATE OR REPLACE VIEW n360.v_risk_register AS
+-- Each risk as it stands now (its newest row), with age and whether it is past due. (Aliases differ from the column
+-- names inside: ClickHouse would read a reused name as the aggregate.)
+SELECT risk_id, x_account AS account, x_reason AS reason, x_impact AS impact, x_owner AS owner, x_due AS due,
+       x_status AS status, x_outcome AS outcome, x_note AS note, x_opened AS opened_at, x_updated AS updated_at,
+       dateDiff('day', toDate(x_opened), today()) AS age_days, x_status = 'open' AND x_due < today() AS overdue
+FROM (SELECT risk_id, argMax(account, at) AS x_account, argMax(reason, at) AS x_reason, argMax(impact, at) AS x_impact,
+             argMax(owner, at) AS x_owner, argMax(due, at) AS x_due, argMax(status, at) AS x_status,
+             argMax(outcome, at) AS x_outcome, argMax(note, at) AS x_note, min(at) AS x_opened, max(at) AS x_updated
+      FROM n360.risk_register GROUP BY risk_id);
+
+CREATE OR REPLACE VIEW n360.v_risk_pulse AS
+-- Each customer's newest CSM rating, and whether it has expired (n360.settings risk_pulse_valid_days).
+SELECT account, x_level AS level, x_note AS note, x_by AS by, x_at AS at,
+       dateDiff('day', toDate(x_at), today()) > (SELECT risk_pulse_valid_days FROM n360.settings) AS expired
+FROM (SELECT account, argMax(level, at) AS x_level, argMax(note, at) AS x_note, argMax(by, at) AS x_by, max(at) AS x_at
+      FROM n360.risk_pulse GROUP BY account);
+
+CREATE OR REPLACE VIEW n360.v_risk_signal AS
+-- One row per customer and signal: level (risk | watch | fine | not reported) and the reason in words. The rules are
+-- PROPOSED (n360.settings, docs/17). "Not reported" = the source has nothing for this customer: grey, never "fine".
+-- Signals and lenses: CSM = commercial and relationship; CA = customer architect (technical).
+WITH (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') AS dt,
+     (SELECT decision_window_days FROM n360.settings) AS window_days,
+     (SELECT risk_contact_watch_days FROM n360.settings) AS contact_watch,
+     (SELECT risk_contact_risk_days FROM n360.settings) AS contact_risk,
+     (SELECT risk_exec_watch_days FROM n360.settings) AS exec_watch,
+     (SELECT risk_safe_forecast_categories FROM n360.settings) AS safe_cats,
+     (SELECT risk_lost_forecast_categories FROM n360.settings) AS lost_cats,
+     (SELECT risk_renewal_lost_days FROM n360.settings) AS lost_days,
+     (SELECT risk_volume_watch_pct FROM n360.settings) AS vol_watch,
+     (SELECT risk_volume_risk_pct FROM n360.settings) AS vol_risk,
+     (SELECT risk_concentration_pct FROM n360.settings) AS conc_pct,
+     (SELECT risk_stale_config_weeks FROM n360.settings) AS stale_weeks,
+     (SELECT risk_ticket_age_days FROM n360.settings) AS ticket_age,
+     (SELECT risk_open_tickets FROM n360.settings) AS open_tickets,
+     (SELECT risk_building_drop_pct FROM n360.settings) AS build_drop,
+     (SELECT engine_current_major FROM n360.settings) AS current_major,
+     (SELECT attention_va_min_convs FROM n360.settings) AS busy_convs,
+     (SELECT containment_low_pct FROM n360.settings) AS low_cont,
+     (SELECT count() > 0 FROM n360.sf_account) AS sf_loaded,
+     (SELECT count() > 0 FROM n360.ps_ticket) AS tickets_loaded,
+     -- contract pace (from v_contract_status)
+     pace AS (SELECT account, 1 AS found, countIf(renewal_risk) AS n_risk, countIf(status = 'below pace' AND NOT renewal_risk) AS n_below,
+                     countIf(pct_billed IS NOT NULL) AS n_measured,
+                     argMinIf(concat(line_label, ' at renewal risk: ', toString(round(pct_billed)), '% used, ', toString(days_left), ' days left'),
+                              days_left, renewal_risk) AS risk_reason,
+                     argMinIf(concat(line_label, ': ', toString(round(pct_billed)), '% used, ', toString(round(pct_term)), '% of the term gone'),
+                              pct_billed - pct_term, status = 'below pace') AS below_reason,
+                     countIf(status IN ('over billed', 'will exceed')) AS n_expansion,
+                     minIf(toNullable(days_left), days_left >= 0) AS next_end_days
+              FROM n360.v_contract_status GROUP BY account),
+     -- Salesforce renewals and contact
+     sfa AS (SELECT sf_account_id, account FROM n360.v_sf_account WHERE account != ''),
+     ren AS (SELECT sfa.account AS account, 1 AS found,
+                    argMinIf(tuple(o.close_date, ifNull(o.forecast_category, ''), ifNull(o.stage, ''), ifNull(o.amount, 0)),
+                             o.close_date, NOT o.is_closed AND o.close_date >= dt - 30) AS nxt,
+                    countIf(NOT o.is_closed AND o.close_date >= dt - 30) AS n_open,
+                    maxIf(o.close_date, o.is_closed AND NOT o.is_won AND o.close_date >= dt - lost_days) AS lost_date,
+                    countIf(o.is_closed AND NOT o.is_won AND o.close_date >= dt - lost_days) AS n_lost,
+                    maxIf(o.close_date, o.is_closed AND o.is_won AND o.close_date >= dt - lost_days) AS won_date,
+                    countIf(o.is_closed AND o.is_won AND o.close_date >= dt - lost_days) AS n_won
+             FROM sfa LEFT JOIN (SELECT * FROM n360.sf_opportunity WHERE is_renewal) AS o ON o.sf_account_id = sfa.sf_account_id
+             GROUP BY sfa.account),
+     con AS (SELECT sfa.account AS account, 1 AS found, maxIf(a.activity_date, a.is_contact) AS last_contact,
+                    maxIf(a.activity_date, a.is_executive) AS last_exec, countIf(a.is_contact) AS n_contact,
+                    countIf(a.is_executive) AS n_exec
+             FROM sfa LEFT JOIN n360.sf_activity AS a ON a.sf_account_id = sfa.sf_account_id GROUP BY sfa.account),
+     -- usage
+     vol AS (SELECT account, 1 AS found, countIf(convs_30 IS NULL OR convs_prev_30 IS NULL) AS n_unread,
+                    sum(ifNull(convs_30, 0)) AS c30, sum(ifNull(convs_prev_30, 0)) AS cp30,
+                    max(ifNull(convs_30, 0)) AS top_va, argMax(va, ifNull(convs_30, 0)) AS top_va_name, count() AS n_vas,
+                    countIf(containment_down) AS n_cont_down, argMinIf(concat(va, ': containment down ', toString(abs(containment_change_pts)), ' points'),
+                              containment_change_pts, containment_down) AS cont_reason,
+                    countIf(containment_30 IS NOT NULL) AS n_cont
+             FROM n360.v_va_change GROUP BY account),
+     cont2 AS (SELECT account, count() AS n, any(subject) AS va FROM n360.v_anomaly_v2
+               WHERE signal = 'containment drop' AND period > dt - 14 GROUP BY account),
+     flags AS (SELECT a.account AS account, countIf(a.kind = 'went silent') AS n_silent, countIf(a.kind = 'drop') AS n_drop,
+                      anyIf(a.va_name, a.kind = 'went silent') AS silent_va, anyIf(a.va_name, a.kind = 'drop') AS drop_va
+               FROM n360.v_va_day_anomaly AS a WHERE NOT a.provisional AND a.day >= dt - 9 GROUP BY a.account),
+     bill AS (SELECT account, sum(n_pace) AS n_pace, sum(n_gap) AS n_gap FROM (
+                 SELECT account, count() AS n_pace, 0 AS n_gap FROM n360.v_forecast_change
+                 WHERE moved_earlier AND data_date > (SELECT max(data_date) FROM n360.forecast_history) - 7 GROUP BY account
+                 UNION ALL SELECT account, 0, count() FROM n360.v_anomaly_v2 WHERE signal = 'measure gap' AND period > dt - 14
+                 GROUP BY account) GROUP BY account),
+     hyg AS (SELECT account, countIf(status IN ('billed not recorded', 'unmapped', 'under review', 'not read')) AS n_gap,
+                    arrayStringConcat(arrayDistinct(groupArrayIf(status, status IN ('billed not recorded', 'unmapped', 'under review', 'not read'))), ', ') AS what
+             FROM n360.v_contract_status GROUP BY account),
+     -- CSM view
+     reg AS (SELECT account, countIf(status = 'open' AND impact = 'churn') AS n_churn, countIf(status = 'open') AS n_open,
+                    anyIf(concat(reason, ' (', impact, ')'), status = 'open') AS what
+             FROM n360.v_risk_register GROUP BY account),
+     pul AS (SELECT account, toString(level) AS level, expired, note, toDate(at) AS d FROM n360.v_risk_pulse),
+     -- configuration (Phase 2)
+     cfgchg AS (SELECT bot_id, max(if(changed, snapshot_date, toDate(0))) AS last_change, min(snapshot_date) AS first_read,
+                       max(snapshot_date) AS last_read
+                FROM (SELECT bot_id, snapshot_date,
+                             (engine_version, v8_playbooks, legacy_intents, mcp_servers_live, supervisory_rules_on)
+                               != lagInFrame((engine_version, v8_playbooks, legacy_intents, mcp_servers_live, supervisory_rules_on))
+                                  OVER (PARTITION BY bot_id ORDER BY snapshot_date ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)
+                               AND row_number() OVER (PARTITION BY bot_id ORDER BY snapshot_date) > 1 AS changed
+                      FROM n360.va_config_snapshot) GROUP BY bot_id),
+     eng AS (SELECT g.account AS account, 1 AS found,
+                    countIf(NOT g.current_engine AND ifNull(c.convs_30, 0) >= busy_convs) AS n_busy_old,
+                    countIf(NOT g.current_engine) AS n_old,
+                    argMaxIf(concat(c.va, ' on ', g.engine_version), ifNull(c.convs_30, 0), NOT g.current_engine) AS old_va,
+                    countIf(g.mcp_servers_live = 0 AND ifNull(c.containment_30, 100) < low_cont) AS n_capped,
+                    anyIf(c.va, g.mcp_servers_live = 0 AND ifNull(c.containment_30, 100) < low_cont) AS capped_va,
+                    max(greatest(ch.last_change, ch.first_read)) AS newest_change, max(ch.last_read) AS newest_read
+             FROM n360.v_va_config_latest AS g
+             LEFT JOIN n360.v_va_change AS c ON c.bot_id = g.bot_id
+             LEFT JOIN cfgchg AS ch ON ch.bot_id = g.bot_id
+             GROUP BY g.account),
+     bld AS (SELECT account, 1 AS found, sumIf(n, day > dt - 30) AS b30, sumIf(n, day <= dt - 30 AND day > dt - 60) AS bp30 FROM (
+                 SELECT account, day, ifNull(authoring_sessions, 0) AS n FROM n360.cortex_day WHERE user_type = 'customer'
+                 UNION ALL SELECT account, day, ifNull(questions, 0) FROM n360.explorer_day WHERE user_type = 'customer')
+             GROUP BY account),
+     idle AS (SELECT account, count() AS n, any(playbook) AS pb FROM (
+                 SELECT account, bot_id, playbook FROM n360.playbook_day WHERE day > dt - 31
+                 GROUP BY account, bot_id, playbook HAVING sum(executions) = 0) GROUP BY account),
+     tix AS (SELECT account, 1 AS found, countIf(status = 'open') AS n_open,
+                    dateDiff('day', minIf(opened, status = 'open'), dt) AS oldest
+             FROM n360.ps_ticket GROUP BY account)
+SELECT account, signal, lens, title, level, reason,
+       multiIf(level = 'risk', 3, level = 'watch', 2, level = 'fine', 1, 0) AS level_rank
+FROM (
+    SELECT a.account AS account, 'pace' AS signal, 'CSM' AS lens, 'Contract pace' AS title,
+           multiIf(p.found != 1 OR p.n_measured = 0 AND p.n_risk = 0, 'not reported', p.n_risk > 0, 'risk', p.n_below > 0, 'watch', 'fine') AS level,
+           multiIf(p.found != 1, 'No contract line (unbilled)', p.n_risk > 0, p.risk_reason, p.n_below > 0,
+                   concat(p.below_reason, if(p.n_below > 1, concat(' (+', toString(p.n_below - 1), ' more)'), '')),
+                   p.n_measured = 0, 'No line has a reading yet',
+                   p.n_expansion > 0, concat('On pace or above · ', toString(p.n_expansion), ' over or will exceed (expansion)'), 'On pace') AS reason
+    FROM n360.account AS a LEFT JOIN pace AS p ON p.account = a.account
+    UNION ALL
+    SELECT a.account, 'renewal', 'CSM', 'Renewal',
+           multiIf(r.found != 1, 'not reported', r.n_lost > 0, 'risk',
+                   r.n_open > 0 AND has(lost_cats, r.nxt.2), 'risk',
+                   r.n_open > 0 AND dateDiff('day', dt, r.nxt.1) <= window_days AND NOT has(safe_cats, r.nxt.2), 'watch',
+                   r.n_open = 0 AND r.n_won = 0 AND p.found = 1 AND p.next_end_days <= window_days, 'watch', 'fine'),
+           multiIf(r.found != 1, if(sf_loaded, 'Not linked to a Salesforce account', 'Salesforce not loaded'),
+                   r.n_lost > 0, concat('Renewal lost on ', toString(toDayOfMonth(r.lost_date)), ' ', formatDateTime(r.lost_date, '%b %Y')),
+                   r.n_open > 0, concat('Renewal ', toString(toDayOfMonth(r.nxt.1)), ' ', formatDateTime(r.nxt.1, '%b %Y'), ' · ',
+                                        if(r.nxt.2 = '', 'no forecast category', r.nxt.2), ' · ', r.nxt.3),
+                   r.n_won > 0, concat('Renewed: won on ', toString(toDayOfMonth(r.won_date)), ' ', formatDateTime(r.won_date, '%b %Y')),
+                   p.found = 1 AND p.next_end_days <= window_days,
+                   concat('Term ends in ', toString(p.next_end_days), ' days and no renewal opportunity'),
+                   'No open renewal opportunity')
+    FROM n360.account AS a LEFT JOIN ren AS r ON r.account = a.account LEFT JOIN pace AS p ON p.account = a.account
+    UNION ALL
+    SELECT a.account, 'volume', 'CSM', 'Conversations',
+           multiIf(v.found != 1 OR v.n_unread > 0 OR v.cp30 = 0, 'not reported',
+                   100 * (v.c30 - v.cp30) / v.cp30 <= -vol_risk, 'risk', 100 * (v.c30 - v.cp30) / v.cp30 <= -vol_watch, 'watch', 'fine'),
+           multiIf(v.found != 1, 'No VA', v.n_unread > 0 OR v.cp30 = 0, 'Not every day read in the last 60 days',
+                   concat(if(v.c30 >= v.cp30, 'Up ', 'Down '), toString(abs(toInt32(round(100 * (v.c30 - v.cp30) / v.cp30)))),
+                          '% on the 30 days before'))
+    FROM n360.account AS a LEFT JOIN vol AS v ON v.account = a.account
+    UNION ALL
+    SELECT a.account, 'contact', 'CSM', 'Last contact',
+           multiIf(c.found != 1, 'not reported', c.n_contact = 0, 'risk', dateDiff('day', c.last_contact, dt) > contact_risk, 'risk',
+                   dateDiff('day', c.last_contact, dt) > contact_watch OR c.n_exec = 0
+                       OR dateDiff('day', c.last_exec, dt) > exec_watch, 'watch', 'fine'),
+           multiIf(c.found != 1, if(sf_loaded, 'Not linked to a Salesforce account', 'Salesforce not loaded'),
+                   c.n_contact = 0, 'No contact recorded in a year',
+                   concat('Last contact ', toString(dateDiff('day', c.last_contact, dt)), ' days ago · ',
+                          if(c.n_exec = 0, 'no executive meeting in a year',
+                             concat('executive meeting ', toString(dateDiff('day', c.last_exec, dt)), ' days ago'))))
+    FROM n360.account AS a LEFT JOIN con AS c ON c.account = a.account
+    UNION ALL
+    SELECT a.account, 'billing', 'CSM', 'Billing stability',
+           if(ifNull(b.n_pace, 0) + ifNull(b.n_gap, 0) + ifNull(h.n_gap, 0) > 0, 'watch', 'fine'),
+           arrayStringConcat(arrayFilter(x -> x != '', [
+               if(ifNull(b.n_pace, 0) > 0, 'crossing date moved 14+ days earlier this week', ''),
+               if(ifNull(b.n_gap, 0) > 0, 'contract measure drifted from engaged', ''),
+               if(ifNull(h.n_gap, 0) > 0, concat('contract data incomplete: ', h.what), ''),
+               if(ifNull(b.n_pace, 0) + ifNull(b.n_gap, 0) + ifNull(h.n_gap, 0) = 0, 'Stable', '')]), ' · ')
+    FROM n360.account AS a LEFT JOIN bill AS b ON b.account = a.account LEFT JOIN hyg AS h ON h.account = a.account
+    UNION ALL
+    SELECT a.account, 'csm', 'CSM', 'CSM view',
+           multiIf(ifNull(g.n_churn, 0) > 0 OR (u.level = 'red' AND NOT u.expired), 'risk',
+                   ifNull(g.n_open, 0) > 0 OR (u.level = 'amber' AND NOT u.expired), 'watch',
+                   u.level = 'green' AND NOT u.expired, 'fine', 'not reported'),
+           arrayStringConcat(arrayFilter(x -> x != '', [
+               if(ifNull(g.n_open, 0) > 0, concat(toString(g.n_open), ' open in the register: ', g.what), ''),
+               multiIf(u.level = '', 'No CSM rating yet', u.expired, concat('Rating expired (', toString(u.d), ')'),
+                       concat('Rated ', u.level, if(u.note = '', '', concat(': ', u.note))))]), ' · ')
+    FROM n360.account AS a LEFT JOIN reg AS g ON g.account = a.account LEFT JOIN pul AS u ON u.account = a.account
+    UNION ALL
+    SELECT a.account, 'va_health', 'CA', 'VA health',
+           multiIf(v.found != 1, 'not reported', ifNull(f.n_silent, 0) > 0, 'risk', ifNull(f.n_drop, 0) >= 2, 'watch', 'fine'),
+           multiIf(v.found != 1, 'No VA', ifNull(f.n_silent, 0) > 0, concat(f.silent_va, ' went silent (settled)'),
+                   ifNull(f.n_drop, 0) >= 2, concat(toString(f.n_drop), ' drops in the 7 newest settled days (', f.drop_va, ')'),
+                   'No silence, under 2 drops')
+    FROM n360.account AS a LEFT JOIN vol AS v ON v.account = a.account LEFT JOIN flags AS f ON f.account = a.account
+    UNION ALL
+    SELECT a.account, 'containment', 'CA', 'Containment',
+           multiIf(v.found != 1 OR v.n_cont = 0, 'not reported', ifNull(k.n, 0) > 0, 'risk', v.n_cont_down > 0, 'watch', 'fine'),
+           multiIf(v.found != 1, 'No VA', v.n_cont = 0, 'No handoff data', ifNull(k.n, 0) > 0,
+                   concat(k.va, ': weekly containment far below its usual level'), v.n_cont_down > 0, v.cont_reason, 'Steady')
+    FROM n360.account AS a LEFT JOIN vol AS v ON v.account = a.account LEFT JOIN cont2 AS k ON k.account = a.account
+    UNION ALL
+    SELECT a.account, 'concentration', 'CA', 'Concentration',
+           multiIf(v.found != 1 OR v.c30 = 0, 'not reported', v.n_vas >= 2 AND 100 * v.top_va / v.c30 >= conc_pct, 'watch', 'fine'),
+           multiIf(v.found != 1, 'No VA', v.c30 = 0, 'No conversations in 30 days', v.n_vas = 1, 'One VA',
+                   concat(v.top_va_name, ' carries ', toString(toInt32(round(100 * v.top_va / v.c30))), '% of ',
+                          toString(v.n_vas), ' VAs\' conversations'))
+    FROM n360.account AS a LEFT JOIN vol AS v ON v.account = a.account
+    UNION ALL
+    SELECT a.account, 'engine', 'CA', 'Engine and configuration',
+           multiIf(e.found != 1, 'not reported', e.n_busy_old > 0, 'risk',
+                   e.n_old > 0 OR e.n_capped > 0 OR dateDiff('week', e.newest_change, e.newest_read) >= stale_weeks, 'watch', 'fine'),
+           if(e.found != 1, 'No configuration read', arrayStringConcat(arrayFilter(x -> x != '', [
+               if(e.n_old > 0, concat(e.old_va, if(e.n_busy_old > 0, ' (busy) is below V8', ' is below V8')), ''),
+               if(e.n_capped > 0, concat(e.capped_va, ': no MCP servers and containment under 50%'), ''),
+               if(dateDiff('week', e.newest_change, e.newest_read) >= stale_weeks,
+                  concat('no configuration change in ', toString(dateDiff('week', e.newest_change, e.newest_read)), ' weeks'), ''),
+               if(e.n_old = 0 AND e.n_capped = 0 AND dateDiff('week', e.newest_change, e.newest_read) < stale_weeks,
+                  'Every VA on V8 or later, configuration changing', '')]), ' · '))
+    FROM n360.account AS a LEFT JOIN eng AS e ON e.account = a.account
+    UNION ALL
+    SELECT a.account, 'building', 'CA', 'Customer building',
+           multiIf(bd.found != 1, 'not reported', bd.b30 = 0, 'watch',
+                   bd.bp30 > 0 AND 100 * (bd.b30 - bd.bp30) / bd.bp30 <= -build_drop, 'watch', ifNull(i.n, 0) > 0, 'watch', 'fine'),
+           if(bd.found != 1, 'No authoring or assistant data', arrayStringConcat(arrayFilter(x -> x != '', [
+               if(bd.b30 = 0, 'no authoring or assistant use by customer users in 30 days', ''),
+               if(bd.b30 > 0 AND bd.bp30 > 0 AND 100 * (bd.b30 - bd.bp30) / bd.bp30 <= -build_drop,
+                  concat('authoring and assistant use down ', toString(toInt32(round(-100 * (bd.b30 - bd.bp30) / bd.bp30))), '%'), ''),
+               if(ifNull(i.n, 0) > 0, concat(toString(i.n), ' playbook built, not run (', i.pb, ')'), ''),
+               if(bd.b30 > 0 AND NOT (bd.bp30 > 0 AND 100 * (bd.b30 - bd.bp30) / bd.bp30 <= -build_drop) AND ifNull(i.n, 0) = 0,
+                  concat(toString(bd.b30), ' sessions and questions in 30 days'), '')]), ' · '))
+    FROM n360.account AS a LEFT JOIN bld AS bd ON bd.account = a.account LEFT JOIN idle AS i ON i.account = a.account
+    UNION ALL
+    SELECT a.account, 'support', 'CA', 'Support',
+           multiIf(NOT tickets_loaded, 'not reported', t.found != 1, 'fine',
+                   t.n_open >= open_tickets OR (t.n_open > 0 AND t.oldest > ticket_age), 'watch', 'fine'),
+           multiIf(NOT tickets_loaded, 'Tickets not loaded', t.found != 1 OR t.n_open = 0, 'No open ticket',
+                   concat(toString(t.n_open), ' open, oldest ', toString(t.oldest), ' days'))
+    FROM n360.account AS a LEFT JOIN tix AS t ON t.account = a.account
+);
+
+CREATE OR REPLACE VIEW n360.v_risk_customer AS
+-- One row per customer: the worst signal overall and per lens (Totango's rule: one risk signal makes the customer
+-- "at risk"), counts, the reasons at risk, and the renewal it sits in front of.
+WITH (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') AS dt,
+     ren AS (SELECT account, if(n > 0, nxt.1, NULL) AS close_date, if(n > 0, nxt.2, NULL) AS amount FROM (
+                 SELECT s.account AS account, countIf(NOT o.is_closed AND o.close_date >= dt) AS n,
+                        argMinIf(tuple(o.close_date, ifNull(o.amount, 0)), o.close_date, NOT o.is_closed AND o.close_date >= dt) AS nxt
+                 FROM n360.v_sf_account AS s INNER JOIN n360.sf_opportunity AS o ON o.sf_account_id = s.sf_account_id
+                 WHERE s.account != '' AND o.is_renewal GROUP BY s.account)),
+     term AS (SELECT account, minIf(toNullable(end_date), days_left >= 0) AS end_date FROM n360.v_contract_status GROUP BY account)
+SELECT a.account AS account, a.display_name AS display_name, a.csm_rocketlane AS csm,
+       multiIf(max(r.level_rank) = 3, 'risk', max(r.level_rank) = 2, 'watch', max(r.level_rank) = 1, 'fine', 'not reported') AS level,
+       multiIf(maxIf(r.level_rank, r.lens = 'CSM') = 3, 'risk', maxIf(r.level_rank, r.lens = 'CSM') = 2, 'watch',
+               maxIf(r.level_rank, r.lens = 'CSM') = 1, 'fine', 'not reported') AS csm_level,
+       multiIf(maxIf(r.level_rank, r.lens = 'CA') = 3, 'risk', maxIf(r.level_rank, r.lens = 'CA') = 2, 'watch',
+               maxIf(r.level_rank, r.lens = 'CA') = 1, 'fine', 'not reported') AS ca_level,
+       countIf(r.level = 'risk') AS n_risk, countIf(r.level = 'watch') AS n_watch,
+       arrayStringConcat(groupArrayIf(concat(r.title, ': ', r.reason), r.level = 'risk'), ' · ') AS risk_reasons,
+       arrayStringConcat(groupArrayIf(concat(r.title, ': ', r.reason), r.level = 'watch'), ' · ') AS watch_reasons,
+       -- the next renewal: the open Salesforce renewal, else the next contract term end
+       multiIf(any(rn.close_date) IS NOT NULL, any(rn.close_date), any(t.end_date) IS NOT NULL, any(t.end_date), NULL) AS renewal_date,
+       dateDiff('day', dt, renewal_date) AS days_to_renewal,
+       any(rn.amount) AS renewal_amount
+FROM n360.account AS a
+INNER JOIN n360.v_risk_signal AS r ON r.account = a.account
+LEFT JOIN ren AS rn ON rn.account = a.account
+LEFT JOIN term AS t ON t.account = a.account
+GROUP BY a.account, a.display_name, a.csm_rocketlane;
+
+CREATE OR REPLACE VIEW n360.v_sf_unlinked AS
+-- Salesforce accounts with no N360 account, as of now (sf_runs.unmatched_accounts is the list at the time of a pull).
+SELECT sf_account_id, sf_name, owner FROM n360.v_sf_account WHERE account = '';
+
+-- ───────────────────────── risk model (26 Nov 2026): code/risk/, docs/21_RISK_MODEL.md ─────────────────────────
+-- Written only by code/risk/risk_model.py; never swapped by a load. Append-only; the newest run wins in the views.
+CREATE TABLE IF NOT EXISTS n360.risk_features         -- the feature store: each feature as it stood on a date
+(
+    as_of        Date,
+    account      LowCardinality(String),
+    feature      LowCardinality(String),
+    value        Nullable(Float64),                     -- NULL = not reported (the source had nothing)
+    computed_at  DateTime('UTC') DEFAULT now()
+)
+ENGINE = MergeTree PARTITION BY toYYYYMM(as_of) ORDER BY (account, as_of, feature);
+
+CREATE TABLE IF NOT EXISTS n360.risk_outcome          -- outcomes recorded by hand (risk_model.py outcome)
+(
+    account   LowCardinality(String),
+    date      Date,
+    outcome   Enum8('churned' = 1, 'downsold' = 2, 'renewed' = 3, 'expanded' = 4),
+    note      String,
+    by        LowCardinality(String),
+    at        DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = MergeTree ORDER BY (account, date);
+
+CREATE TABLE IF NOT EXISTS n360.risk_model_runs       -- every trained model, with its backtest
+(
+    run_id      UUID,
+    trained_at  DateTime('UTC') DEFAULT now(),
+    version     String,                                 -- risk_model.json version
+    kind        LowCardinality(String),                 -- 'prior' (too few outcomes) | 'trained'
+    n           UInt32,
+    events      UInt32,
+    note        String,
+    model       String,                                 -- JSON: intercept, coef, fill
+    backtest    String                                  -- JSON: metrics per method, reliability, lead times
+)
+ENGINE = MergeTree ORDER BY trained_at;
+
+CREATE TABLE IF NOT EXISTS n360.risk_scores
+(
+    run_id           UUID,
+    scored_at        DateTime('UTC') DEFAULT now(),
+    model_run_id     Nullable(UUID),                    -- NULL = the expert prior (no model trained yet)
+    model_kind       LowCardinality(String),
+    as_of            Date,
+    account          LowCardinality(String),
+    health           Nullable(Float64),
+    band             LowCardinality(String),            -- healthy | watch | at risk | not reported
+    probability      Float64,                           -- churn or downsell at the next renewal (within the horizon)
+    eligible         Bool,                              -- next renewal within the horizon (or unknown)
+    coverage         Float64,                           -- share of the model's weight with data
+    hard_reds        Array(String),
+    days_to_renewal  Nullable(Float64),
+    renewal_amount   Nullable(Float64),
+    revenue_at_risk  Nullable(Float64)                  -- probability x renewal amount, when eligible
+)
+ENGINE = MergeTree ORDER BY (as_of, account, scored_at);
+
+CREATE TABLE IF NOT EXISTS n360.risk_contributions    -- why: each feature's value, risk, health points lost, log-odds push
+(
+    run_id     UUID,
+    as_of      Date,
+    account    LowCardinality(String),
+    feature    LowCardinality(String),
+    dimension  LowCardinality(String),
+    value      Nullable(Float64),
+    risk       Nullable(Float64),
+    points     Float64,
+    logodds    Float64
+)
+ENGINE = MergeTree ORDER BY (as_of, account, feature, run_id);
+
+CREATE OR REPLACE VIEW n360.v_risk_outcomes AS
+-- Every known outcome: recorded by hand, closed in the risk register, or a renewal closed in Salesforce.
+SELECT account, date, outcome, source FROM (
+    SELECT account, date, toString(outcome) AS outcome, 'recorded' AS source FROM n360.risk_outcome
+    UNION ALL
+    SELECT account, toDate(updated_at), multiIf(outcome = 'churned', 'churned', outcome = 'downsold', 'downsold', 'renewed'), 'register'
+    FROM n360.v_risk_register WHERE status = 'closed' AND outcome IN ('churned', 'downsold', 'saved')
+    UNION ALL
+    SELECT s.account, o.close_date, if(o.is_won, 'renewed', 'churned'), 'salesforce'
+    FROM n360.sf_opportunity AS o INNER JOIN n360.v_sf_account AS s ON s.sf_account_id = o.sf_account_id
+    WHERE o.is_renewal AND o.is_closed AND s.account != '' AND o.close_date IS NOT NULL);
+
+CREATE OR REPLACE VIEW n360.v_risk_model AS
+-- The model in use: the newest trained run (the expert prior until one exists).
+SELECT * FROM n360.risk_model_runs ORDER BY trained_at DESC LIMIT 1;
+
+CREATE OR REPLACE VIEW n360.v_risk_score AS
+-- The newest score per customer: the newest scoring run of the newest date.
+SELECT * FROM n360.risk_scores
+WHERE (as_of, scored_at) IN (SELECT as_of, max(scored_at) FROM n360.risk_scores
+                             WHERE as_of = (SELECT max(as_of) FROM n360.risk_scores) GROUP BY as_of);
+
+CREATE OR REPLACE VIEW n360.v_risk_drivers AS
+-- The newest contributions per customer (same run as v_risk_score).
+SELECT c.* FROM n360.risk_contributions AS c
+WHERE c.run_id IN (SELECT run_id FROM n360.v_risk_score);

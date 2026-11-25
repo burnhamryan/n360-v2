@@ -5,3 +5,9 @@ theme; 14 and 15 in the light theme). Loaded with 14 synthetic nights; night 9 w
 VA and number is invented by `sample_data/generate_synthetic.py`. Maple Clinics shows the grey states (too early,
 under review, billed not recorded, unmapped); Willow Energy shows renewal risk. The data is 6 days old when these
 were taken, so the freshness stamp is amber. Regenerate after a dashboard change; CI does not check these.
+
+`16-risk.png` and `17-risk-light.png` show the Risk dashboard (`docs/17_RISK_RESEARCH.md`, section 7), on the same synthetic data. The
+Salesforce records come from `sample_data/generate_salesforce.py` through the fake API. The register entries and CSM
+ratings are the ones `code/ci.sh` records.
+
+`18-risk-model.png`: the Risk model dashboard (`docs/21_RISK_MODEL.md`) on the same synthetic data, with Willow Energy chosen. The score is the expert prior (too few synthetic outcomes to train), and the backtest panels are empty until there is enough history.

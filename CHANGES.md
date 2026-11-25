@@ -1,3 +1,55 @@
+# CHANGES · 26 Nov 2026 · Customer risk model
+
+**A customer risk model you can test, tune and run, on its own or inside N360** (`code/risk/`, `docs/21_RISK_MODEL.md`).
+It gives each customer:
+- **health** (0–100), with the points each feature costs;
+- a **band**, with hard reds that force "at risk";
+- the **chance of churn or downsell at the next renewal**;
+- **revenue at risk**.
+
+It has 20 features in 7 dimensions, each computed as it stood on any past date. The probability is a logistic
+regression that starts as an expert prior built from the scorecard and learns from outcomes as they arrive. A
+walk-forward backtest compares it with the scorecard and the rules. The new dashboard is `n360-risk-model`.
+Tested on synthetic data with a known truth: AUC about 0.77 out of time; the trained model is better calibrated than
+the prior; churn was flagged a month or more ahead.
+
+| Piece | What |
+|---|---|
+| `code/risk/model.py` | Feature risks, scorecard, hard reds, the expert prior, ridge-to-prior logistic regression (pure Python), explanations, metrics (AUC, Brier, precision/recall at 10%, reliability) |
+| `code/risk/backtest.py` | Labels (renewal window, horizon observed), walk-forward backtest, lead time |
+| `code/risk/features.py` | 20 point-in-time features from N360's ClickHouse (usage, contract, quality, adoption, Salesforce, tickets, register, CSM rating) |
+| `code/risk/risk_model.py` | `features`, `train`, `score`, `backtest`, `explain`, `outcome`, `nightly`; with N360 or `--no-db` on files |
+| `code/risk/risk_model.json` | Every setting (PROPOSED): dimensions, weights, anchors, hard reds, bands, prior, ridge, horizon, backtest |
+| `code/schema.sql` | `risk_features`, `risk_outcome`, `risk_model_runs`, `risk_scores`, `risk_contributions`; views `v_risk_outcomes`, `v_risk_model`, `v_risk_score`, `v_risk_drivers` |
+| `sample_data/generate_risk_panel.py` | A synthetic 220-customer, 130-week history with a known risk process |
+| Tests, CI | `code/risk/test_risk_model.py` (25 checks). The N360 path in CI: features, train, score history, view checks. Nightly scoring in `nightly.sh` (training stays manual). Model tables backed up |
+
+---
+
+# CHANGES · 25 Nov 2026 · Risk dashboard and Salesforce
+
+**New Risk dashboard (`n360-risk`), and N360 now reads Salesforce.** The dashboard shows which customers are at risk,
+why, and who is acting, for CSMs and customer architects. It has:
+- 12 explainable signals per customer, with forced reds;
+- a risk register and a CSM rating;
+- a renewal runway;
+- a per-VA architect view;
+- nightly risk history.
+
+Salesforce is read-only: accounts, renewals, contracts and activity. Design and research: `docs/17_RISK_RESEARCH.md`.
+Salesforce: `docs/18_SALESFORCE.md`. Tested on synthetic data and a fake Salesforce API only.
+
+| Piece | What |
+|---|---|
+| `code/salesforce/` | `sf_pull.py`: reads Salesforce over its REST API, standard library only, using an existing token or OAuth client credentials, with SOQL paging. `salesforce.json` sets what to read. `load_salesforce.py` stages, checks and swaps. `fake_salesforce.py` serves the API for tests |
+| `code/schema.sql` | `sf_*` tables and `sf_runs`. `risk_register`, `risk_pulse`, `risk_history`. Views `v_sf_account`, `v_sf_unlinked`, `v_risk_signal`, `v_risk_customer`, `v_risk_register`, `v_risk_pulse`. 16 PROPOSED risk settings |
+| `code/risk_register.py` | Add, update and close risks; record a CSM rating. The reason codes are a short fixed list |
+| `code/load.py`, `code/ops/nightly.sh` | Risk history every night. `N360_SALESFORCE=1` pulls Salesforce before the nights. History tables backed up |
+| `sample_data/generate_salesforce.py` | Synthetic Salesforce records that plant every signal: lost renewal, Omitted forecast, no contact, a differing account name, an unlinked prospect |
+| CI | Covers the Salesforce path end to end: pulled through the fake API, paged, with a wrong secret refused. Also the register, every planted signal level, and risk history on every night |
+
+---
+
 # CHANGES · 25 Nov 2026 · Dashboards rebuilt to the v2 redesign
 
 **The 11 dashboards are reviewed and rebuilt to the v2 redesign. The changes:**

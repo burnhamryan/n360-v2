@@ -6,6 +6,9 @@
 # Each export goes through load.py (stage, 8 checks, swap). Exit codes: 0 nothing failed (loaded, refused by a
 # check, or nothing new); 2 a load errored (stops here, in order; the next run retries it).
 # After at least one load, backs up the history tables if N360_BACKUP is set. Settings: see common.sh.
+# With N360_SALESFORCE=1 it first pulls Salesforce (code/salesforce/sf_pull.py, credentials SF_* in the environment
+# or .env) and loads it (load_salesforce.py), so tonight's risk snapshot sees it. A failed pull is logged and the
+# previous Salesforce copy stays live; the nightly loads still run.
 #   --reload-latest  also reload the newest night already loaded (after a restore onto a new server, whose live
 #                    tables are still empty: the restored n360.runs makes every export look known)
 set -euo pipefail
@@ -21,6 +24,23 @@ else                                                       # macOS has no flock:
     log "another nightly run is in progress (or a stale lock: rmdir $WORK/.nightly.lock.d); nothing to do"; exit 0
   fi
   trap 'rmdir "$WORK/.nightly.lock.d" 2>/dev/null' EXIT
+fi
+
+if [ "${N360_SALESFORCE:-0}" = 1 ]; then
+  sfdir="$WORK/salesforce"; rm -rf "$sfdir"
+  if "$PYTHON" "$ROOT/code/salesforce/sf_pull.py" --out "$sfdir"; then
+    set +e
+    "$PYTHON" "$ROOT/code/salesforce/load_salesforce.py" --rows "$sfdir" --url "$CH_URL" --user "$CH_USER" --password "$CH_PASSWORD"
+    rc=$?; set -e
+    if [ "$rc" -eq 0 ]; then
+      log "Salesforce: LOADED"
+    else
+      log "Salesforce: not loaded (exit $rc); the previous copy stays live"
+    fi
+  else
+    log "Salesforce: pull failed; the previous copy stays live"
+  fi
+  rm -rf "$sfdir"
 fi
 
 reload=${1:-}
@@ -57,5 +77,10 @@ for night in $(ls_dirs "$N360_DROP" | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | s
   esac
 done
 [ "$loaded" -eq 0 ] && log "nothing new to load"
+# risk model (docs/21): tonight's features and scores, unless N360_RISK_MODEL=0. Training stays a deliberate step.
+if [ "$loaded" -gt 0 ] && [ "${N360_RISK_MODEL:-1}" = 1 ]; then
+  "$PYTHON" "$ROOT/code/risk/risk_model.py" --url "$CH_URL" --user "$CH_USER" --password "$CH_PASSWORD" nightly \
+    || log "risk model: scoring failed (the dashboards keep the previous scores)"
+fi
 if [ "$loaded" -gt 0 ] && [ -n "${N360_BACKUP:-}" ]; then "$OPS/backup.sh"; fi
 exit 0

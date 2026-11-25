@@ -5,7 +5,7 @@ the reference for page structure, statuses and colours. Where it differs from th
 per-dashboard sections below are the original specs. They still describe what each panel measures and where it
 comes from.
 
-Twelve dashboards in Grafana 13.3.1 OSS (the eleven below plus **Customer health**, `n360-health`). They are linked,
+Thirteen dashboards in Grafana 13.3.1 OSS (the eleven below plus **Customer health**, `n360-health`, and **Risk**, `n360-risk`, docs/17). They are linked,
 so a reader starts at the Overview and clicks down to one customer, one contract line, one VA. Each spec is what
 `build_dashboards.py` must generate.
 
@@ -125,3 +125,19 @@ Tickets by product area; top asks (several customers wanting the same thing); ti
 Differences: "ran, not loaded" (orange) cannot show: a run that errors before logging (loader exit 2) writes nothing to `runs`, so it shows as "no run". Hover shows the status, not the failed checks (they are in "Why nights stopped"). Freshness history per night (B17).
 
 Stats: last night result, data through, nights loaded of last 14, checks passed on last load, stale sources. Panels: runs, last 14 nights (one block per night: loaded green, stopped red, ran-not-loaded orange, no run grey; hover shows reason); why nights stopped (table); source freshness (last day, days behind: amber 2, red 3); contract measure mix (lines per measure; rules not live).
+
+## 13. Risk · `n360-risk` (BUILT 25 Nov 2026; design and signals in docs/17)
+
+**Question: which customers are at risk, why, and who is acting?** Readers: CSMs and customer architects. Filter:
+CSM.
+
+| Row | Panel | Source |
+|---|---|---|
+| 1 | Sentence; freshness stamp | `v_risk_customer`, `v_risk_register` |
+| 2 | Tiles: customers at risk (30 nights); at-risk renewals within 120 days (+ Salesforce amount); new risk signals vs a week ago; open risks past due | `risk_history`, `v_risk_customer`, `v_risk_signal`, `v_risk_register` |
+| 3 | Risk grid: customer × 12 signals, overall / CSM / architect level, days to renewal, trend | `v_risk_customer`, `v_risk_signal`, `risk_history` |
+| 4 | Why: every signal at risk or watch, in words | `v_risk_signal` |
+| 5 | Risk register: open (past due first) | `v_risk_register` |
+| 6 | Renewal runway (180 days) beside customers at risk and on watch per night | `v_risk_customer`, `risk_history` |
+| 7 | Architect view: every VA (volume, containment, engine, MCP, weeks unchanged, flags, idle playbooks) | `v_va_change`, `v_va_config_latest`, `va_config_snapshot`, `v_va_day_anomaly`, `playbook_day` |
+| 8 | Closed risks, last 90 days, with outcomes | `v_risk_register` |

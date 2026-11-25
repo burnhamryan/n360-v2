@@ -1,0 +1,48 @@
+{
+  "_about": "What sf_pull.py reads from Salesforce. Standard objects and fields only; change names here (never in code) to match the company org. No secrets: credentials come from the environment (docs/18_SALESFORCE.md).",
+  "api_version": "v62.0",
+  "objects": {
+    "sf_account": {
+      "sobject": "Account",
+      "fields": {"sf_account_id": "Id", "name": "Name", "owner": "Owner.Name", "type": "Type",
+                 "last_activity_date": "LastActivityDate"},
+      "where": ""
+    },
+    "sf_opportunity": {
+      "sobject": "Opportunity",
+      "fields": {"opp_id": "Id", "sf_account_id": "AccountId", "name": "Name", "type": "Type", "stage": "StageName",
+                 "forecast_category": "ForecastCategoryName", "close_date": "CloseDate", "amount": "Amount",
+                 "is_closed": "IsClosed", "is_won": "IsWon", "next_step": "NextStep", "owner": "Owner.Name",
+                 "last_activity_date": "LastActivityDate"},
+      "where": "CloseDate >= LAST_N_DAYS:730"
+    },
+    "sf_contract": {
+      "sobject": "Contract",
+      "fields": {"contract_id": "Id", "sf_account_id": "AccountId", "number": "ContractNumber", "status": "Status",
+                 "start_date": "StartDate", "end_date": "EndDate", "term_months": "ContractTerm"},
+      "where": ""
+    },
+    "task": {
+      "sobject": "Task",
+      "fields": {"activity_id": "Id", "sf_account_id": "AccountId", "activity_date": "ActivityDate", "type": "Type",
+                 "subtype": "TaskSubtype", "subject": "Subject", "status": "Status", "owner": "Owner.Name",
+                 "is_closed": "IsClosed"},
+      "where": "ActivityDate = LAST_N_DAYS:365 AND AccountId != null"
+    },
+    "event": {
+      "sobject": "Event",
+      "fields": {"activity_id": "Id", "sf_account_id": "AccountId", "activity_date": "ActivityDate", "type": "Type",
+                 "subtype": "EventSubtype", "subject": "Subject", "owner": "Owner.Name"},
+      "where": "ActivityDate = LAST_N_DAYS:365 AND AccountId != null"
+    }
+  },
+  "renewal_opportunity_types": ["Renewal"],
+  "contact": {
+    "_about": "An activity counts as customer contact when it is a past event, or a closed task of one of these subtypes.",
+    "task_subtypes": ["Call", "Email"]
+  },
+  "executive_keywords": ["EBR", "QBR", "executive", "exec sync"],
+  "account_overrides": {
+    "_about": "Salesforce account name -> N360 account key, where the names differ. Unmatched accounts are listed after every pull."
+  }
+}

@@ -41,6 +41,24 @@ else
   PANEL_CONN=(--url "$URL" --user grafana --password "$GRAFANA_CH_PASSWORD")
 fi
 
+# Salesforce (25 Nov 2026): synthetic records served by a fake Salesforce API, read by the real reader (OAuth client
+# credentials, SOQL, paging), loaded before the nights so each night's risk snapshot sees it
+python3 "$ROOT/sample_data/generate_salesforce.py" --out "$WORK/sf_records.json" > /dev/null
+SF_PORT=${SF_PORT:-18443}
+python3 "$ROOT/code/salesforce/fake_salesforce.py" --records "$WORK/sf_records.json" --port "$SF_PORT" &
+SF_PID=$!; trap 'kill $SF_PID 2>/dev/null || true' EXIT
+python3 -c "import json, sys; c = json.load(open(sys.argv[1])); c['account_overrides']['Juniper Bank N.A.'] = 'Juniper Bank'; json.dump(c, open(sys.argv[2], 'w'))" \
+  "$ROOT/code/salesforce/salesforce.json" "$WORK/salesforce.json"        # a Salesforce name that differs from N360's
+for _ in $(seq 1 20); do curl -s -o /dev/null "http://127.0.0.1:$SF_PORT/" && break; sleep 0.5; done
+SF_ENV=(env NO_PROXY=127.0.0.1 no_proxy=127.0.0.1 SF_LOGIN_URL="http://127.0.0.1:$SF_PORT" SF_CLIENT_ID=fake-client-id)
+"${SF_ENV[@]}" SF_CLIENT_SECRET=fake-client-secret python3 "$ROOT/code/salesforce/sf_pull.py" --out "$WORK/sf" --config "$WORK/salesforce.json"
+python3 "$ROOT/code/salesforce/load_salesforce.py" --rows "$WORK/sf" "${CONN[@]}"
+if "${SF_ENV[@]}" SF_CLIENT_SECRET=wrong python3 "$ROOT/code/salesforce/sf_pull.py" --out "$WORK/sf_bad" > "$WORK/sf_bad.log" 2>&1; then
+  echo "FAIL: a wrong Salesforce secret was accepted"; exit 1
+fi
+[ ! -e "$WORK/sf_bad/sf_account.ndjson" ] || { echo "FAIL: a failed pull wrote files"; exit 1; }
+echo "OK   Salesforce: pulled through the API (paged), loaded; a wrong secret is refused and writes nothing"
+
 i=0
 for dir in $(ls -d "$WORK"/nights/*/ | sort); do
   i=$((i + 1)); want=0; [ $i -eq $BAD ] && want=3
@@ -68,6 +86,24 @@ R=(python3 "$ROOT/code/review_anomaly.py" "${CONN[@]}" --by ci)
 "${R[@]}" --va "Lakeside Email" --day 2026-11-12 --outcome real
 "${R[@]}" --va "Lakeside Email" --day 2026-11-12 --outcome "data issue" --note "re-read: export gap"
 "${R[@]}" --va "Bluebird Web" --day 2026-11-13 --outcome expected --note "industry-wide spike"
+# risk register and CSM ratings (risk dashboard), as the loader user: an open churn risk, an overdue one, an updated
+# one, a closed one, two ratings
+K=(python3 "$ROOT/code/risk_register.py" "${CONN[@]}" --by ci)
+"${K[@]}" add --id R-willow --customer "Willow Energy" --reason "Adoption / value" --impact churn --owner csm12 --due 2026-12-10 --note "[SYNTHETIC] usage falling"
+"${K[@]}" add --id R-orchid --customer "Orchid Health" --reason "Quality / bugs" --impact contraction --owner csm10 --due 2026-11-20 --note "[SYNTHETIC] containment fell"
+"${K[@]}" add --id R-kestrel --customer "Kestrel Travel" --reason "Budget / price" --impact downsell --owner csm9
+"${K[@]}" update --id R-kestrel --due 2026-12-20 --note "[SYNTHETIC] procurement review"
+"${K[@]}" add --id R-atlas --customer "Atlas Streaming" --reason "Budget / price" --impact downsell --owner csm4
+"${K[@]}" close --id R-atlas --outcome saved --note "[SYNTHETIC] renewed at full volume"
+"${K[@]}" pulse --customer "Harbor Telecom" --level amber --note "[SYNTHETIC] budget review in Q1"
+"${K[@]}" pulse --customer "Northwind Outfitters" --level green
+# risk model (docs/21): unit and synthetic-history tests on files, then the N360 path: weekly features back to May,
+# train (falls back to the expert prior: too few outcomes), score every stored date
+python3 "$ROOT/code/risk/test_risk_model.py"
+M=(python3 "$ROOT/code/risk/risk_model.py" "${CONN[@]}")
+"${M[@]}" features --from 2026-05-01 --every 7 > /dev/null
+"${M[@]}" train > /dev/null
+"${M[@]}" score --as-of all > /dev/null
 python3 "$ROOT/code/test_views.py" "${PANEL_CONN[@]}"
 
 # Challenger forecast backtest (B21): writes n360.forecast_challenger; the forecast of record must not change

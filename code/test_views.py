@@ -193,6 +193,74 @@ def main():
     fresh = q('SELECT toUInt8(stale) AS stale, stamp FROM n360.v_freshness')
     check('v_freshness: one stamp, "Usage to ..."', len(fresh) == 1 and fresh[0]['stamp'].startswith('Usage to '), fresh)
 
+    # Salesforce and risk (25 Nov 2026), when the CI loaded the synthetic Salesforce pull and register entries
+    if int(q("SELECT count() AS n FROM n360.sf_account")[0]['n']):
+        link = {r['sf_name']: r['account'] for r in q('SELECT sf_name, account FROM n360.v_sf_account')}
+        check('Salesforce: accounts linked by name, Juniper through an override, the prospect not at all',
+              link.get('Harbor Telecom') == 'Harbor Telecom' and link.get('Juniper Bank N.A.') == 'Juniper Bank'
+              and link.get('Globex Prospects') == '', link)
+        un = [r['sf_name'] for r in q('SELECT sf_name FROM n360.v_sf_unlinked')]
+        check('Salesforce: the unlinked account is listed (v_sf_unlinked)', un == ['Globex Prospects'], un)
+        sig = {(r['account'], r['signal']): r for r in q('SELECT account, signal, level, reason FROM n360.v_risk_signal')}
+        want = {('Lakeside Insurance', 'renewal'): 'risk', ('Willow Energy', 'renewal'): 'risk',
+                ('Juniper Bank', 'renewal'): 'watch', ('Maple Clinics', 'renewal'): 'watch',
+                ('Harbor Telecom', 'renewal'): 'fine', ('Atlas Streaming', 'renewal'): 'fine',
+                ('Willow Energy', 'contact'): 'risk', ('Lakeside Insurance', 'contact'): 'risk',
+                ('Kestrel Travel', 'contact'): 'watch', ('Summit Games', 'contact'): 'watch',
+                ('Cedar Logistics', 'contact'): 'risk', ('Harbor Telecom', 'contact'): 'fine',
+                ('Willow Energy', 'pace'): 'risk', ('Willow Energy', 'volume'): 'risk',
+                ('Lakeside Insurance', 'va_health'): 'risk', ('Orchid Health', 'containment'): 'risk',
+                ('Harbor Telecom', 'concentration'): 'watch', ('Maple Clinics', 'billing'): 'watch',
+                ('Cedar Logistics', 'pace'): 'not reported', ('Summit Games', 'containment'): 'not reported',
+                ('Willow Energy', 'csm'): 'risk', ('Harbor Telecom', 'csm'): 'watch', ('Northwind Outfitters', 'csm'): 'fine',
+                ('Atlas Streaming', 'csm'): 'not reported'}
+        got = {k: sig.get(k, {}).get('level') for k in want}
+        check('risk signals: each planted case at its level', got == want, {k: (v, want[k]) for k, v in got.items() if v != want[k]})
+        check('risk signals: 12 per customer, every level a known word',
+              len(sig) == 12 * int(q('SELECT count() AS n FROM n360.account')[0]['n'])
+              and {r['level'] for r in sig.values()} <= {'risk', 'watch', 'fine', 'not reported'}, len(sig))
+        cust = {r['display_name']: r for r in q('SELECT display_name, level, csm_level, ca_level, days_to_renewal, '
+                                                 'renewal_amount FROM n360.v_risk_customer')}
+        check('risk customers: worst signal wins; Orchid is at risk on the architect side only',
+              cust['Willow Energy']['level'] == 'risk' and cust['Orchid Health']['ca_level'] == 'risk'
+              and cust['Orchid Health']['csm_level'] == 'watch' and cust['Atlas Streaming']['level'] == 'fine',
+              {k: (v['level'], v['csm_level'], v['ca_level']) for k, v in cust.items()})
+        check('risk customers: renewal date and amount from the open Salesforce renewal (Willow 42 days, 190,000)',
+              int(cust['Willow Energy']['days_to_renewal']) == 42 and float(cust['Willow Energy']['renewal_amount']) == 190000,
+              cust['Willow Energy'])
+        reg = {r['risk_id']: r for r in q("SELECT risk_id, toString(status) AS status, outcome, toString(due) AS due, "
+                                          "toUInt8(overdue) AS overdue FROM n360.v_risk_register")}
+        check('risk register: the newest row wins (Kestrel updated, Atlas closed saved, Orchid overdue)',
+              reg['R-kestrel']['due'] == '2026-12-20' and reg['R-atlas']['status'] == 'closed'
+              and reg['R-atlas']['outcome'] == 'saved' and int(reg['R-orchid']['overdue']) == 1, reg)
+        hist = q('SELECT count(DISTINCT data_date) AS n, uniqExact(signal) AS s FROM n360.risk_history')[0]
+        check('risk history: every loaded night, every signal',
+              int(hist['n']) == int(q("SELECT countIf(status = 'loaded') AS n FROM n360.runs")[0]['n']) and int(hist['s']) == 12, hist)
+
+    # risk model (docs/21), when CI scored it
+    if int(q("SELECT count() AS n FROM n360.risk_scores")[0]['n']):
+        sc = {r['account']: r for r in q("SELECT account, health, band, probability, arrayStringConcat(hard_reds, '; ') AS reds "
+                                          "FROM n360.v_risk_score")}
+        check('risk model: one current score per customer, probabilities between 0 and 1',
+              len(sc) == int(q('SELECT count() AS n FROM n360.account')[0]['n'])
+              and all(0 <= float(r['probability']) <= 1 for r in sc.values()), len(sc))
+        w = sc.get('Willow Energy', {})
+        check('risk model: Willow Energy at risk, held there by hard reds (renewal omitted, open churn risk)',
+              w.get('band') == 'at risk' and 'Renewal lost or omitted' in w.get('reds', '') and 'churn risk' in w.get('reds', ''), w)
+        check('risk model: the customers the signals call fine are not at risk in the model (Atlas, Northwind)',
+              sc['Atlas Streaming']['band'] != 'at risk' and sc['Northwind Outfitters']['band'] != 'at risk',
+              {k: sc[k]['band'] for k in ('Atlas Streaming', 'Northwind Outfitters')})
+        pts = q("SELECT s.account AS a, any(s.health) AS h, sum(c.points) AS p, arrayStringConcat(any(s.hard_reds), '') AS r "
+                "FROM n360.v_risk_score AS s INNER JOIN n360.v_risk_drivers AS c ON c.account = s.account "
+                "WHERE s.health IS NOT NULL GROUP BY s.account")
+        bad = [r for r in pts if r['r'] == '' and abs(float(r['p']) - (100 - float(r['h']))) > 0.5]
+        check('risk model: points lost per feature add up to 100 - health (customers with no hard red)', not bad, bad)
+        hist = q('SELECT uniqExact(as_of) AS n FROM n360.risk_scores')[0]['n']
+        check('risk model: a score history over the stored weeks', int(hist) >= 20, hist)
+        outs = {(r['account'], r['outcome']) for r in q('SELECT account, outcome FROM n360.v_risk_outcomes')}
+        check('risk model: outcomes from Salesforce renewals (Lakeside lost, Atlas won) and the register (Atlas saved)',
+              ('Lakeside Insurance', 'churned') in outs and ('Atlas Streaming', 'renewed') in outs, outs)
+
     print('VIEW TESTS PASSED' if not failed else f'{failed} VIEW TESTS FAILED')
     return 1 if failed else 0
 
