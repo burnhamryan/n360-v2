@@ -13,7 +13,7 @@ Steps
      Phase 2 tables (OPTIONAL) are staged and swapped only when their file is in the export.
   4. EXCHANGE TABLES n360.<t> AND n360_next.<t> for each table (atomic per table; ES: alias flip).
   5. Append-only tables (runs, line_totals_history) written straight to n360; forecast_history copied from
-     the forecast just loaded (plus an optional backfill of earlier nights).
+     the forecast just loaded (plus an optional backfill of earlier nights); risk_history copied from v_risk_signal.
 
 Exit codes: 0 loaded, 3 checks failed, 2 error.
 """
@@ -76,6 +76,20 @@ def checks(text):
         name, body = block.split('\n', 1)
         out.append((name.strip(), statements(body)[0]))
     return out
+
+
+def snapshot_risk(ch, data_date=None):
+    """Risk history: every risk signal as it stands now, stored under a night (default: the newest loaded night).
+    Called by the nightly load, and again after a Salesforce pull or a register change, so the newest night always
+    matches what the Risk dashboard shows (its "since last week" and, later, back-testing)."""
+    if data_date is None:
+        r = ch.rows("SELECT toString(max(data_date)) AS d FROM n360.runs WHERE status = 'loaded'")
+        if not r or r[0]['d'] in (None, '1970-01-01'):
+            return
+        data_date = r[0]['d']
+    ch.cmd(f"ALTER TABLE n360.risk_history DELETE WHERE data_date = '{data_date}' SETTINGS mutations_sync = 1")
+    ch.cmd(f"""INSERT INTO n360.risk_history SELECT toDate('{data_date}'), account, signal, lens, level
+               FROM n360.v_risk_signal""")
 
 
 def main():
@@ -155,6 +169,7 @@ def main():
                SELECT toDate('{run['data_date']}'), toUUID('{run['run_id']}'), account, series_key, pool_id, horizon,
                       rate_per_day, forecast_m3, billed, consumed_engaged, cross_date, exhaust_date
                FROM n360.forecast""")
+    snapshot_risk(ch, run['data_date'])
     print(f'LOADED run {run["run_id"]}  data {run["data_date"]}  window end {run["window_end"]}')
     return 0
 

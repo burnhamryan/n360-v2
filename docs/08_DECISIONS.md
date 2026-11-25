@@ -34,6 +34,8 @@
 |---|---|
 | Pace colours (values in `n360.settings`) | Green ≤ term + 10 pts; amber > term + 10 or crossing ≤ 60 d; red > 100% or crossing ≤ 30 d; grey not measurable / not implemented / not read |
 | Anomaly thresholds | Same weekday 8 weeks; z ≤ −4 / ≥ 4; min median 20; provisional 3 days |
+| Risk dashboard rules (`v_risk_signal`, values in `n360.settings`) | Explainable rules, worst signal wins, no weighted score yet; thresholds and reason codes in docs/17 (sections 3, 4, 6) |
+| Salesforce mapping (`code/salesforce/salesforce.json`) | Renewal = Opportunity Type "Renewal"; safe forecast categories Commit / Closed, risk "Omitted"; contact = past events and closed call/email tasks; open questions in docs/18 |
 | Contract statuses (`v_contract_status`, values in `n360.settings`) | Below / ahead of pace ±10 points of term; too early < 30 days in; renewal risk < 50% used with ≤ 120 days left (docs/16, D2) |
 | Needs attention (`v_needs_attention`) | Over billed, will exceed, renewal risk, term ended within 90 days, or a VA with 1,000+ conversations down 25%+ (D3) |
 | Customer health flags | VA conversations down 10%+; containment down 3+ points (last 30 days against the 30 before) (D4) |

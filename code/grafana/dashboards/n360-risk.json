@@ -1,0 +1,2908 @@
+{
+  "uid": "n360-risk",
+  "title": "N360 \u00b7 Risk",
+  "tags": [
+    "n360"
+  ],
+  "editable": false,
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "utc",
+  "time": {
+    "from": "now-60d",
+    "to": "now+180d"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "csm",
+        "label": "CSM",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "n360-clickhouse"
+        },
+        "query": "SELECT DISTINCT csm_rocketlane FROM n360.account ORDER BY 1",
+        "definition": "SELECT DISTINCT csm_rocketlane FROM n360.account ORDER BY 1",
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "In one sentence",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Customers with at least one signal at risk (one risk signal is enough, as in Totango), how many of them renew within 120 days (n360.settings risk_renewal_window_days), and the risk register. Rules and thresholds are PROPOSED (n360.settings; docs/17_RISK_RESEARCH.md).\n\n**Source:** n360.v_risk_customer, n360.v_risk_register  \n**Filter:** CSM  \n**Window:** the latest load",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 18,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(concat(toString(countIf(level = 'risk')), if(countIf(level = 'risk') = 1, ' customer', ' customers')), ' at risk \u00b7 ',\n                      toString(countIf(level = 'risk' AND days_to_renewal BETWEEN 0 AND (SELECT risk_renewal_window_days FROM n360.settings))), ' of them renew within ',\n                      toString((SELECT risk_renewal_window_days FROM n360.settings)), ' days \u00b7 ',\n                      concat(toString((SELECT count() FROM n360.v_risk_register WHERE status = 'open' AND account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote})))), if((SELECT count() FROM n360.v_risk_register WHERE status = 'open' AND account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))) = 1, ' open risk', ' open risks')),\n                      ' in the register, ', toString((SELECT countIf(overdue) FROM n360.v_risk_register WHERE status = 'open' AND account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote})))),\n                      ' past due') AS sentence\n        FROM n360.v_risk_customer WHERE account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Nothing loaded yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "valueSize": 17
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Data",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "The last day of usage in this load, and the day it was loaded. Amber when the data is more than 2 days old (n360.settings stamp_stale_days): the numbers are the last good night's. Click for Pipeline health.\n\n**Source:** n360.v_freshness (n360.runs: loaded runs only)  \n**Filter:** none  \n**Window:** the latest load",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(stamp, if(stale, concat(' \u00b7 ', toString(days_old), ' days old'), '')) AS stamp FROM n360.v_freshness",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": ".* days old$",
+                "result": {
+                  "color": "#F0C25A",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline"
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 13
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Customers at risk",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Customers with at least one signal at risk, each loaded night (n360.risk_history, written by the nightly load from n360.v_risk_signal). The change is against 30 nights ago, or the oldest stored night.\n\n**Source:** n360.risk_history  \n**Filter:** CSM  \n**Window:** the last 30 loaded nights",
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "WITH nightly AS (SELECT data_date AS night, toUInt64(uniqExactIf(account, level = 'risk')) AS value FROM n360.risk_history\n        WHERE account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote})) GROUP BY night),\n             (SELECT max(night) FROM nightly) AS newest,\n             (SELECT max(night) FROM nightly WHERE night <= newest - 30) AS ref_30,\n             (SELECT min(night) FROM nightly) AS oldest,\n             if(ref_30 IS NULL OR ref_30 = toDate(0), if(oldest < newest, oldest, NULL), ref_30) AS ref,\n             (SELECT any(value) FROM nightly WHERE night = newest) AS v_now,\n             (SELECT any(value) FROM nightly WHERE night = ref) AS v_then\n        SELECT toDateTime(night) AS time, value, if(ref IS NULL, 'no earlier night stored', concat(multiIf(v_now > v_then, concat('+', toString(v_now - v_then)), v_now < v_then, concat('\u2212', toString(v_then - v_now)), 'no change'), ' since ', toString(toDayOfMonth(ref)), ' ', formatDateTime(ref, '%b'))) AS change\n        FROM nightly WHERE night > newest - 30 ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "displayName": "${__field.labels.change}",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#7F9CC0"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "showPercentChange": false,
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      },
+      "timeFrom": "35d",
+      "hideTimeOverride": true,
+      "n360Metric": "customers at risk"
+    },
+    {
+      "id": 4,
+      "title": "At-risk renewals",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Customers at risk whose next renewal (the open Salesforce renewal, else the next contract term end) is within 120 days, and the amount on those renewal opportunities (Salesforce Amount, in its currency; not added up across currencies if there are several).\n\n**Source:** n360.v_risk_customer (n360.sf_opportunity)  \n**Filter:** CSM  \n**Window:** the latest load",
+      "gridPos": {
+        "x": 6,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT now() AS time, toUInt64(countIf(level = 'risk' AND days_to_renewal BETWEEN 0 AND (SELECT risk_renewal_window_days FROM n360.settings))) AS value,\n               if(countIf(level = 'risk' AND days_to_renewal BETWEEN 0 AND (SELECT risk_renewal_window_days FROM n360.settings) AND renewal_amount IS NOT NULL) = 0,\n                  concat('within ', toString((SELECT risk_renewal_window_days FROM n360.settings)), ' days'),\n                  concat(if(toUInt64(sumIf(ifNull(renewal_amount, 0), level = 'risk' AND days_to_renewal BETWEEN 0 AND (SELECT risk_renewal_window_days FROM n360.settings))) IS NULL, NULL, if(toUInt64(sumIf(ifNull(renewal_amount, 0), level = 'risk' AND days_to_renewal BETWEEN 0 AND (SELECT risk_renewal_window_days FROM n360.settings))) >= 1000000, concat(toString(intDiv(toUInt64(sumIf(ifNull(renewal_amount, 0), level = 'risk' AND days_to_renewal BETWEEN 0 AND (SELECT risk_renewal_window_days FROM n360.settings))), 1000000)), ',', leftPad(toString(intDiv(toUInt64(sumIf(ifNull(renewal_amount, 0), level = 'risk' AND days_to_renewal BETWEEN 0 AND (SELECT risk_renewal_window_days FROM n360.settings))), 1000) % 1000), 3, '0'), ',', leftPad(toString(toUInt64(sumIf(ifNull(renewal_amount, 0), level = 'risk' AND days_to_renewal BETWEEN 0 AND (SELECT risk_renewal_window_days FROM n360.settings))) % 1000), 3, '0')), if(toUInt64(sumIf(ifNull(renewal_amount, 0), level = 'risk' AND days_to_renewal BETWEEN 0 AND (SELECT risk_renewal_window_days FROM n360.settings))) >= 1000, concat(toString(intDiv(toUInt64(sumIf(ifNull(renewal_amount, 0), level = 'risk' AND days_to_renewal BETWEEN 0 AND (SELECT risk_renewal_window_days FROM n360.settings))), 1000)), ',', leftPad(toString(toUInt64(sumIf(ifNull(renewal_amount, 0), level = 'risk' AND days_to_renewal BETWEEN 0 AND (SELECT risk_renewal_window_days FROM n360.settings))) % 1000), 3, '0')), toString(toUInt64(sumIf(ifNull(renewal_amount, 0), level = 'risk' AND days_to_renewal BETWEEN 0 AND (SELECT risk_renewal_window_days FROM n360.settings))))))),\n                         ' up for renewal within ', toString((SELECT risk_renewal_window_days FROM n360.settings)), ' days')) AS change\n        FROM n360.v_risk_customer WHERE account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "displayName": "${__field.labels.change}",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "New risk signals",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Signals at risk now that were not at risk a week ago (the stored night 7 nights back, or the oldest).\n\n**Source:** n360.v_risk_signal, n360.risk_history  \n**Filter:** CSM  \n**Window:** now against a week ago",
+      "gridPos": {
+        "x": 12,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "WITH (SELECT if(countIf(data_date <= newest - 7) > 0, maxIf(data_date, data_date <= newest - 7), min(data_date))\n                    FROM n360.risk_history CROSS JOIN (SELECT max(data_date) AS newest FROM n360.risk_history) AS m) AS ref\n        SELECT now() AS time, toUInt64(count()) AS value,\n               concat('at risk now, not on ', toString(toDayOfMonth(ref)), ' ', formatDateTime(ref, '%b')) AS change\n        FROM n360.v_risk_signal AS s\n        WHERE s.level = 'risk' AND s.account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))\n          AND (s.account, s.signal) NOT IN (SELECT account, signal FROM n360.risk_history WHERE data_date = ref AND level = 'risk')",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "displayName": "${__field.labels.change}",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Open risks past due",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Open register entries whose due date has passed. Risks are recorded with code/risk_register.py (Grafana cannot write data).\n\n**Source:** n360.v_risk_register (n360.risk_register)  \n**Filter:** CSM  \n**Window:** now",
+      "gridPos": {
+        "x": 18,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT now() AS time, toUInt64(countIf(overdue)) AS value,\n               concat('of ', toString(count()), ' open in the register') AS change\n        FROM n360.v_risk_register WHERE status = 'open' AND account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Nothing in the register yet",
+          "unit": "locale",
+          "decimals": 0,
+          "displayName": "${__field.labels.change}",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Risk by customer and signal",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "One row per customer, one chip per signal: Risk, Watch, OK, or a grey dash = not reported (the source has nothing for this customer: never OK). Overall = the worst signal; CSM = the commercial and relationship signals (Pace to CSM view); Architect = the technical ones (VA health to Support). Renews in = days to the open Salesforce renewal, else the next contract term end. \"vs a week ago\" compares the worst level with the stored night a week back. The reasons are in the table below. Sorted by level, then the soonest renewal. Click a customer to open it.\n\n**Source:** n360.v_risk_customer, n360.v_risk_signal (contract status, usage, anomalies, Salesforce, register, configuration, tickets), n360.risk_history  \n**Filter:** CSM  \n**Window:** the latest load; a week ago for the trend",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 24,
+        "h": 15
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "WITH (SELECT if(countIf(data_date <= newest - 7) > 0, maxIf(data_date, data_date <= newest - 7), min(data_date))\n                    FROM n360.risk_history CROSS JOIN (SELECT max(data_date) AS newest FROM n360.risk_history) AS m) AS ref,\n             before AS (SELECT account, max(multiIf(level = 'risk', 3, level = 'watch', 2, level = 'fine', 1, 0)) AS r\n                        FROM n360.risk_history WHERE data_date = ref GROUP BY account)\n        SELECT c.display_name AS Customer, c.level AS Overall, c.csm_level AS CSM, c.ca_level AS Architect,\n               c.days_to_renewal AS `Renews in`,\n               anyIf(s.level, s.signal = 'pace') AS `Pace`,\n               anyIf(s.level, s.signal = 'renewal') AS `Renewal`,\n               anyIf(s.level, s.signal = 'volume') AS `Volume`,\n               anyIf(s.level, s.signal = 'contact') AS `Contact`,\n               anyIf(s.level, s.signal = 'billing') AS `Billing`,\n               anyIf(s.level, s.signal = 'csm') AS `CSM view`,\n               anyIf(s.level, s.signal = 'va_health') AS `VA health`,\n               anyIf(s.level, s.signal = 'containment') AS `Contained`,\n               anyIf(s.level, s.signal = 'concentration') AS `Reliance`,\n               anyIf(s.level, s.signal = 'engine') AS `Engine`,\n               anyIf(s.level, s.signal = 'building') AS `Building`,\n               anyIf(s.level, s.signal = 'support') AS `Support`,\n               multiIf(b.r = 0, '', max(s.level_rank) > b.r, '\u25b2 worse', max(s.level_rank) < b.r, '\u25bc better', '\u25cf same') AS `vs a week ago`,\n               c.account AS account\n        FROM n360.v_risk_customer AS c INNER JOIN n360.v_risk_signal AS s ON s.account = c.account\n        LEFT JOIN before AS b ON b.account = c.account\n        WHERE c.account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))\n        GROUP BY c.display_name, c.level, c.csm_level, c.ca_level, c.days_to_renewal, c.account, b.r\n        ORDER BY indexOf(['risk', 'watch', 'fine', 'not reported'], Overall), `Renews in` IS NULL, `Renews in`, Customer",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "custom": {
+            "align": "center"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "account"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Overall"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CSM"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Architect"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Pace"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Renewal"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Volume"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Contact"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Billing"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CSM view"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VA health"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Contained"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Reliance"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Engine"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Building"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Support"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "\u2014",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Renews in"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix: d"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": -100000,
+                      "to": -1,
+                      "result": {
+                        "text": "Ended",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "No date",
+                        "color": "#B4B4B4",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vs a week ago"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^\u25b2.*",
+                      "result": {
+                        "color": "#E07B5F",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 145
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Overall"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 68
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CSM"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 68
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Architect"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 68
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Renews in"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Pace"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 72
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Renewal"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 72
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Volume"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 72
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Contact"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 72
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Billing"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 72
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CSM view"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 72
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VA health"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 72
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Contained"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 72
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Reliance"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 72
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Engine"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 72
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Building"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 72
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Support"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 72
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vs a week ago"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open customer",
+                    "url": "/d/n360-customer?var-account=${__data.fields.account}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 8,
+      "title": "Why: every signal at risk or watch",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "The reason behind every Risk and Watch chip above, in words, customers in the same order. Lens: CSM (commercial, relationship) or CA (customer architect: technical). Rules: n360.v_risk_signal.\n\n**Source:** n360.v_risk_signal  \n**Filter:** CSM; signals at risk or watch  \n**Window:** the latest load",
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 24,
+        "h": 12
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT c.display_name AS Customer, s.lens AS Lens, s.title AS Signal, s.level AS Level, s.reason AS Reason,\n               c.account AS account\n        FROM n360.v_risk_signal AS s INNER JOIN n360.v_risk_customer AS c ON c.account = s.account\n        WHERE s.level IN ('risk', 'watch') AND s.account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))\n        ORDER BY indexOf(['risk', 'watch', 'fine', 'not reported'], c.level), c.days_to_renewal IS NULL, c.days_to_renewal,\n                 Customer, s.level_rank DESC, Lens DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No signal at risk or watch"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "account"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Level"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "risk": {
+                        "text": "Risk",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "watch": {
+                        "text": "Watch",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "fine": {
+                        "text": "OK",
+                        "color": "#76C893",
+                        "index": 2
+                      },
+                      "not reported": {
+                        "text": "Not reported",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 170
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Lens"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 60
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Signal"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 170
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Level"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open customer",
+                    "url": "/d/n360-customer?var-account=${__data.fields.account}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm"
+      },
+      "n360MayBeEmpty": "no signal at risk or watch"
+    },
+    {
+      "id": 9,
+      "title": "Risk register: open",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Open risks recorded by CSMs: reason (a short fixed list), impact (churn, downsell, contraction), owner and due date. Past due first. Record, update and close with code/risk_register.py; Grafana cannot write data.\n\n**Source:** n360.v_risk_register (n360.risk_register)  \n**Filter:** CSM; open risks  \n**Window:** now",
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 24,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT a.display_name AS Customer, r.reason AS Reason, r.impact AS Impact, r.owner AS Owner,\n               concat(toString(toDayOfMonth(r.due)), ' ', formatDateTime(r.due, '%b %Y')) AS Due, r.age_days AS `Age (days)`,\n               if(r.overdue, 'Past due', if(r.due IS NULL, 'No due date', 'Open')) AS State, r.note AS Note, r.risk_id AS Id,\n               r.account AS account\n        FROM n360.v_risk_register AS r INNER JOIN n360.account AS a ON a.account = r.account\n        WHERE r.status = 'open' AND r.account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))\n        ORDER BY r.overdue DESC, r.impact = 'churn' DESC, r.due IS NULL, r.due",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No open risk in the register"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "account"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "State"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Past due": {
+                        "text": "Past due",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "Open": {
+                        "text": "Open",
+                        "color": "text",
+                        "index": 1
+                      },
+                      "No due date": {
+                        "text": "No due date",
+                        "color": "#F0C25A",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Impact"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "churn": {
+                        "text": "Churn",
+                        "color": "#E07B5F",
+                        "index": 0
+                      },
+                      "downsell": {
+                        "text": "Downsell",
+                        "color": "text",
+                        "index": 1
+                      },
+                      "contraction": {
+                        "text": "Contraction",
+                        "color": "text",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 170
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Reason"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Impact"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Owner"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Due"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Age (days)"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "State"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Id"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open customer",
+                    "url": "/d/n360-customer?var-account=${__data.fields.account}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm"
+      },
+      "n360MayBeEmpty": "no open risk"
+    },
+    {
+      "id": 10,
+      "title": "Renewal runway",
+      "type": "state-timeline",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Customers renewing within 180 days: one lane from the data-through day to the renewal date (the open Salesforce renewal, else the term end), in the customer's risk colour. Lanes ending first are the most urgent; 120 days is the at-risk window (n360.settings).\n\n**Source:** n360.v_risk_customer  \n**Filter:** CSM  \n**Window:** the next 180 days",
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "WITH lanes AS (SELECT display_name AS lane, (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') AS dt,\n                              renewal_date AS rd, multiIf(level = 'risk', 3, level = 'watch', 2, level = 'fine', 1, 0) AS lv\n                       FROM n360.v_risk_customer WHERE account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote})) AND days_to_renewal BETWEEN 0 AND 180),\n             times AS (SELECT DISTINCT t FROM (SELECT dt AS t FROM lanes UNION ALL SELECT rd FROM lanes))\n        SELECT toDateTime(times.t) AS time, lanes.lane AS lane, toUInt8(if(times.t >= lanes.rd, 9, lanes.lv)) AS state\n        FROM lanes CROSS JOIN times ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "3": {
+                  "text": "Risk",
+                  "color": "#E07B5F",
+                  "index": 0
+                },
+                "2": {
+                  "text": "Watch",
+                  "color": "#F0C25A",
+                  "index": 1
+                },
+                "1": {
+                  "text": "OK",
+                  "color": "#76C893",
+                  "index": 2
+                },
+                "0": {
+                  "text": "Not reported",
+                  "color": "#B4B4B4",
+                  "index": 3
+                },
+                "9": {
+                  "text": "Renewal",
+                  "color": "transparent",
+                  "index": 4
+                }
+              }
+            }
+          ],
+          "displayName": "${__field.labels.lane}",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#B4B4B4"
+          },
+          "custom": {
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "mergeValues": true,
+        "rowHeight": 0.8,
+        "alignValue": "left",
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "n360MayBeEmpty": "no renewal within 180 days"
+    },
+    {
+      "id": 11,
+      "title": "Customers at risk and on watch, night by night",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "How many customers were at risk (any signal at risk) and on watch (worst signal watch), each loaded night. Grows as nights are stored; with weekly history this becomes the base to check, later, whether the rules predicted churn (docs/17).\n\n**Source:** n360.risk_history  \n**Filter:** CSM  \n**Window:** every stored night",
+      "gridPos": {
+        "x": 12,
+        "y": 42,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT toDateTime(data_date) AS time, uniqExactIf(account, r = 3) AS `At risk`, uniqExactIf(account, r = 2) AS `On watch`\n        FROM (SELECT data_date, account, max(multiIf(level = 'risk', 3, level = 'watch', 2, 1)) AS r FROM n360.risk_history\n              WHERE account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote})) GROUP BY data_date, account)\n        GROUP BY time ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 85,
+            "lineWidth": 1,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "barAlignment": 0
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "At risk"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#E07B5F"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "On watch"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F0C25A"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "timeFrom": "45d"
+    },
+    {
+      "id": 12,
+      "title": "Architect view: every VA",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "One row per VA, busiest first, so the biggest technical problem is at the top: conversations and containment against the 30 days before (containment per VA only), engine, MCP servers live (a VA with none is capped at answering questions), weeks since its configuration last changed, settled silences and drops in the 7 newest settled days, and playbooks built but not run in 31 days. Engine, MCP and weeks unchanged need the configuration export (\"Not reported yet\" until then). Click a VA to open it.\n\n**Source:** n360.v_va_change, n360.v_va_config_latest, n360.va_config_snapshot, n360.v_va_day_anomaly, n360.playbook_day  \n**Filter:** CSM  \n**Window:** the 60 days to the data-through day; the newest configuration read",
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 24,
+        "h": 11
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "WITH (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') AS dt,\n             chg AS (SELECT bot_id, max(if(changed, snapshot_date, first_read)) AS last_change, max(snapshot_date) AS last_read\n                     FROM (SELECT bot_id, snapshot_date, min(snapshot_date) OVER (PARTITION BY bot_id) AS first_read,\n                                  (engine_version, v8_playbooks, legacy_intents, mcp_servers_live, supervisory_rules_on)\n                                    != lagInFrame((engine_version, v8_playbooks, legacy_intents, mcp_servers_live, supervisory_rules_on))\n                                       OVER (PARTITION BY bot_id ORDER BY snapshot_date ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)\n                                    AND row_number() OVER (PARTITION BY bot_id ORDER BY snapshot_date) > 1 AS changed\n                           FROM n360.va_config_snapshot) GROUP BY bot_id),\n             fl AS (SELECT bot_id, countIf(kind = 'went silent') AS s, countIf(kind = 'drop') AS d FROM n360.v_va_day_anomaly\n                    WHERE NOT provisional AND day >= dt - 9 GROUP BY bot_id),\n             idle AS (SELECT bot_id, count() AS n FROM (SELECT bot_id, playbook FROM n360.playbook_day WHERE day > dt - 31\n                      GROUP BY bot_id, playbook HAVING sum(executions) = 0) GROUP BY bot_id)\n        SELECT c.va AS VA, a.display_name AS Customer, c.convs_30 AS `Conversations, 30 days`, c.convs_change_pct AS `vs 30 before`,\n               c.containment_30 AS Containment, c.containment_change_pts AS `Containment change`,\n               g.engine_version AS Engine, g.mcp_servers_live AS `MCP servers`,\n               if(ch.last_read IS NULL, NULL, dateDiff('week', ch.last_change, ch.last_read)) AS `Weeks unchanged`,\n               concat(if(ifNull(fl.s, 0) > 0, 'Silent', ''), if(ifNull(fl.s, 0) > 0 AND ifNull(fl.d, 0) > 0, ' \u00b7 ', ''),\n                      if(ifNull(fl.d, 0) > 0, concat(toString(fl.d), ' drops'), '')) AS `Flags, 7 days`,\n               ifNull(idle.n, 0) AS `Idle playbooks`,\n               concat('/d/n360-va?var-account=', c.account, '&var-va=', toString(c.bot_id)) AS drill\n        FROM n360.v_va_change AS c INNER JOIN n360.account AS a ON a.account = c.account\n        LEFT JOIN (SELECT toNullable(bot_id) AS bot_id, engine_version, mcp_servers_live FROM n360.v_va_config_latest) AS g ON g.bot_id = c.bot_id\n        LEFT JOIN (SELECT toNullable(bot_id) AS bot_id, last_change, toNullable(last_read) AS last_read FROM chg) AS ch ON ch.bot_id = c.bot_id\n        LEFT JOIN fl ON fl.bot_id = c.bot_id LEFT JOIN idle ON idle.bot_id = c.bot_id\n        WHERE c.account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))\n        ORDER BY `Conversations, 30 days` DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "drill"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Conversations, 30 days"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vs 30 before"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Containment"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Containment change"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Flags, 7 days"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "": {
+                        "text": "",
+                        "color": "text",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Flags, 7 days"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": ".+",
+                      "result": {
+                        "color": "#D9695F",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Conversations, 30 days"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vs 30 before"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Containment"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Containment change"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Engine"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MCP servers"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Weeks unchanged"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VA"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 200
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VA"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open VA",
+                    "url": "${__data.fields.drill}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 13,
+      "title": "Closed risks, last 90 days",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Risks closed in the last 90 days and how they ended (saved, churned, downsold, no action, invalid): what worked, and the reasons behind churn. Over time this is the outcome data a weighted score would be checked against (docs/17).\n\n**Source:** n360.v_risk_register  \n**Filter:** CSM; closed risks  \n**Window:** the last 90 days",
+      "gridPos": {
+        "x": 0,
+        "y": 63,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT a.display_name AS Customer, r.reason AS Reason, r.impact AS Impact, r.outcome AS Outcome,\n               concat(toString(toDayOfMonth(toDate(r.updated_at))), ' ', formatDateTime(toDate(r.updated_at), '%b %Y')) AS Closed, r.note AS Note\n        FROM n360.v_risk_register AS r INNER JOIN n360.account AS a ON a.account = r.account\n        WHERE r.status = 'closed' AND r.updated_at > now() - INTERVAL 90 DAY AND r.account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))\n        ORDER BY r.updated_at DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No risk closed in 90 days"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Outcome"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "saved": {
+                        "text": "Saved",
+                        "color": "#76C893",
+                        "index": 0
+                      },
+                      "churned": {
+                        "text": "Churned",
+                        "color": "#E07B5F",
+                        "index": 1
+                      },
+                      "downsold": {
+                        "text": "Downsold",
+                        "color": "#F0C25A",
+                        "index": 2
+                      },
+                      "no action": {
+                        "text": "No action",
+                        "color": "text",
+                        "index": 3
+                      },
+                      "invalid": {
+                        "text": "Invalid",
+                        "color": "#B4B4B4",
+                        "index": 4
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 170
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Reason"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Impact"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Outcome"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Closed"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm"
+      },
+      "n360MayBeEmpty": "no risk closed in 90 days"
+    }
+  ],
+  "links": [
+    {
+      "type": "link",
+      "title": "Back to Overview",
+      "url": "/d/n360-overview",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    }
+  ]
+}

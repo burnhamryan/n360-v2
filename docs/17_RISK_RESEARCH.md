@@ -6,7 +6,8 @@
 - which of those N360 already has, can derive, or would need as new data;
 - a proposed design to build in Grafana.
 
-Researched 25 Nov 2026. Nothing is built yet: section 6 lists the decisions to make first.
+Researched 25 Nov 2026. **Built the same day** as the `n360-risk` dashboard, on the data in place plus Salesforce
+(section 7). The decisions in section 6 are still open; every rule is a PROPOSED setting.
 
 **How it was researched.** Two research passes used web search across vendor help centres, vendor docs and
 practitioner sources. The session's network policy blocked full page fetches. So findings come from search
@@ -227,3 +228,58 @@ page.
 5. **Thresholds** in sections 3 and 4 are proposals and would go in `n360.settings` like the others.
 6. **Real data:** risk views would be built and tested on synthetic data (planted cases for every signal), as before.
    They would then be checked on the real nights.
+
+## 7. What is built (25 Nov 2026)
+
+**Dashboard `n360-risk` ("N360 · Risk").** It has these parts:
+- a sentence and stamp;
+- tiles:
+  - customers at risk, with a 30-night line;
+  - at-risk renewals within 120 days, with the Salesforce renewal amount;
+  - new risk signals against a week ago;
+  - open risks past due;
+- the **risk grid**: one row per customer, with overall, CSM and architect levels, days to renewal, 12 signal chips,
+  and the trend against a week ago;
+- **Why**: every Risk and Watch chip, in words;
+- the **risk register**;
+- the **renewal runway** (180 days);
+- customers at risk and on watch, night by night;
+- the **architect view** (every VA);
+- **closed risks** with their outcomes.
+
+It has a CSM filter, and every customer and VA drills down.
+
+**The 12 signals** (`n360.v_risk_signal`; thresholds in `n360.settings`):
+
+| Lens | Signal | Source |
+|---|---|---|
+| CSM | Pace | Contract status |
+| CSM | Renewal | Salesforce renewal opportunities |
+| CSM | Volume | Conversations |
+| CSM | Contact | Salesforce tasks and events |
+| CSM | Billing | Forecast moves, measure drift, contract data gaps |
+| CSM | CSM view | Register and rating |
+| CA | VA health | Silences and drops |
+| CA | Contained | Containment |
+| CA | Reliance | One VA carrying 80%+ |
+| CA | Engine | Version, MCP servers, configuration age |
+| CA | Building | Customer authoring and assistant use, idle playbooks |
+| CA | Support | Open tickets |
+
+**Levels.** Each signal is at one of four levels:
+- **Risk**
+- **Watch**
+- **OK**
+- **Not reported** (grey, never OK)
+
+A customer's level is its worst signal.
+
+**New pieces:**
+- `code/salesforce/` (reader, loader, fake API for tests; see `docs/18_SALESFORCE.md`);
+- `code/risk_register.py` (the register and CSM rating; Grafana cannot write data);
+- `n360.risk_history` (every signal each night, plus after a Salesforce pull or a register change).
+
+**Not built yet:**
+- A weighted score. Section 4 recommends waiting for history and outcomes.
+- Abandoned conversations, escalation reasons and other platform data (section 3, rows 23–27).
+- Contract value beyond the Salesforce renewal amount.

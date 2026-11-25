@@ -1,3 +1,27 @@
+# CHANGES · 25 Nov 2026 · Risk dashboard and Salesforce
+
+**New Risk dashboard (`n360-risk`), and N360 now reads Salesforce.** The dashboard shows which customers are at risk,
+why, and who is acting, for CSMs and customer architects. It has:
+- 12 explainable signals per customer, with forced reds;
+- a risk register and a CSM rating;
+- a renewal runway;
+- a per-VA architect view;
+- nightly risk history.
+
+Salesforce is read-only: accounts, renewals, contracts and activity. Design and research: `docs/17_RISK_RESEARCH.md`.
+Salesforce: `docs/18_SALESFORCE.md`. Tested on synthetic data and a fake Salesforce API only.
+
+| Piece | What |
+|---|---|
+| `code/salesforce/` | `sf_pull.py`: reads Salesforce over its REST API, standard library only, using an existing token or OAuth client credentials, with SOQL paging. `salesforce.json` sets what to read. `load_salesforce.py` stages, checks and swaps. `fake_salesforce.py` serves the API for tests |
+| `code/schema.sql` | `sf_*` tables and `sf_runs`. `risk_register`, `risk_pulse`, `risk_history`. Views `v_sf_account`, `v_sf_unlinked`, `v_risk_signal`, `v_risk_customer`, `v_risk_register`, `v_risk_pulse`. 16 PROPOSED risk settings |
+| `code/risk_register.py` | Add, update and close risks; record a CSM rating. The reason codes are a short fixed list |
+| `code/load.py`, `code/ops/nightly.sh` | Risk history every night. `N360_SALESFORCE=1` pulls Salesforce before the nights. History tables backed up |
+| `sample_data/generate_salesforce.py` | Synthetic Salesforce records that plant every signal: lost renewal, Omitted forecast, no contact, a differing account name, an unlinked prospect |
+| CI | Covers the Salesforce path end to end: pulled through the fake API, paged, with a wrong secret refused. Also the register, every planted signal level, and risk history on every night |
+
+---
+
 # CHANGES · 25 Nov 2026 · Dashboards rebuilt to the v2 redesign
 
 **The 11 dashboards are reviewed and rebuilt to the v2 redesign. The changes:**

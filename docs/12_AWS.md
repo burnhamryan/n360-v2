@@ -103,7 +103,7 @@ server then checks every hour. You can still load from the laptop; the same `run
 
 ## 5. Moving your laptop's history to AWS
 
-The history tables (`runs`, `line_totals_history`, `forecast_history`, `source_freshness`, `anomaly_log`,
+The history tables (`runs`, `line_totals_history`, `forecast_history`, `source_freshness`, `anomaly_log`, `risk_register`, `risk_pulse`, `risk_history`, `sf_runs`,
 `forecast_challenger`) cannot be rebuilt from exports. To bring them over from a laptop install:
 
 ```bash
