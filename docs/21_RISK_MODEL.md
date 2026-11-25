@@ -23,13 +23,14 @@ days) are the ones the probability is judged on. Customers renewing later are st
 ## 2. The features (point-in-time)
 
 There are 20 risk features in seven dimensions. Each one is computed as it stood on a given date, from data up to that
-date only (`code/risk/features.py`). The model can therefore be backtested honestly on N360's own history.
+date only (`code/risk/features.py`). Rows the nightly run stores are exactly what was known that night; rows rebuilt
+later for past dates are close to it, with the limits listed in section 8.
 
 | Dimension (weight) | Features |
 |---|---|
 | Commercial and contract (25%) | Points behind the term (worst line); forecast at term end (lowest line); renewal forecast category (Salesforce, current only) |
-| Usage (20%) | Conversations, 30 and 90 days against the period before; week-to-week volatility; silent VA-days |
-| Product quality (15%) | Containment (busiest VA); containment change; drop days |
+| Usage (20%) | Conversations, the last 4 and 12 weeks against the same span before; week-to-week volatility; days the worst VA was silent (settled days only) |
+| Product quality (15%) | Containment (busiest VA); containment change; days the worst VA was flagged as a drop (settled days only) |
 | Adoption and depth (15%) | Share of conversations on VAs below V8; target features used; customer authoring and assistant trend; weeks since any configuration changed |
 | Relationship (15%) | Days since the last customer contact; days since the last executive meeting (Salesforce) |
 | Support (5%) | Open tickets; oldest open ticket (current only) |
@@ -53,90 +54,109 @@ containment where 60 is good and 30 is bad.
 - Each dimension's risk is the weighted mean of its reported features.
 - Overall risk is the weighted mean of the dimensions that have any data.
 - health = 100 × (1 − risk).
-- Points lost per feature add up to 100 − health.
+- Points lost per feature add up to 100 − health, always. When a hard red caps health, the points it takes show on
+  their own line ("Hard red").
 
-**Hard reds** (Gainsight's "exceptions"). Any one of these caps health at 40 and sets the band to "at risk", whatever
-the weights say:
-- renewal lost or omitted in Salesforce;
-- the CSM rated the customer red;
-- an open churn risk in the register;
-- a VA silent for 5 or more expected days;
-- under half of billed by the term end, within 120 days of renewal.
+**Hard reds** (Gainsight's "exceptions"). Any one of these caps health at 40, sets the band to "at risk", and puts a
+floor under the chance shown, whatever the weights say:
+
+| Hard red | Chance never shown below |
+|---|---|
+| Renewal lost or omitted in Salesforce | 90% |
+| The CSM rated the customer red | 50% |
+| An open churn risk in the register | 50% |
+| Under half of billed by the term end, within 120 days of renewal | 40% |
+| One VA silent for 5 or more expected days | 30% |
+
+A hard red that only applies near a renewal is listed as "could not be checked" when the renewal date is unknown.
 
 **Bands.** Healthy is 75 or more, watch is 50 to 74, at risk is under 50 or any hard red (GitLab's published bands).
+Two more: **not enough data** when under 40% of the model's weight has data and there is no hard red, and
+**churned** for a customer known to have churned, kept for 12 months and then dropped from the scores.
 
-**Probability.** A logistic regression on the 0–1 feature risks.
-- **Before any outcomes,** it uses an **expert prior** made from the scorecard weights:
-  - intercept = logit(5%);
-  - coefficients = each feature's overall weight × (logit(75%) − logit(5%)).
-  - So a customer at no risk anywhere scores 5%, and one at full risk everywhere scores 75%. The prior ranks drivers
-    exactly as the scorecard does.
-- **With outcomes,** training is Newton/IRLS with a ridge penalty that pulls each coefficient **toward the prior, not
-  toward zero** (λ = 4).
-  - With few outcomes the prior dominates; as outcomes accumulate, the data takes over.
-  - A feature the data says nothing about is shrunk.
-  - It trains only once there are at least 20 churns or downsells.
-- Missing features take the training mean, so they push neither way.
-- Each feature's "push" is its coefficient × (its risk − the training mean): its effect on the log-odds against an
-  average customer.
+**Probability.** A logistic model on the same re-weighted risks as the scorecard. "Not reported" is never "fine"
+here either: a missing feature takes its dimension's risk, a missing dimension takes the overall risk, and a customer
+with nothing reported gets no probability at all.
 
-**Labels.**
-- 1 if the customer churned or downsold within 180 days after the snapshot date. Snapshots whose 180 days aren't over
-  yet are left unlabelled, never counted as "no".
-- Training uses one snapshot per customer every 28 days, because weekly snapshots of one customer are not independent
-  evidence.
+- **The expert prior** (before any outcomes) says three things, each of which can be checked:
+  - the average customer in a renewal window has the portfolio's loss rate (`prior_mean_rate`, 15% proposed:
+    **replace it with renewals lost ÷ renewals due from the real record**);
+  - a customer at full risk on everything has `prior_max_rate` (80% proposed);
+  - features move the log-odds in proportion to their scorecard weights, so the prior ranks customers exactly as
+    the scorecard does.
+  - Its level is set each time on the customers actually in their renewal window, so their mean chance equals the
+    portfolio rate.
+- **Learning comes in stages,** counted in distinct renewals lost (and at least as many kept), never in snapshots:
+
+  | Stage | From | What the data may change |
+  |---|---|---|
+  | prior | 0 | Nothing |
+  | calibrated | 10 lost | The level and one slope. The ranking stays the scorecard's; the chance becomes the data's |
+  | dimension | 50 lost | One weight per dimension |
+  | feature | 100 lost | One weight per feature |
+
+  - Each learned weight is pulled toward the stage before it. The pull is relative (λ = 4): a weight's prior spread
+    is half its prior value, so the data has to argue to halve or double it.
+  - The prior's level counts as 20 renewals of evidence, so the first few outcomes move it gently.
+  - No weight goes below zero: a risk never lowers the chance of churn. One that tries is held at zero.
+  - Features that keep no history keep their prior weight, rescaled by the learned slope.
+- Each feature's "push" is its effect on the log-odds against the average customer. The pushes add up exactly.
+
+**Labels: the unit is the renewal.**
+- A snapshot belongs to the customer's next renewal when that is 0 to 180 days away. An unknown renewal date is not
+  judged.
+- The renewal's outcome is the loss or renewal recorded from 120 days before its date to 60 days after. Most
+  customers have a 30 to 90 day opt-out, so a loss is usually logged well before the term ends.
+- 1 = churned or downsold. 0 = renewed, or nothing recorded 60 days after the renewal date.
+- Never used: snapshots taken once the outcome was recorded (the answer was known), and every snapshot after a churn.
+- Every label, lost or kept, becomes usable 60 days after its renewal date. A loss is logged weeks before a kept
+  renewal is; learning from each as soon as it is recorded would overstate the loss rate.
+- The same loss recorded twice (Salesforce and the register) is one outcome.
 - Outcomes come from `n360.v_risk_outcomes`:
-  - closed Salesforce renewals (won = renewed, lost = churned);
-  - closed register entries (churned, downsold, saved);
+  - closed Salesforce renewals: lost = churned; **won at under 90% of the customer's previous won amount =
+    downsold** (`settings.risk_downsell_ratio`, proposed); else renewed. This covers every customer, flagged or not;
+  - closed register entries (churned, downsold, saved): a second witness, since only flagged customers have one;
   - outcomes recorded by hand.
 
 **Backtest** (`code/risk/backtest.py`).
-- Walk forward: every 28 days, train only on outcomes known by then, and score the next period.
-- Four methods are compared:
-  - the scorecard;
-  - the expert prior;
-  - the trained model;
-  - the rules alone (hard reds or the at-risk band).
+- Walk forward: every 28 days, train only on outcomes usable by then, and score the next period.
+- Each renewal is judged 150, 90 and 30 days ahead, so it counts three times at most, not twenty.
+- Four methods are compared: the scorecard, the expert prior, the model as it would have been trained at the time,
+  and the rules alone (reported as a flag: share flagged, precision, recall).
 - Measures:
-  - **AUC** (ranking; 0.5 is chance);
-  - precision and recall for the **top 10%** flagged;
-  - **Brier** score (calibration of the probability);
-  - a **reliability** table (predicted against observed);
-  - **lead time** (how far ahead churns were flagged).
+  - **AUC** with a 95% interval from resampling whole customers, and the interval of trained minus prior;
+  - precision and recall for the **top 10%**;
+  - **Brier** score, and losses expected against losses seen;
+  - a **reliability** table for the model and for the prior;
+  - **lead time:** share of losses warned, median days ahead among those warned, whether the warning was still up
+    30 days before the loss, and how often the flag was up on renewals that were not lost.
 
 ## 4. How it is tested
 
-`code/risk/test_risk_model.py` runs in CI (25 checks), with no database:
-- **Unit checks:**
-  - anchors in both directions;
-  - points add up to 100 − health;
-  - missing features re-weight and lower coverage;
-  - hard reds and their windows;
-  - nothing reported gives no health, never 100;
-  - the prior hits its base and maximum rates and ranks drivers like the scorecard;
-  - too few outcomes returns the prior;
-  - labels are never assigned before the horizon is observed;
-  - training is deterministic.
-- **A synthetic history with a known truth** (`sample_data/generate_risk_panel.py`):
-  - 220 invented customers over 130 weeks;
-  - a hidden health that drifts and sometimes jumps (a champion leaves, an outage);
-  - features are noisy readings of it, one carries no signal at all, and Phase 2 features are missing for a third of
-    customers;
-  - churn at renewal depends on the hidden health and on lost contact.
+`code/risk/test_risk_model.py` runs in CI (52 checks), with no database:
+- **Unit checks:** anchors; points add up with and without a hard red; missing features re-weight; "not enough
+  data"; the prior's rates; "not reported" never reads as "fine"; hard-red floors; the explanation adds up; one
+  outcome per renewal; nothing used after an outcome or a churn; events are renewals, not snapshots; the stages;
+  weights never below zero; a clean separation still converges; ties in AUC and in a top share.
+- **A synthetic history with a known truth** (`sample_data/generate_risk_panel.py`): 220 invented customers over 130
+  weeks, with the awkward parts of real records planted on purpose:
+  - a churn is logged 30 to 90 days before the term ends, and the customer goes on producing rows for half a year;
+  - a third of churns are recorded twice; one good renewal in twelve is never recorded;
+  - two features carry no signal; Phase 2 features are missing for a third of customers and Salesforce activity
+    for one in seven.
 - **What the walk-forward checks on that history:**
-  - scorecard, prior and trained model rank at AUC ≥ 0.72 (about 0.77 in practice);
-  - the trained model is better calibrated than the prior;
-  - the top 10% flagged churn at more than twice the base rate;
-  - most churns were flagged a month or more ahead;
-  - the no-signal feature is shrunk below its prior weight;
-  - the strong true signals keep positive weights;
-  - current-only features are never trained on.
-- **On N360's own synthetic data** (`code/test_views.py`):
-  - one score per customer;
-  - Willow Energy at risk through its hard reds;
-  - points add up per customer;
-  - a 30-week score history;
-  - outcomes read from Salesforce and the register.
+  - the scorecard ranks within 0.04 AUC of the hidden truth itself (0.780 against 0.787);
+  - the trained model is never clearly worse than the prior, at 220 customers and at 40;
+  - losses expected are within 20% of losses seen;
+  - a prior set at a badly wrong rate is corrected by learning;
+  - most losses are flagged beforehand, a month or more ahead.
+- **On N360's own synthetic data** (`code/test_views.py`): one score per customer; Willow Energy at risk through its
+  hard reds; points add up for every customer; a score history; outcomes from Salesforce and the register; the
+  model in use is the adopted run; the feature store marks nightly and rebuilt dates.
+
+**What the synthetic test cannot show.** The generator still drives every feature from one hidden number, so it says
+the plumbing is right and the model does no harm. It does not say the weights are right for real customers. Only
+real renewals can.
 
 ## 5. Running it
 
@@ -157,14 +177,19 @@ python3 code/risk/risk_model.py --user n360 --password "$N360_CH_PASSWORD" expla
 
 What each one does:
 - `features --from … --every 7` backfills weekly features, point-in-time, into `n360.risk_features`. Run it once.
-- `train` trains on stored features and outcomes, runs the backtest, and stores the model.
+  It never replaces a date the nightly run stored (`--overwrite` to force it): the nightly row is the only true
+  record of what was known that night.
+- `train` trains on stored features and outcomes, runs the backtest, stores the run and says whether it has earned
+  adoption. **The run is not in use yet.**
+- `adopt --run RUN_ID` puts a stored run into use. `adopt --run prior` goes back to the built-in expert prior.
 - `score --as-of all` scores every stored date, which gives the score history.
 - `explain` prints one customer, feature by feature.
 
 **Every night:**
 - `nightly.sh` runs `risk_model.py nightly` after a load: today's features, then today's scores. Set
   `N360_RISK_MODEL=0` to turn it off.
-- **Training is never automatic.** Retrain on purpose, read the backtest, and only then use the new model.
+- **Training is never automatic, and a trained run is never used until adopted.** Retrain on purpose, read the
+  backtest and the verdict `train` prints, then `adopt`.
 
 **Record an outcome by hand,** when it is not in Salesforce or the register:
 
@@ -184,9 +209,10 @@ The same `--no-db` flag works for `train`, `score` and `explain`; see the help t
 
 | Table or view | What it holds |
 |---|---|
-| `risk_features` | The feature store, one value per customer, feature and date |
+| `risk_features` | The feature store, one value per customer, feature and date; `source` says nightly or rebuilt |
 | `risk_outcome` | Outcomes recorded by hand |
 | `risk_model_runs` | Every model, with its backtest as JSON |
+| `risk_model_adopted` | Which run is in use: the newest row |
 | `risk_scores` | Every score |
 | `risk_contributions` | The reasons behind each score: per feature value, risk, points and push |
 | `v_risk_score`, `v_risk_drivers`, `v_risk_model`, `v_risk_outcomes` | What Grafana reads |
@@ -209,30 +235,35 @@ outcomes back it, it can replace or complement the rules.
 ## 7. Governance: how to change it
 
 1. **Change a weight, anchor, hard red or band** in `risk_model.json`. Bump its `version`. Run the tests, then `train`
-   to get a backtest. Compare it with the last run before using the new settings.
-2. **Adopt a trained model only when** its backtest beats the expert prior on AUC and Brier, on real outcomes, over at
-   least two retrainings. The same bar style as the forecast challenger (docs/08).
-3. **Record outcomes.** The model can only learn from churns, downsells and renewals it knows about. Closing register
-   entries with an outcome, and keeping Salesforce renewals closed won or lost, is what makes it better.
-4. **Back-test before trusting.** On real data, the first useful backtest needs about 180 days of stored features plus
+   to get a backtest. Compare it with the last run before adopting.
+2. **Adopt a trained run only when it has earned it.** `train` prints the verdict:
+   - stage "calibrated": its Brier score beats the prior's (the ranking cannot change at this stage);
+   - stages "dimension" and "feature": the whole 95% interval of trained minus prior AUC is above zero, and its Brier
+     score is lower.
+3. **Record outcomes.** Keep Salesforce renewals closed won or lost with the right amount; close register entries
+   with an outcome; record anything else by hand. A churned customer then shows as "churned" for 12 months.
+4. **Set the prior's rate from the record** before trusting the percentages: renewals lost ÷ renewals due over the
+   last two or three years goes in `prior_mean_rate`.
+5. **Back-test before trusting.** On real data, the first useful backtest needs about 180 days of stored features plus
    the outcomes after them. Until then the score is the expert prior: explainable, but unproven.
 
 ## 8. Known limits and next steps
 
-- **Few customers, few outcomes.** With a few dozen enterprise customers, years may pass before there are 20 churns.
-  The prior and the scorecard carry the model until then. Downsells count as events, which helps.
-- **Contract terms are taken as they are today** when rebuilding past features. A renegotiated term changes history
-  slightly.
+- **Few customers, few outcomes.** With a few dozen enterprise customers, the model will sit at "prior", then
+  "calibrated", for years. That is the design: the scorecard carries the ranking, and outcomes first fix the level.
+- **Rebuilt history is not perfect history.** Contract lines are read as they are today (a renewal adds a line and
+  the old one stays, but an edited date rewrites the past); Salesforce activity logged late shows up in the past;
+  the "current" engine version is today's. Nightly rows do not have these limits, so the history gets more
+  trustworthy every night the model runs.
+- **Downsell from Salesforce amounts is a proposal.** It assumes the renewal amount and the previous won amount are
+  the same kind of number (both annual, both for the same scope). Check it against a few real renewals.
+- **Revenue at risk treats a downsell as losing the whole renewal.**
+- **Churned status lives in the risk model only.** Other dashboards do not yet filter churned customers out.
+- **Volume change is not adjusted for season.** A decline after a peak still scores as risk.
 - **Not in the model yet, because the data doesn't exist yet** (docs/17, section 3):
   - abandoned conversations, escalation reasons, CSAT, tool and integration failures (Datadog, Langfuse: docs/20);
   - meeting sentiment;
   - champion change;
   - contract value beyond the Salesforce renewal amount.
-- **Possible upgrades once outcomes accumulate:**
-  - a survival (time-to-churn) model;
-  - per-segment weights;
-  - interaction with days to renewal.
-- **Settings not yet decided:**
-  - the 5% base rate and 75% maximum of the prior;
-  - the 180-day horizon;
-  - the hard-red list.
+- **Settings not yet decided** (all proposed): the prior's 15% and 80%; the 10 / 50 / 100 stages; the hard-red list
+  and floors; the 40% coverage floor; the 120 / 60 day outcome window.

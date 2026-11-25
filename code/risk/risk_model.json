@@ -1,12 +1,12 @@
 {
   "_about": "The N360 customer risk model (docs/21_RISK_MODEL.md). Every feature, weight, anchor, hard red and model setting is here; code never holds a threshold. All values are PROPOSED until Ryan approves and the backtest supports them.",
-  "version": "2026-11-25.1",
+  "version": "2026-11-26.1",
   "horizon_days": 180,
   "label_events": [
     "churned",
     "downsold"
   ],
-  "_label_about": "Contracted churn and downsell happen at a renewal. The model answers: will this customer churn or downsell at its next renewal, for customers whose renewal is within horizon_days (or unknown). Snapshots further out are scored for display but not used to train or judge the model.",
+  "_label_about": "The unit is the renewal. A snapshot belongs to the customer's next renewal when it is 0 to eligible_days_to_renewal days away (unknown renewal date: not judged). The renewal's outcome is the churn, downsell or renewal recorded from outcome_days_before the renewal date (most customers have a 30 to 90 day opt-out, so a loss is logged early) to outcome_days_after it. Nothing recorded by then counts as renewed. Snapshots taken once the outcome was recorded, and every snapshot after a churn, are never used. A churned customer stays in the scores for churned_keep_days with the band 'churned'.",
   "eligible_days_to_renewal": 180,
   "dimensions": {
     "commercial": {
@@ -38,11 +38,11 @@
       "title": "CSM view"
     }
   },
-  "_features_about": "risk = clamp((value - good) / (bad - good), 0, 1): 0 at or better than good, 1 at or worse than bad (works in either direction). weight = share inside its dimension. pit = can be computed as it stood on a past date (point-in-time); features that cannot are left out of training and backtests and used only for today's score.",
+  "_features_about": "risk = clamp((value - good) / (bad - good), 0, 1): 0 at or better than good, 1 at or worse than bad (works in either direction). weight = share inside its dimension. pit = can be computed as it stood on a past date (point-in-time); features that cannot are left out of training and backtests and used only for today's score. Two features that measure nearly the same thing share weight rather than double it: pace gap is the smaller partner of forecast at term end, and the 12-week volume change of the 4-week one.",
   "features": {
     "pace_gap_pts": {
       "dimension": "commercial",
-      "weight": 0.35,
+      "weight": 0.15,
       "good": 0,
       "bad": 40,
       "pit": true,
@@ -51,7 +51,7 @@
     },
     "forecast_end_pct": {
       "dimension": "commercial",
-      "weight": 0.35,
+      "weight": 0.45,
       "good": 90,
       "bad": 40,
       "pit": true,
@@ -60,7 +60,7 @@
     },
     "renewal_forecast_risk": {
       "dimension": "commercial",
-      "weight": 0.3,
+      "weight": 0.4,
       "good": 0,
       "bad": 1,
       "pit": false,
@@ -69,20 +69,20 @@
     },
     "conv_change_30_pct": {
       "dimension": "usage",
-      "weight": 0.35,
+      "weight": 0.4,
       "good": 0,
       "bad": -30,
       "pit": true,
-      "title": "Conversations, last 30 days against the 30 before",
+      "title": "Conversations, last 4 weeks against the 4 before",
       "unit": "%"
     },
     "conv_change_90_pct": {
       "dimension": "usage",
-      "weight": 0.25,
+      "weight": 0.2,
       "good": 0,
       "bad": -30,
       "pit": true,
-      "title": "Conversations, last 90 days against the 90 before",
+      "title": "Conversations, last 12 weeks against the 12 before",
       "unit": "%"
     },
     "conv_volatility": {
@@ -100,8 +100,8 @@
       "good": 0,
       "bad": 5,
       "pit": true,
-      "title": "VA-days with no conversations where some were expected (30 days)",
-      "unit": "VA-days"
+      "title": "Days the worst VA was silent when conversations were expected (30 days, settled)",
+      "unit": "days"
     },
     "containment_pct": {
       "dimension": "quality",
@@ -127,8 +127,8 @@
       "good": 0,
       "bad": 6,
       "pit": true,
-      "title": "VA-days flagged as drops (30 days)",
-      "unit": "VA-days"
+      "title": "Days the worst VA was flagged as a drop (30 days, settled)",
+      "unit": "days"
     },
     "legacy_va_share": {
       "dimension": "adoption",
@@ -228,7 +228,7 @@
     "billed_lines",
     "data_gaps"
   ],
-  "_hard_red_about": "Exceptions (Gainsight's term): any one makes the band 'at risk' and caps health at cap_health, whatever the weights say.",
+  "_hard_red_about": "Exceptions (Gainsight's term): any one makes the band 'at risk' and caps health at cap_health, whatever the weights say; the points it takes show as their own line. min_probability: the chance at renewal is never shown below this while the rule fires.",
   "hard_red": {
     "cap_health": 40,
     "rules": [
@@ -236,52 +236,79 @@
         "feature": "renewal_forecast_risk",
         "op": ">=",
         "value": 1,
-        "label": "Renewal lost or omitted in Salesforce"
+        "label": "Renewal lost or omitted in Salesforce",
+        "min_probability": 0.9
       },
       {
         "feature": "csm_pulse",
         "op": ">=",
         "value": 1,
-        "label": "CSM rated red"
+        "label": "CSM rated red",
+        "min_probability": 0.5
       },
       {
         "feature": "open_churn_risks",
         "op": ">=",
         "value": 1,
-        "label": "Open churn risk in the register"
+        "label": "Open churn risk in the register",
+        "min_probability": 0.5
       },
       {
         "feature": "silent_va_days_30",
         "op": ">=",
         "value": 5,
-        "label": "A VA silent for 5+ expected days"
+        "label": "A VA silent for 5+ expected days",
+        "min_probability": 0.3
       },
       {
         "feature": "forecast_end_pct",
         "op": "<",
         "value": 50,
         "label": "Under half of billed by the term end",
-        "when_days_to_renewal_le": 120
+        "when_days_to_renewal_le": 120,
+        "min_probability": 0.4
       }
     ]
   },
   "bands": {
     "healthy": 75,
-    "watch": 50
+    "watch": 50,
+    "min_coverage": 0.4,
+    "_about": "Under min_coverage (share of the model's weight with data) and with no hard red, the band is 'not enough data': too little is known to call the customer healthy."
   },
   "probability": {
-    "_about": "Churn-or-downsell probability within horizon_days: logistic regression on the feature risks (0-1), shrunk toward an expert prior built from the scorecard weights. With few outcomes the prior dominates; as outcomes accumulate the data takes over.",
-    "prior_base_rate": 0.05,
-    "prior_max_rate": 0.75,
+    "_about": "Chance of churn or downsell at the next renewal. It starts as an expert prior: the average customer in a renewal window gets prior_mean_rate (set this from the real renewal record: renewals lost / renewals due), a customer at full risk everywhere gets prior_max_rate, and features move the log-odds in proportion to their scorecard weights. prior_mean_risk is the average scorecard risk assumed until there are customers to measure it on. It then learns in stages, counted in DISTINCT renewals lost (and as many kept): from stages.calibrate the level and one slope (the prior's level counts as prior_strength_renewals renewals of evidence, so the first few outcomes move it gently); from stages.dimension one weight per dimension; from stages.feature one weight per feature. ridge_lambda is relative: a weight's prior spread is its prior value / sqrt(ridge_lambda), so 4 means the data must argue to move a weight by half. Weights never go below zero.",
+    "prior_mean_rate": 0.15,
+    "prior_max_rate": 0.8,
+    "prior_mean_risk": 0.2,
+    "stages": {
+      "calibrate": 10,
+      "dimension": 50,
+      "feature": 100
+    },
+    "prior_strength_renewals": 20,
     "ridge_lambda": 4.0,
-    "min_events_to_train": 20,
     "max_iter": 50
   },
   "backtest": {
-    "_about": "Walk-forward: retrain every train_every_days once min_train_days of history exist; training uses one snapshot per customer every train_sample_days (weekly snapshots of one customer are not independent); top_share = the share of customers flagged when measuring precision.",
+    "_about": "Walk-forward: retrain every train_every_days once min_train_days of history exist; training uses one snapshot per renewal every train_sample_days, weighted so each renewal counts once. Each renewal is judged at lead_days before it (the nearest snapshot within lead_tolerance_days). top_share = the share flagged when measuring precision. Intervals: `bootstrap` resamples of whole customers. alert_probability = the chance at which the model counts as having warned; hold_days = how long before a loss the warning must still be up.",
     "train_every_days": 28,
     "min_train_days": 180,
     "train_sample_days": 28,
-    "top_share": 0.1
+    "top_share": 0.1,
+    "lead_days": [
+      150,
+      90,
+      30
+    ],
+    "lead_tolerance_days": 14,
+    "bootstrap": 300,
+    "alert_probability": 0.3,
+    "hold_days": 30
+  },
+  "label": {
+    "outcome_days_before": 120,
+    "outcome_days_after": 60,
+    "churned_keep_days": 365
   }
 }

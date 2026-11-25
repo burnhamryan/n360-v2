@@ -5,7 +5,8 @@ Runs on its own (files in, files out) or against N360's ClickHouse, where Grafan
 With N360 (connection as load.py: --url/--user/--password, or --chdb PATH; the loader user, as it writes):
     python3 code/risk/risk_model.py features                       # today's features into n360.risk_features
     python3 code/risk/risk_model.py features --from 2026-01-01 --every 7   # backfill weekly, point-in-time
-    python3 code/risk/risk_model.py train                          # train on stored features + v_risk_outcomes; backtest
+    python3 code/risk/risk_model.py train                          # train on stored features + v_risk_outcomes; backtest; store
+    python3 code/risk/risk_model.py adopt --run RUN_ID             # put that run into use (nothing is used until adopted)
     python3 code/risk/risk_model.py score                          # score today's features; Grafana shows them
     python3 code/risk/risk_model.py nightly                        # features + score (nightly.sh runs this)
     python3 code/risk/risk_model.py explain --customer "Willow Energy"
@@ -44,62 +45,116 @@ def write_ndjson(path, rows):
 # ───────────────────────── scoring (shared by both modes) ─────────────────────────
 
 
-def score_rows(rows, model, cfg):
-    """Scores and contributions for feature rows, with a model (or the prior when model is None)."""
+def score_rows(rows, model, cfg, outcomes=()):
+    """Scores and contributions for feature rows, with a model (or the expert prior when model is None: its level is
+    set on the customers of these rows that are in their renewal window). A customer known to have churned keeps a
+    row for label.churned_keep_days with the band 'churned' and no probability, then drops out."""
+    gone = bt.churn_dates(outcomes)
+    keep = dt.timedelta(cfg['label']['churned_keep_days'])
+
+    def churned(r):
+        return r['account'] in gone and bt._d(r['as_of']) >= gone[r['account']]
+    rows = [r for r in rows if not (churned(r) and bt._d(r['as_of']) - gone[r['account']] > keep)]
     if model is None:
-        model = dict(m.prior(cfg, m.feature_keys(cfg)), kind='prior')
+        model = m.prior(cfg, [r for r in rows if bt.eligible(r, cfg) and not churned(r)])
     scores, contribs = [], []
     for r in rows:
         sc = m.scorecard(r, cfg)
-        p = m.predict(model, r, cfg)
+        lost = churned(r)
+        p = None if lost else m.probability(model, r, cfg)
         push = m.explain(model, r, cfg)
-        elig = bt.eligible(r, cfg)
+        elig = bt.eligible(r, cfg) and not lost
         amount = r.get('renewal_amount') or None
-        scores.append({'account': r['account'], 'as_of': r['as_of'], 'health': sc['health'], 'band': sc['band'],
-                       'probability': round(p, 4), 'eligible': elig, 'coverage': sc['coverage'],
+        scores.append({'account': r['account'], 'as_of': r['as_of'], 'health': sc['health'],
+                       'band': 'churned' if lost else sc['band'],
+                       'probability': None if p is None else round(p, 4), 'eligible': elig, 'coverage': sc['coverage'],
                        'hard_reds': sc['hard_reds'], 'days_to_renewal': r.get('days_to_renewal'),
-                       'renewal_amount': amount, 'revenue_at_risk': round(p * amount, 2) if elig and amount else None,
-                       'model_kind': model.get('kind', 'prior')})
+                       'renewal_amount': amount,
+                       'revenue_at_risk': round(p * amount, 2) if elig and amount and p is not None else None,
+                       'model_kind': model.get('stage', model.get('kind', 'prior'))})
         rk = m.risks(r, cfg)
         for k, f in cfg['features'].items():
             contribs.append({'account': r['account'], 'as_of': r['as_of'], 'feature': k, 'dimension': f['dimension'],
                              'value': r.get(k), 'risk': None if rk[k] is None else round(rk[k], 4),
                              'points': sc['contributions'].get(k, 0.0), 'logodds': push.get(k, 0.0)})
+        if m.CAP in sc['contributions']:
+            contribs.append({'account': r['account'], 'as_of': r['as_of'], 'feature': m.CAP, 'dimension': 'hard red',
+                             'value': None, 'risk': None, 'points': sc['contributions'][m.CAP], 'logodds': 0.0})
     return scores, contribs
 
 
 def report_md(res, cfg, title='Risk model backtest'):
-    out = [f'# {title}', '', f"Model settings version `{cfg['version']}`; horizon {cfg['horizon_days']} days; "
-           f"events: {', '.join(cfg['label_events'])}.", '']
+    out = [f'# {title}', '', f"Model settings version `{cfg['version']}`; renewals judged from {cfg['eligible_days_to_renewal']} "
+           f"days out; events: {', '.join(cfg['label_events'])}.", '']
     if 'methods' not in res:
         return '\n'.join(out + [res.get('note', 'No result.'), ''])
-    out += [f"Scored out of time: {res['snapshots_scored']} snapshots ({res['period'][0]} to {res['period'][1]}), "
-            f"{res['events']} with a churn or downsell within the horizon (base rate {res['base_rate']:.1%}).", '',
-            f"| Method | AUC | Precision, top {cfg['backtest']['top_share']:.0%} | Recall, top {cfg['backtest']['top_share']:.0%} | Brier |",
-            '|---|---|---|---|---|']
+    f = lambda v, p=3: '-' if v is None else f'{v:.{p}f}'  # noqa: E731
+    top = f"{cfg['backtest']['top_share']:.0%}"
+    out += [f"Scored out of time: {res['renewals']} renewals, {res['events']} of them lost (base rate {res['base_rate']:.1%}), "
+            f"from {res['snapshots_scored']} snapshots ({res['period'][0]} to {res['period'][1]}). Each renewal is judged "
+            f"{', '.join(str(x) for x in res['lead_days'])} days ahead ({res['judged']} judgements). Intervals are 95%, from "
+            'resampling whole customers.', '',
+            f'| Method | AUC | 95% interval | Precision, top {top} | Recall, top {top} | Brier | Losses expected / seen |',
+            '|---|---|---|---|---|---|---|']
     for name, x in res['methods'].items():
-        f = lambda v, p=3: '-' if v is None else f'{v:.{p}f}'  # noqa: E731
-        out.append(f"| {name} | {f(x['auc'])} | {f(x['top_precision'])} | {f(x['top_recall'])} | {f(x.get('brier'))} |")
-    out += ['', '## Calibration of the trained model', '', '| Predicted | Snapshots | Mean predicted | Observed |', '|---|---|---|---|']
-    for b in res['reliability']:
-        out.append(f"| {b['bin']} | {b['n']} | {b['predicted']:.3f} | {b['observed']:.3f} |")
+        if name.startswith('rules'):
+            continue
+        exp = f"{x['expected_events']:.0f} / {x['observed_events']}" if 'brier' in x else '-'
+        out.append(f"| {name} | {f(x['auc'])} | {f(x['auc_low'])} to {f(x['auc_high'])} | {f(x['top_precision'])} | "
+                   f"{f(x['top_recall'])} | {f(x.get('brier'))} | {exp} |")
+    d = res['trained_minus_prior_auc']
+    out += ['', f"Trained model minus expert prior, AUC: {f(d[0])} to {f(d[1])} (95% interval). The trained model is worth "
+            'adopting only when this interval sits above zero and its Brier score is lower.']
+    x = res['methods']['rules (at-risk band)']
+    out += ['', f"**The rules alone** (a hard red or health under {cfg['bands']['watch']}) flag {f(x['flagged_share'], 3)} of judgements, "
+            f"with precision {f(x['precision'])} and recall {f(x['recall'])} (AUC {f(x['auc'])})."]
+    if 'trained_periods' in res:
+        t = res['trained_periods']
+        out += ['', f"**Only the periods where the model had learned something** ({t['judged']} judgements, {t['events']} lost): "
+                f"AUC {f(t['auc_model'])} against the prior's {f(t['auc_prior'])}; Brier {f(t['brier_model'])} against {f(t['brier_prior'])}."]
+    st = {}
+    for r in res['retrainings']:
+        st[r['stage']] = st.get(r['stage'], 0) + 1
+    out += ['', 'Retrainings by stage: ' + ', '.join(f'{k} {v}' for k, v in st.items())
+            + f". The last one had {res['retrainings'][-1]['events']} renewals lost to learn from."]
+    out += ['', '## By lead time', '', '| Days before the renewal | Judgements | AUC, scorecard | AUC, trained model |', '|---|---|---|---|']
+    for L, x in res['by_lead'].items():
+        out.append(f"| {L} | {x['judged']} | {f(x['auc_scorecard'])} | {f(x['auc_model'])} |")
+    for key, name in (('reliability', 'trained model'), ('reliability_prior', 'expert prior')):
+        out += ['', f'## Calibration of the {name}', '', '| Predicted | Judgements | Mean predicted | Observed |', '|---|---|---|---|']
+        for b in res[key]:
+            out.append(f"| {b['bin']} | {b['n']} | {b['predicted']:.3f} | {b['observed']:.3f} |")
     lt = res['lead_time_days']
-    out += ['', '## Warning lead time', '', '| Warning | Events | Warned beforehand | Median days ahead |', '|---|---|---|---|']
+    out += ['', '## Warning lead time', '',
+            f"Model alert = chance at or above {cfg['backtest']['alert_probability']:.0%}. Held = still flagged on the last "
+            f"snapshot {cfg['backtest']['hold_days']} or more days before the loss was recorded.", '',
+            '| Warning | Renewals lost | Warned beforehand | Median days ahead, when warned | Held | Flagged, renewals not lost |',
+            '|---|---|---|---|---|---|']
     for k, v in lt.items():
-        out.append(f"| {k.replace('_', ' ')} | {v['events']} | {v['warned']} | {v['median_days_ahead']} |")
+        fa = '-' if v['false_alarm_share'] is None else f"{v['false_alarm_share']:.1%}"
+        out.append(f"| {k.replace('_', ' ')} | {v['events']} | {v['warned']} | {v['median_days_ahead']} | {v['held']} | {fa} |")
     return '\n'.join(out) + '\n'
 
 
 # ───────────────────────── N360 (ClickHouse) ─────────────────────────
 
 
-def ch_features_store(ch, rows, cfg):
+def ch_features_store(ch, rows, cfg, source, overwrite=False):
+    """Store feature rows. A row written by the nightly run is the only true record of what was known that night
+    (current-only features, that night's contract terms, unsettled days), so a rebuild never replaces it unless
+    `overwrite`. Returns the dates skipped."""
     keys = list(cfg['features']) + cfg['context']
     dates = sorted({r['as_of'] for r in rows})
+    kept = set()
+    if source == 'rebuilt' and not overwrite:
+        kept = {x['d'] for x in ch.rows("SELECT DISTINCT toString(as_of) AS d FROM n360.risk_features WHERE source = 'nightly'")}
     for d in dates:
-        ch.cmd(f"ALTER TABLE n360.risk_features DELETE WHERE as_of = '{d}' SETTINGS mutations_sync = 1")
-    long = [{'as_of': r['as_of'], 'account': r['account'], 'feature': k, 'value': r.get(k)} for r in rows for k in keys]
+        if d not in kept:
+            ch.cmd(f"ALTER TABLE n360.risk_features DELETE WHERE as_of = '{d}' SETTINGS mutations_sync = 1")
+    long = [{'as_of': r['as_of'], 'account': r['account'], 'feature': k, 'value': r.get(k), 'source': source}
+            for r in rows if r['as_of'] not in kept for k in keys]
     insert(ch, 'n360.risk_features', long)
+    return sorted(kept & set(dates))
 
 
 def insert(ch, table, rows):
@@ -130,12 +185,40 @@ def ch_outcomes(ch):
 
 
 def ch_model(ch):
+    """The model in use: the newest ADOPTED run (None, None when none has been adopted: the built-in expert prior)."""
     r = ch.rows("SELECT toString(run_id) AS run_id, model, kind FROM n360.v_risk_model")
     if not r:
         return None, None
     mdl = json.loads(r[0]['model'])
     mdl['kind'] = r[0]['kind']
     return r[0]['run_id'], mdl
+
+
+def newest_window(rows, cfg, outcomes):
+    """The customers in their renewal window on the newest stored date: what the prior's level is set on."""
+    if not rows:
+        return []
+    newest = max(r['as_of'] for r in rows)
+    gone = bt.churn_dates(outcomes)
+    return [r for r in rows if r['as_of'] == newest and bt.eligible(r, cfg)
+            and not (r['account'] in gone and bt._d(newest) >= gone[r['account']])]
+
+
+def verdict(mdl, res):
+    """Whether a trained model has earned its place: the governance bar in docs/21, section 7."""
+    if mdl['kind'] != 'trained':
+        return 'This is the expert prior with its level set on the current customers: nothing was learned from outcomes.'
+    if 'methods' not in res:
+        return 'DO NOT ADOPT YET: there is no backtest to judge it by.'
+    d, M = res.get('trained_minus_prior_auc') or [None, None], res['methods']
+    better_brier = M['trained model (probability)']['brier'] < M['expert prior (probability)']['brier']
+    if mdl['stage'] == 'calibrated':
+        return ('Stage "calibrated": the ranking is the scorecard\'s, only the level and slope moved. '
+                + ('Its Brier score beats the prior: reasonable to adopt.' if better_brier
+                   else 'DO NOT ADOPT: its Brier score is no better than the prior.'))
+    if d[0] is not None and d[0] > 0 and better_brier:
+        return 'It beats the prior on AUC (the whole 95% interval is above zero) and on Brier: reasonable to adopt.'
+    return 'DO NOT ADOPT: it does not clearly beat the expert prior on both AUC and Brier.'
 
 
 def main():
@@ -152,10 +235,15 @@ def main():
     p.add_argument('--from', dest='frm')
     p.add_argument('--to')
     p.add_argument('--every', type=int, default=7)
-    p = sub.add_parser('train', help='train on stored features and outcomes, then backtest')
+    p.add_argument('--overwrite', action='store_true', help='let a rebuild replace rows the nightly run stored')
+    p = sub.add_parser('train', help='train on stored features and outcomes, backtest, store the run (not in use until adopted)')
     p.add_argument('--features'); p.add_argument('--outcomes'); p.add_argument('--model-out'); p.add_argument('--report')
+    p.add_argument('--adopt', action='store_true', help='put the new run into use at once (CI; otherwise read the backtest first)')
+    p = sub.add_parser('adopt', help='put a stored model run into use')
+    p.add_argument('--run', required=True, help="a run id from 'train', or 'prior' to go back to the built-in expert prior")
+    p.add_argument('--by', default=os.environ.get('USER', 'unknown')); p.add_argument('--note', default='')
     p = sub.add_parser('score', help="score the newest features (or a file's)")
-    p.add_argument('--features'); p.add_argument('--model'); p.add_argument('--out')
+    p.add_argument('--features'); p.add_argument('--model'); p.add_argument('--out'); p.add_argument('--outcomes')
     p.add_argument('--as-of', default='latest', help="a date, 'latest', or 'all' (every stored date: the score history)")
     p = sub.add_parser('backtest', help='walk-forward backtest; no model is stored')
     p.add_argument('--features'); p.add_argument('--outcomes'); p.add_argument('--report')
@@ -184,8 +272,10 @@ def main():
         if getattr(a, 'frm', None):
             ds = fe.dates(a.frm, a.to or newest, a.every)
         rows = [r for d in ds for r in fe.build(ch, d, newest)]
-        ch_features_store(ch, rows, cfg)
-        print(f'features: {len(rows)} customer-days over {len(ds)} date(s) ({ds[0]} to {ds[-1]}) stored in n360.risk_features')
+        rebuilt = bool(getattr(a, 'frm', None)) or ds != [newest]
+        skipped = ch_features_store(ch, rows, cfg, 'rebuilt' if rebuilt else 'nightly', getattr(a, 'overwrite', False))
+        print(f'features: {len(rows)} customer-days over {len(ds)} date(s) ({ds[0]} to {ds[-1]}) for n360.risk_features'
+              + (f'; {len(skipped)} date(s) kept as the nightly run stored them (--overwrite to replace)' if skipped else ''))
         if a.cmd == 'features':
             return 0
     if a.cmd in ('score', 'nightly'):
@@ -193,12 +283,13 @@ def main():
         days = ([x['d'] for x in ch.rows('SELECT DISTINCT toString(as_of) AS d FROM n360.risk_features ORDER BY d')]
                 if d == 'all' else [d])
         mid, mdl = ch_model(ch)
+        outs = ch_outcomes(ch)
         for day in days:
             rows = ch_features_load(ch, cfg, day)
             if not rows:
                 print(f'No stored features for {day}: run "features" first.')
                 return 1
-            scores, contribs = score_rows(rows, mdl, cfg)
+            scores, contribs = score_rows(rows, mdl, cfg, outs)
             run = str(uuid.uuid4())
             insert(ch, 'n360.risk_scores', [{**s, 'run_id': run, 'model_run_id': mid} for s in scores])
             insert(ch, 'n360.risk_contributions', [{**c, 'run_id': run} for c in contribs])
@@ -211,17 +302,34 @@ def main():
         observed = dt.date.fromisoformat(newest)
         res = bt.run(rows, outs, cfg, observed)
         if a.cmd == 'train':
-            lab = bt.thin(bt.labelled(rows, outs, cfg, observed), cfg['backtest']['train_sample_days'])
-            mdl = m.train([r for r, _ in lab], [y for _, y in lab], cfg, pit_only=True)
+            mdl = bt.fit(bt.labelled(rows, outs, cfg, observed), cfg, newest_window(rows, cfg, outs))
             run = str(uuid.uuid4())
-            body = {k: mdl[k] for k in ('intercept', 'coef', 'fill')}
+            body = {k: mdl[k] for k in ('intercept', 'coef', 'mean', 'stage')}
             ch.cmd(f"""INSERT INTO n360.risk_model_runs (run_id, version, kind, n, events, note, model, backtest) VALUES
                        ('{run}', {esc(cfg['version'])}, {esc(mdl['kind'])}, {mdl.get('n', 0)}, {mdl.get('events', 0)},
                         {esc(mdl.get('note', ''))}, {esc(json.dumps(body))}, {esc(json.dumps(res, default=str))})""")
             print(f"model {run}: {mdl['kind']} ({mdl.get('note', '')})")
-        print(report_md(res, cfg).split('## Calibration')[0])
+            print(verdict(mdl, res))
+            if a.adopt:
+                ch.cmd(f"INSERT INTO n360.risk_model_adopted (run_id, by, note) VALUES ('{run}', 'train --adopt', '')")
+                print(f'adopted: run {run} is now in use')
+            else:
+                print(f'Stored, NOT in use. To use it: risk_model.py adopt --run {run}')
+        print(report_md(res, cfg).split('## By lead time')[0])
         if a.report:
             open(a.report, 'w').write(report_md(res, cfg))
+        return 0
+    if a.cmd == 'adopt':
+        if a.run == 'prior':
+            run = '00000000-0000-0000-0000-000000000000'        # no run: the built-in expert prior
+        else:
+            got = ch.rows(f"SELECT toString(run_id) AS r FROM n360.risk_model_runs WHERE toString(run_id) = {esc(a.run)}")
+            if not got:
+                print(f'No model run {a.run!r} in n360.risk_model_runs.')
+                return 1
+            run = got[0]['r']
+        ch.cmd(f"INSERT INTO n360.risk_model_adopted (run_id, by, note) VALUES ('{run}', {esc(a.by)}, {esc(a.note)})")
+        print('adopted: the built-in expert prior is now in use' if a.run == 'prior' else f'adopted: run {run} is now in use')
         return 0
     if a.cmd == 'explain':
         rows = [r for r in ch_features_load(ch, cfg, newest) if r['account'].lower() == a.customer.lower()]
@@ -229,6 +337,7 @@ def main():
             print(f'No features for {a.customer!r} on {newest}.')
             return 1
         _, mdl = ch_model(ch)
+        mdl = mdl or m.prior(cfg, newest_window(ch_features_load(ch, cfg, newest), cfg, ch_outcomes(ch)))
         print(explain_text(rows[0], mdl, cfg))
         return 0
     if a.cmd == 'outcome':
@@ -245,20 +354,25 @@ def main():
 
 
 def explain_text(row, mdl, cfg):
-    mdl = mdl or dict(m.prior(cfg, m.feature_keys(cfg)), kind='prior')
+    mdl = mdl or m.prior(cfg)
     sc = m.scorecard(row, cfg)
-    p = m.predict(mdl, row, cfg)
+    p = m.probability(mdl, row, cfg)
     rk = m.risks(row, cfg)
     push = m.explain(mdl, row, cfg)
+    chance = 'no chance shown (nothing reported)' if p is None else f'P(churn or downsell at the next renewal) {p:.0%}'
     lines = [f"{row['account']} on {row['as_of']}: health {sc['health']} ({sc['band']}), "
-             f"P(churn or downsell at the next renewal) {p:.0%} [{mdl.get('kind', 'prior')}], coverage {sc['coverage']:.0%}"]
+             f"{chance} [{mdl.get('stage', mdl.get('kind', 'prior'))}], coverage {sc['coverage']:.0%}"]
     if sc['hard_reds']:
         lines.append('Hard reds: ' + '; '.join(sc['hard_reds']))
+    if sc['hard_reds_unchecked']:
+        lines.append('Could not be checked (renewal date unknown): ' + '; '.join(sc['hard_reds_unchecked']))
     lines.append(f"{'feature':26s} {'value':>10s} {'risk':>6s} {'points':>7s} {'log-odds':>9s}")
     for k in sorted(cfg['features'], key=lambda k: -sc['contributions'].get(k, 0)):
         v = row.get(k)
         lines.append(f"{k:26s} {('-' if v is None else f'{v:.1f}'):>10s} {('-' if rk[k] is None else f'{rk[k]:.2f}'):>6s} "
                      f"{sc['contributions'].get(k, 0):7.1f} {push.get(k, 0):9.3f}")
+    if m.CAP in sc['contributions']:
+        lines.append(f"{'hard red (cap at ' + str(cfg['hard_red']['cap_health']) + ')':26s} {'-':>10s} {'-':>6s} {sc['contributions'][m.CAP]:7.1f} {0:9.3f}")
     return '\n'.join(lines)
 
 
@@ -266,8 +380,7 @@ def files_mode(a, cfg):
     if a.cmd == 'train':
         rows, outs = read_ndjson(a.features), read_ndjson(a.outcomes)
         observed = max(dt.date.fromisoformat(r['as_of'][:10]) for r in rows)
-        lab = bt.thin(bt.labelled(rows, outs, cfg, observed), cfg['backtest']['train_sample_days'])
-        mdl = m.train([r for r, _ in lab], [y for _, y in lab], cfg, pit_only=True)
+        mdl = bt.fit(bt.labelled(rows, outs, cfg, observed), cfg, newest_window(rows, cfg, outs))
         if a.model_out:
             json.dump(mdl, open(a.model_out, 'w'), indent=1)
         print(f"model: {mdl['kind']} ({mdl.get('note', '')})")
@@ -280,7 +393,7 @@ def files_mode(a, cfg):
         text = report_md(res, cfg)
         if a.report:
             open(a.report, 'w').write(text)
-        print(text.split('## Calibration')[0])
+        print(text.split('## By lead time')[0])
         return 0
     if a.cmd == 'score':
         rows = read_ndjson(a.features)
@@ -290,7 +403,7 @@ def files_mode(a, cfg):
             newest = max(r['as_of'] for r in rows)
             rows = [r for r in rows if r['as_of'] == newest]
         mdl = json.load(open(a.model)) if a.model else None
-        scores, contribs = score_rows(rows, mdl, cfg)
+        scores, contribs = score_rows(rows, mdl, cfg, read_ndjson(a.outcomes) if a.outcomes else ())
         if a.out:
             write_ndjson(a.out, scores)
             write_ndjson(a.out.replace('.ndjson', '') + '.contributions.ndjson', contribs)
