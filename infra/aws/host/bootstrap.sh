@@ -3,7 +3,7 @@
 # on the data volume and are kept; only the code version and settings change. Terraform's user_data writes
 # /etc/n360/n360.conf and runs this at first boot; update.sh runs it again later.
 #
-# /etc/n360/n360.conf (shell variables):
+# Settings: Parameter Store /n360/<name>/config (written by Terraform), copied to /etc/n360/n360.conf each run:
 #   N360_NAME          name tag and Parameter Store prefix (/n360/<name>/...)       e.g. n360
 #   AWS_REGION         region                                                       e.g. us-east-1
 #   REPO_URL, GIT_REF  the code to run                                              e.g. https://github.com/burnhamryan/n360-v2, main
@@ -16,7 +16,14 @@ set -euo pipefail
 CONF=${N360_CONF:-/etc/n360/n360.conf}
 # shellcheck source=/dev/null
 . "$CONF"
-: "${N360_NAME:?}" "${AWS_REGION:?}" "${REPO_URL:?}" "${GIT_REF:?}" "${DATA_VOLUME_ID:?}" "${BUCKET:?}"
+: "${N360_NAME:?}" "${AWS_REGION:?}"
+# The settings live in Parameter Store (Terraform writes /n360/<name>/config); refresh the local copy every run.
+cfg=$(aws ssm get-parameter --region "$AWS_REGION" --name "/n360/$N360_NAME/config" --query Parameter.Value --output text 2>/dev/null || true)
+if [ -n "$cfg" ]; then printf '%s\n' "$cfg" > "$CONF"; fi
+# shellcheck source=/dev/null
+. "$CONF"
+GIT_REF=${N360_GIT_REF:-$GIT_REF}      # update.sh REF runs one other version without changing Terraform
+: "${REPO_URL:?}" "${GIT_REF:?}" "${DATA_VOLUME_ID:?}" "${BUCKET:?}"
 COMPOSE_VERSION=2.40.3
 declare -A COMPOSE_SHA256=(
   [x86_64]=dba9d98e1ba5bfe11d88c99b9bd32fc4a0624a30fafe68eea34d61a3e42fd372

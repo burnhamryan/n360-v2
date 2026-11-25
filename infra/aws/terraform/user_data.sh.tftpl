@@ -1,0 +1,11 @@
+#!/bin/bash
+# First boot: fetch the code and run infra/aws/host/bootstrap.sh, which reads the settings from Parameter Store
+# (/n360/${name}/config). Log: /var/log/n360-bootstrap.log
+set -euo pipefail
+exec > >(tee -a /var/log/n360-bootstrap.log) 2>&1
+mkdir -p /etc/n360
+printf "N360_NAME='%s'\nAWS_REGION='%s'\n" '${name}' '${region}' > /etc/n360/n360.conf
+dnf install -y -q git
+if [ ! -d /opt/n360/.git ]; then git clone -q '${repo_url}' /opt/n360; fi
+git -C /opt/n360 fetch -q --tags origin '${git_ref}' && git -C /opt/n360 checkout -q --detach FETCH_HEAD
+/opt/n360/infra/aws/host/bootstrap.sh

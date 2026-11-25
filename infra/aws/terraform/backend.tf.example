@@ -1,0 +1,11 @@
+# Optional: keep Terraform state in S3 (encrypted, versioned, locked) instead of on one laptop.
+# Copy to backend.tf, create the bucket first, then `terraform init -migrate-state`.
+terraform {
+  backend "s3" {
+    bucket       = "my-terraform-state-bucket"
+    key          = "n360/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}

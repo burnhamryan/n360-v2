@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars and edit. Never commit terraform.tfvars if it holds anything sensitive.
+region = "us-east-1"
+name   = "n360"
+
+# Public HTTPS with Google sign-in (leave domain empty for tunnel-only access):
+domain                 = "n360.example.com"
+google_client_id       = "1234567890-abc.apps.googleusercontent.com"
+google_allowed_domains = "example.com"
+google_hosted_domain   = "example.com"
+# https_allowed_cidrs  = ["203.0.113.0/24"]   # narrow to office / VPN ranges if you can
+
+# Loads: false = from your laptop through the tunnel (now); true = the server loads s3://<bucket>/exports hourly.
+server_loads = false
+
+# git_ref = "v1.0.0"   # pin a tag for production
