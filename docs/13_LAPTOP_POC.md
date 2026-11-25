@@ -5,7 +5,8 @@ Everything stays on the laptop: ClickHouse and Grafana listen on `localhost` onl
 ## 0. You need
 
 - **Docker Desktop**, running (Settings → Resources: 4 GB memory or more).
-- **Python 3.10+** (`python3 --version`; `brew install python@3.12` if older).
+- **Python 3.12**: `brew install python@3.12` (or the macOS installer from python.org). macOS's own `python3` is
+  3.9, too old: pip then finds only clickhouse-connect 0.x and fails on `==1.13.0`.
 - **git**, and internet access for the first start (Docker images and the Grafana plugin download once).
 - The company pipeline's export folder: one folder per night, `data/<D>/rows/*.ndjson` + `run.json`
   (written by `export_rows.py`). Below it is `~/n360-pipeline/data`; use your real path.
@@ -14,7 +15,7 @@ Everything stays on the laptop: ClickHouse and Grafana listen on `localhost` onl
 
 ```bash
 git clone https://github.com/burnhamryan/n360-v2 ~/n360 && cd ~/n360
-python3 -m venv .venv && source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install clickhouse-connect==1.13.0
 cd code && cp .env.example .env
 ```
