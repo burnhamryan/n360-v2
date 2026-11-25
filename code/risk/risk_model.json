@@ -1,0 +1,287 @@
+{
+  "_about": "The N360 customer risk model (docs/21_RISK_MODEL.md). Every feature, weight, anchor, hard red and model setting is here; code never holds a threshold. All values are PROPOSED until Ryan approves and the backtest supports them.",
+  "version": "2026-11-25.1",
+  "horizon_days": 180,
+  "label_events": [
+    "churned",
+    "downsold"
+  ],
+  "_label_about": "Contracted churn and downsell happen at a renewal. The model answers: will this customer churn or downsell at its next renewal, for customers whose renewal is within horizon_days (or unknown). Snapshots further out are scored for display but not used to train or judge the model.",
+  "eligible_days_to_renewal": 180,
+  "dimensions": {
+    "commercial": {
+      "weight": 0.25,
+      "title": "Commercial and contract"
+    },
+    "usage": {
+      "weight": 0.2,
+      "title": "Usage"
+    },
+    "quality": {
+      "weight": 0.15,
+      "title": "Product quality"
+    },
+    "adoption": {
+      "weight": 0.15,
+      "title": "Adoption and depth"
+    },
+    "relationship": {
+      "weight": 0.15,
+      "title": "Relationship"
+    },
+    "support": {
+      "weight": 0.05,
+      "title": "Support"
+    },
+    "voice": {
+      "weight": 0.05,
+      "title": "CSM view"
+    }
+  },
+  "_features_about": "risk = clamp((value - good) / (bad - good), 0, 1): 0 at or better than good, 1 at or worse than bad (works in either direction). weight = share inside its dimension. pit = can be computed as it stood on a past date (point-in-time); features that cannot are left out of training and backtests and used only for today's score.",
+  "features": {
+    "pace_gap_pts": {
+      "dimension": "commercial",
+      "weight": 0.35,
+      "good": 0,
+      "bad": 40,
+      "pit": true,
+      "title": "Points behind the term (worst line)",
+      "unit": "points"
+    },
+    "forecast_end_pct": {
+      "dimension": "commercial",
+      "weight": 0.35,
+      "good": 90,
+      "bad": 40,
+      "pit": true,
+      "title": "Forecast at term end (lowest line)",
+      "unit": "% of billed"
+    },
+    "renewal_forecast_risk": {
+      "dimension": "commercial",
+      "weight": 0.3,
+      "good": 0,
+      "bad": 1,
+      "pit": false,
+      "title": "Renewal forecast category (Salesforce)",
+      "unit": "0 safe, 0.5 open, 1 lost or omitted"
+    },
+    "conv_change_30_pct": {
+      "dimension": "usage",
+      "weight": 0.35,
+      "good": 0,
+      "bad": -30,
+      "pit": true,
+      "title": "Conversations, last 30 days against the 30 before",
+      "unit": "%"
+    },
+    "conv_change_90_pct": {
+      "dimension": "usage",
+      "weight": 0.25,
+      "good": 0,
+      "bad": -30,
+      "pit": true,
+      "title": "Conversations, last 90 days against the 90 before",
+      "unit": "%"
+    },
+    "conv_volatility": {
+      "dimension": "usage",
+      "weight": 0.15,
+      "good": 0.1,
+      "bad": 0.5,
+      "pit": true,
+      "title": "Week-to-week volatility (12 weeks)",
+      "unit": "coefficient of variation"
+    },
+    "silent_va_days_30": {
+      "dimension": "usage",
+      "weight": 0.25,
+      "good": 0,
+      "bad": 5,
+      "pit": true,
+      "title": "VA-days with no conversations where some were expected (30 days)",
+      "unit": "VA-days"
+    },
+    "containment_pct": {
+      "dimension": "quality",
+      "weight": 0.35,
+      "good": 60,
+      "bad": 30,
+      "pit": true,
+      "title": "Containment (busiest VA with handoff data)",
+      "unit": "%"
+    },
+    "containment_change_pts": {
+      "dimension": "quality",
+      "weight": 0.4,
+      "good": 0,
+      "bad": -10,
+      "pit": true,
+      "title": "Containment change, 30 days against the 30 before",
+      "unit": "points"
+    },
+    "drop_days_30": {
+      "dimension": "quality",
+      "weight": 0.25,
+      "good": 0,
+      "bad": 6,
+      "pit": true,
+      "title": "VA-days flagged as drops (30 days)",
+      "unit": "VA-days"
+    },
+    "legacy_va_share": {
+      "dimension": "adoption",
+      "weight": 0.25,
+      "good": 0,
+      "bad": 1,
+      "pit": true,
+      "title": "Share of conversations on VAs below V8",
+      "unit": "share"
+    },
+    "features_used": {
+      "dimension": "adoption",
+      "weight": 0.25,
+      "good": 5,
+      "bad": 1,
+      "pit": true,
+      "title": "Target features used (of 5)",
+      "unit": "features"
+    },
+    "build_change_pct": {
+      "dimension": "adoption",
+      "weight": 0.25,
+      "good": 0,
+      "bad": -60,
+      "pit": true,
+      "title": "Customer authoring and assistant use, 30 days against the 30 before",
+      "unit": "%"
+    },
+    "weeks_config_unchanged": {
+      "dimension": "adoption",
+      "weight": 0.25,
+      "good": 4,
+      "bad": 16,
+      "pit": true,
+      "title": "Weeks since any VA's configuration changed",
+      "unit": "weeks"
+    },
+    "days_since_contact": {
+      "dimension": "relationship",
+      "weight": 0.6,
+      "good": 14,
+      "bad": 90,
+      "pit": true,
+      "title": "Days since the last customer contact (Salesforce)",
+      "unit": "days"
+    },
+    "days_since_exec": {
+      "dimension": "relationship",
+      "weight": 0.4,
+      "good": 60,
+      "bad": 270,
+      "pit": true,
+      "title": "Days since the last executive meeting (Salesforce)",
+      "unit": "days"
+    },
+    "open_tickets": {
+      "dimension": "support",
+      "weight": 0.5,
+      "good": 0,
+      "bad": 5,
+      "pit": false,
+      "title": "Open support tickets",
+      "unit": "tickets"
+    },
+    "oldest_open_ticket_days": {
+      "dimension": "support",
+      "weight": 0.5,
+      "good": 7,
+      "bad": 60,
+      "pit": false,
+      "title": "Age of the oldest open ticket",
+      "unit": "days"
+    },
+    "csm_pulse": {
+      "dimension": "voice",
+      "weight": 0.6,
+      "good": 0,
+      "bad": 1,
+      "pit": true,
+      "title": "CSM rating (green 0, amber 0.5, red 1)",
+      "unit": "rating"
+    },
+    "open_churn_risks": {
+      "dimension": "voice",
+      "weight": 0.4,
+      "good": 0,
+      "bad": 1,
+      "pit": true,
+      "title": "Open churn risks in the register",
+      "unit": "risks"
+    }
+  },
+  "_context_about": "Context features are stored and shown but do not score risk: they decide urgency and money.",
+  "context": [
+    "days_to_renewal",
+    "renewal_amount",
+    "billed_lines",
+    "data_gaps"
+  ],
+  "_hard_red_about": "Exceptions (Gainsight's term): any one makes the band 'at risk' and caps health at cap_health, whatever the weights say.",
+  "hard_red": {
+    "cap_health": 40,
+    "rules": [
+      {
+        "feature": "renewal_forecast_risk",
+        "op": ">=",
+        "value": 1,
+        "label": "Renewal lost or omitted in Salesforce"
+      },
+      {
+        "feature": "csm_pulse",
+        "op": ">=",
+        "value": 1,
+        "label": "CSM rated red"
+      },
+      {
+        "feature": "open_churn_risks",
+        "op": ">=",
+        "value": 1,
+        "label": "Open churn risk in the register"
+      },
+      {
+        "feature": "silent_va_days_30",
+        "op": ">=",
+        "value": 5,
+        "label": "A VA silent for 5+ expected days"
+      },
+      {
+        "feature": "forecast_end_pct",
+        "op": "<",
+        "value": 50,
+        "label": "Under half of billed by the term end",
+        "when_days_to_renewal_le": 120
+      }
+    ]
+  },
+  "bands": {
+    "healthy": 75,
+    "watch": 50
+  },
+  "probability": {
+    "_about": "Churn-or-downsell probability within horizon_days: logistic regression on the feature risks (0-1), shrunk toward an expert prior built from the scorecard weights. With few outcomes the prior dominates; as outcomes accumulate the data takes over.",
+    "prior_base_rate": 0.05,
+    "prior_max_rate": 0.75,
+    "ridge_lambda": 4.0,
+    "min_events_to_train": 20,
+    "max_iter": 50
+  },
+  "backtest": {
+    "_about": "Walk-forward: retrain every train_every_days once min_train_days of history exist; training uses one snapshot per customer every train_sample_days (weekly snapshots of one customer are not independent); top_share = the share of customers flagged when measuring precision.",
+    "train_every_days": 28,
+    "min_train_days": 180,
+    "train_sample_days": 28,
+    "top_share": 0.1
+  }
+}
