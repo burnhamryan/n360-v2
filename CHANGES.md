@@ -1,3 +1,31 @@
+# CHANGES · 26 Nov 2026 · Customer risk model
+
+**A customer risk model you can test, tune and run, on its own or inside N360** (`code/risk/`, `docs/21_RISK_MODEL.md`).
+It gives each customer:
+- **health** (0–100), with the points each feature costs;
+- a **band**, with hard reds that force "at risk";
+- the **chance of churn or downsell at the next renewal**;
+- **revenue at risk**.
+
+It has 20 features in 7 dimensions, each computed as it stood on any past date. The probability is a logistic
+regression that starts as an expert prior built from the scorecard and learns from outcomes as they arrive. A
+walk-forward backtest compares it with the scorecard and the rules. The new dashboard is `n360-risk-model`.
+Tested on synthetic data with a known truth: AUC about 0.77 out of time; the trained model is better calibrated than
+the prior; churn was flagged a month or more ahead.
+
+| Piece | What |
+|---|---|
+| `code/risk/model.py` | Feature risks, scorecard, hard reds, the expert prior, ridge-to-prior logistic regression (pure Python), explanations, metrics (AUC, Brier, precision/recall at 10%, reliability) |
+| `code/risk/backtest.py` | Labels (renewal window, horizon observed), walk-forward backtest, lead time |
+| `code/risk/features.py` | 20 point-in-time features from N360's ClickHouse (usage, contract, quality, adoption, Salesforce, tickets, register, CSM rating) |
+| `code/risk/risk_model.py` | `features`, `train`, `score`, `backtest`, `explain`, `outcome`, `nightly`; with N360 or `--no-db` on files |
+| `code/risk/risk_model.json` | Every setting (PROPOSED): dimensions, weights, anchors, hard reds, bands, prior, ridge, horizon, backtest |
+| `code/schema.sql` | `risk_features`, `risk_outcome`, `risk_model_runs`, `risk_scores`, `risk_contributions`; views `v_risk_outcomes`, `v_risk_model`, `v_risk_score`, `v_risk_drivers` |
+| `sample_data/generate_risk_panel.py` | A synthetic 220-customer, 130-week history with a known risk process |
+| Tests, CI | `code/risk/test_risk_model.py` (25 checks). The N360 path in CI: features, train, score history, view checks. Nightly scoring in `nightly.sh` (training stays manual). Model tables backed up |
+
+---
+
 # CHANGES · 25 Nov 2026 · Risk dashboard and Salesforce
 
 **New Risk dashboard (`n360-risk`), and N360 now reads Salesforce.** The dashboard shows which customers are at risk,

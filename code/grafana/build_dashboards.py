@@ -10,7 +10,7 @@ description (the (i)), and "Not reported yet" wherever a value was not read. Nev
 Layout of this file: settings (one place each) -> building blocks (target, panel, describe,
 variables, header, links, formats, colours from view labels) -> one function per dashboard -> main().
 """
-import json, os
+import json, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, 'dashboards')
@@ -26,7 +26,8 @@ DEFAULT_RANGE = {'from': 'now-90d', 'to': 'now'}
 UID = {'overview': 'n360-overview', 'contracts': 'n360-contracts', 'customer': 'n360-customer', 'line': 'n360-line',
        'va': 'n360-va', 'forecast': 'n360-forecast', 'anomalies': 'n360-anomalies',
        'adoption': 'n360-adoption', 'requests': 'n360-requests',
-       'containment': 'n360-containment', 'pipeline': 'n360-pipeline', 'health': 'n360-health', 'risk': 'n360-risk'}   # never change (links depend on them)
+       'containment': 'n360-containment', 'pipeline': 'n360-pipeline', 'health': 'n360-health', 'risk': 'n360-risk',
+       'risk_model': 'n360-risk-model'}   # never change (links depend on them)
 FORECAST_WINDOWS = (30, 60, 90)   # Forecast "Crossing billed" stat (spec 6): display windows
 
 # Display colours: ONE palette (v2 principle 6: colour means status, nowhere else). Mid tones chosen to read on both
@@ -2393,10 +2394,209 @@ def risk():
                             width('Customer', 170), width('Reason', 190), width('Impact', 100), width('Outcome', 100),
                             width('Closed', 110)], noValue='No risk closed in 90 days'),
         options={'cellHeight': 'sm'}, may_be_empty='no risk closed in 90 days'))
-    return dashboard(UID['risk'], 'N360 · Risk', p, [var_csm()], [back_link()], time={'from': 'now-60d', 'to': 'now+180d'})
+    return dashboard(UID['risk'], 'N360 · Risk', p, [var_csm()], [back_link(), back_link(('n360-risk-model', 'Risk model'))],
+                     time={'from': 'now-60d', 'to': 'now+180d'})
 
 
-DASHBOARDS = [overview, contracts, customer, health, risk, contract_line, va, forecast, anomalies, containment, pipeline,
+def risk_model_dashboard():
+    """Risk model (docs/21): how likely is each customer to churn or downsell at its next renewal, and why? Reads the
+    scores code/risk/risk_model.py writes; feature titles and the expert prior come from code/risk/risk_model.json."""
+    cfg = json.load(open(os.path.join(os.path.dirname(HERE), 'risk', 'risk_model.json')))
+    sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'risk'))
+    import model as rm
+    keys = list(cfg['features'])
+    def titles(col='feature'):
+        return (f"transform({col}, ['" + "', '".join(keys) + "'], ['"
+                + "', '".join(cfg['features'][k]['title'].replace("'", "\\'") for k in keys) + f"'], {col})")
+    title_sql = titles()
+    dims = list(cfg['dimensions'])
+    dim_sql = (f"transform(dimension, ['" + "', '".join(dims) + "'], ['"
+               + "', '".join(cfg['dimensions'][d]['title'] for d in dims) + "'], dimension)")
+    pr = rm.prior(cfg, rm.feature_keys(cfg, pit_only=True))
+    prior_vals = ', '.join(f"('{k}', {pr['coef'][k]:.4f})" for k in pr['coef'])
+    BAND = {'at risk': ('At risk', 'risk'), 'watch': ('Watch', 'amber'), 'healthy': ('Healthy', 'green'),
+            'not reported': ('Not reported', 'grey')}
+    horizon = cfg['horizon_days']
+    in_csm = "account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))"
+    one = "account IN (${customer:singlequote})"
+    trained_auc = """JSONExtract(backtest, 'methods', 'trained model (probability)', 'auc', 'Nullable(Float64)')"""
+    p = page_header(1, f"""
+        WITH (SELECT any(kind) FROM n360.v_risk_model) AS kind,
+             (SELECT countIf(outcome IN ('churned', 'downsold')) FROM n360.v_risk_outcomes) AS events,
+             (SELECT any({trained_auc}) FROM n360.v_risk_model) AS auc
+        SELECT if(count() = 0, NULL, concat(
+                   {plural("countIf(band = 'at risk')", 'customer', 'customers')}, ' at risk · ',
+                   if(sumIf(revenue_at_risk, revenue_at_risk IS NOT NULL) > 0,
+                      concat({num_sql("toUInt64(sumIf(revenue_at_risk, revenue_at_risk IS NOT NULL))")}, ' revenue at risk in renewals within {horizon} days · '), ''),
+                   'model: ', if(kind = 'trained', 'trained on ', 'expert prior (trains at {cfg['probability']['min_events_to_train']} outcomes; '),
+                   {plural('events', 'outcome', 'outcomes')}, if(kind = 'trained', '', ' so far)'),
+                   if(auc IS NULL, '', concat(' · backtest AUC ', toString(round(auc, 2)))))) AS sentence
+        FROM n360.v_risk_score WHERE {in_csm}""",
+        describe('Customers the model puts at risk (health under 50 or a hard red), the revenue at risk (chance of churn or '
+                 'downsell at the next renewal x the open Salesforce renewal amount, renewals within the horizon), and '
+                 'the model in use: the expert prior until enough outcomes exist, then a model trained on them. AUC: how '
+                 'well it ranked customers out of time (0.5 = chance, 1 = perfect).',
+                 'n360.v_risk_score, n360.v_risk_model, n360.v_risk_outcomes (code/risk/risk_model.py)', 'CSM', 'the newest score'))
+    p.append(tile(3, 'At risk (model)', f"""
+        SELECT as_of AS night, toUInt64(countIf(band = 'at risk')) AS value FROM n360.risk_scores
+        WHERE (as_of, scored_at) IN (SELECT as_of, max(scored_at) FROM n360.risk_scores GROUP BY as_of) AND {in_csm}
+        GROUP BY night""", 0, 3,
+        describe('Customers with health under 50 or a hard red, each scored date (the score history is filled by '
+                 '"risk_model.py score --as-of all" and each nightly run).', 'n360.risk_scores', 'CSM', 'the last 30 scored dates')))
+    p.append(single_tile(4, 'Revenue at risk', f"""
+        SELECT toUInt64(sumIf(revenue_at_risk, revenue_at_risk IS NOT NULL)) AS `chance x renewal amount, next {horizon} days`
+        FROM n360.v_risk_score WHERE {in_csm}""", 6, 3,
+        describe(f'Sum over customers renewing within {horizon} days of: the chance of churn or downsell at that renewal '
+                 'times the open Salesforce renewal amount (its currency; not converted). Customers with no renewal '
+                 'amount add nothing.', 'n360.v_risk_score (n360.sf_opportunity)', 'CSM', 'the newest score')))
+    p.append(single_tile(5, 'Outcomes to learn from', f"""
+        SELECT countIf(outcome IN ('churned', 'downsold')) AS `churns and downsells (trains at {cfg['probability']['min_events_to_train']})`
+        FROM n360.v_risk_outcomes""", 12, 3,
+        describe('Churns and downsells known so far: closed renewals in Salesforce, closed register entries, outcomes '
+                 'recorded by hand ("risk_model.py outcome"). Under the training minimum the model is the expert prior.',
+                 'n360.v_risk_outcomes', 'none (every customer)', 'all time')))
+    p.append(single_tile(6, 'Backtest AUC', f"""
+        SELECT {trained_auc} AS `out of time; 0.5 = chance, 1 = perfect` FROM n360.v_risk_model""", 18, 3,
+        describe('How well the model ranked customers who later churned or downsold above those who did not, scored '
+                 'out of time (each period by a model trained only on earlier outcomes). Empty until there is enough '
+                 'history: the walk-forward needs 180 days of features and outcomes after them.',
+                 'n360.v_risk_model (risk_model.py train)', 'none', 'the newest training run'),
+        field=plain(field_config(decimals=2, noValue='Not enough history yet'))))
+    p.append(panel(7, 'Customers by health and chance at the next renewal', 'table', f"""
+        WITH top AS (SELECT account, arrayStringConcat(arraySlice(arrayMap(x -> x.2, arraySort(x -> -x.1,
+                                groupArray((points, {titles('c.feature')})))), 1, 3), ' · ') AS drivers
+                     FROM n360.v_risk_drivers AS c WHERE c.points > 0.5 GROUP BY account)
+        SELECT a.display_name AS Customer, s.band AS Band, s.health AS Health, s.probability AS `Chance at renewal`,
+               if(s.eligible, 'within {horizon} days', 'later') AS Renewal, s.days_to_renewal AS `Renews in`,
+               s.revenue_at_risk AS `Revenue at risk`, ifNull(t.drivers, '') AS `Biggest drivers`,
+               arrayStringConcat(s.hard_reds, ' · ') AS `Hard reds`, s.coverage AS Coverage, s.account AS account
+        FROM n360.v_risk_score AS s INNER JOIN n360.account AS a ON a.account = s.account
+        LEFT JOIN top AS t ON t.account = s.account
+        WHERE s.{in_csm}
+        ORDER BY indexOf(['at risk', 'watch', 'healthy', 'not reported'], Band), s.probability DESC""", 0, 8, 24, 13,
+        describe('Every customer: band (hard reds, else health under 50 at risk, under 75 watch), health (100 = no risk; the '
+                 'weighted scorecard), the chance of churn or downsell at the next renewal (logistic model; the expert '
+                 'prior until trained), revenue at risk, the three features costing the most health points, hard reds, '
+                 'and coverage (share of the model\'s weight with data: low coverage = less to go on). Pick a customer '
+                 'above to see every feature below.', 'n360.v_risk_score, n360.v_risk_drivers', 'CSM', 'the newest score'),
+        field=field_config([hidden('account'), coloured('Band', BAND, 'color-background'),
+                            override('Health', ('min', 0), ('max', 100), ('decimals', 0), ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series']}),
+                                     ('custom.cellOptions', {'type': 'gauge', 'mode': 'basic', 'valueDisplayMode': 'text'})),
+                            override('Chance at renewal', ('unit', 'percentunit'), ('decimals', 0)),
+                            override('Coverage', ('unit', 'percentunit'), ('decimals', 0)),
+                            count_col('Revenue at risk'), override('Renews in', ('unit', 'suffix: d'), ('decimals', 0)),
+                            *[override(c, ('mappings', [empty_grey()])) for c in ('Health', 'Revenue at risk', 'Renews in')],
+                            coloured('Renewal', {'later': ('Later', 'none')}),
+                            override('Hard reds', ('mappings', [{'type': 'value', 'options': {'': {'text': ' ', 'index': 0}}}])),
+                            width('Customer', 160), width('Band', 90), width('Health', 130), width('Chance at renewal', 90),
+                            width('Renewal', 120), width('Renews in', 120), width('Revenue at risk', 120), width('Coverage', 80),
+                            width('Biggest drivers', 380),
+                            with_links('Customer', {'title': 'Show this customer below',
+                                                    'url': f"/d/{UID['risk_model']}?var-customer=${{__data.fields.account}}&${{__url_time_range}}"})]),
+        options={'cellHeight': 'sm'}, may_be_empty='nothing scored yet'))
+    p.append(panel(8, 'What costs this customer health', 'barchart', f"""
+        SELECT {title_sql} AS Feature, round(points, 1) AS `Health points lost`
+        FROM n360.v_risk_drivers WHERE {one} AND points > 0 ORDER BY points DESC""", 0, 21, 12, 11,
+        describe('For the customer chosen above: health points each feature costs (its share of the scorecard x its risk; '
+                 'they add up to 100 - health, before any hard-red cap).', 'n360.v_risk_drivers', 'Customer (one)',
+                 'the newest score'),
+        field=field_config(decimals=1, min=0, color={'mode': 'fixed', 'fixedColor': COLOUR['series']}),
+        options={'xField': 'Feature', 'orientation': 'horizontal', 'showValue': 'always', 'barWidth': 0.7,
+                 'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'}},
+        may_be_empty='no feature costs this customer health'))
+    p.append(panel(9, 'Every feature for this customer', 'table', f"""
+        SELECT {dim_sql} AS Dimension, {title_sql} AS Feature, value AS Value, risk AS Risk, points AS `Points lost`,
+               logodds AS `Push on the odds`
+        FROM n360.v_risk_drivers WHERE {one}
+        ORDER BY indexOf(['{"', '".join(dims)}'], dimension), points DESC""", 12, 21, 12, 11,
+        describe('Each feature for the chosen customer: its value, its risk (0 at the "good" anchor, 1 at the "bad" one; '
+                 'risk_model.json), health points lost, and its push on the log-odds of churn against an average '
+                 'customer (positive = riskier). "Not reported yet" = the source has nothing: it costs nothing and its '
+                 'weight moves to the rest of its dimension.', 'n360.v_risk_drivers', 'Customer (one)', 'the newest score'),
+        field=field_config([override('Value', ('decimals', 1)), override('Risk', ('decimals', 2), ('min', 0), ('max', 1),
+                            ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series']}),
+                            ('custom.cellOptions', {'type': 'gauge', 'mode': 'basic', 'valueDisplayMode': 'text'})),
+                            override('Points lost', ('decimals', 1)), override('Push on the odds', ('decimals', 2)),
+                            *[override(c, ('mappings', [empty_grey()])) for c in ('Value', 'Risk')],
+                            width('Dimension', 140), width('Feature', 250), width('Value', 70), width('Risk', 100),
+                            width('Points lost', 80)]),
+        options={'cellHeight': 'sm'}, may_be_empty='nothing scored yet'))
+    p.append(panel(10, 'Health over time', 'timeseries', f"""
+        SELECT toDateTime(s.as_of) AS time, a.display_name AS customer, s.health AS health
+        FROM n360.risk_scores AS s INNER JOIN n360.account AS a ON a.account = s.account
+        WHERE (s.as_of, s.scored_at) IN (SELECT as_of, max(scored_at) FROM n360.risk_scores GROUP BY as_of) AND s.{in_csm}
+        ORDER BY time""", 0, 32, 12, 10,
+        describe('Each customer\'s health on every scored date (one line per customer, shades of one colour; customers are '
+                 'not statuses). The dashed line is 50, the at-risk line.', 'n360.risk_scores', 'CSM', 'every scored date'),
+        fmt='timeseries',
+        field=field_config(min=0, max=100, decimals=0, displayName='${__field.labels.customer}',
+                           custom={'lineWidth': 2, 'spanNulls': False, **reference_line(cfg['bands']['watch'])['custom']},
+                           thresholds=reference_line(cfg['bands']['watch'])['thresholds'], **series_colours()),
+        options={'legend': {'displayMode': 'table', 'placement': 'right', 'showLegend': True, 'calcs': ['lastNotNull']},
+                 'tooltip': {'mode': 'multi', 'sort': 'asc'}}, may_be_empty='nothing scored yet'))
+    p[-1]['n360Reference'] = True
+    p[-1]['timeFrom'] = '210d'
+    p.append(panel(11, 'Dimensions for this customer', 'barchart', f"""
+        SELECT {dim_sql} AS Dimension, round(sum(points), 1) AS `Health points lost`
+        FROM n360.v_risk_drivers WHERE {one} GROUP BY dimension
+        ORDER BY indexOf(['{"', '".join(dims)}'], dimension)""", 12, 32, 12, 10,
+        describe('Health points the chosen customer loses in each dimension (weights in risk_model.json).',
+                 'n360.v_risk_drivers', 'Customer (one)', 'the newest score'),
+        field=field_config(decimals=1, min=0, color={'mode': 'fixed', 'fixedColor': COLOUR['series']}),
+        options={'xField': 'Dimension', 'orientation': 'horizontal', 'showValue': 'always', 'barWidth': 0.7,
+                 'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'}},
+        may_be_empty='nothing scored yet'))
+    p.append(panel(12, 'Backtest: how well each method ranked churn, out of time', 'table', """
+        SELECT method AS Method, JSONExtract(backtest, 'methods', method, 'auc', 'Nullable(Float64)') AS AUC,
+               JSONExtract(backtest, 'methods', method, 'top_precision', 'Nullable(Float64)') AS `Precision, top 10%`,
+               JSONExtract(backtest, 'methods', method, 'top_recall', 'Nullable(Float64)') AS `Recall, top 10%`,
+               JSONExtract(backtest, 'methods', method, 'brier', 'Nullable(Float64)') AS Brier
+        FROM n360.v_risk_model ARRAY JOIN JSONExtractKeys(backtest, 'methods') AS method""", 0, 42, 12, 8,
+        describe('Walk-forward backtest of the newest training run: each period scored by a model trained only on '
+                 'outcomes known before it. AUC 0.5 = chance, 1 = perfect; precision = share of the top 10% flagged '
+                 'that churned or downsold; recall = share of all churns and downsells caught in the top 10%; Brier = '
+                 'calibration error of a probability (lower is better).',
+                 'n360.v_risk_model (risk_model.py train)', 'none', 'the newest training run'),
+        field=field_config([*[override(c, ('decimals', 3)) for c in ('AUC', 'Precision, top 10%', 'Recall, top 10%', 'Brier')],
+                            *[override(c, ('mappings', [{'type': 'special', 'options': {'match': 'null', 'result': {
+                                'text': '—', 'color': COLOUR['grey'], 'index': 0}}}])) for c in ('AUC', 'Precision, top 10%', 'Recall, top 10%', 'Brier')],
+                            width('Method', 230)], noValue='Not enough history for a backtest yet (180 days of features and outcomes after them)'),
+        options={'cellHeight': 'sm'}, may_be_empty='not enough history for a backtest'))
+    p.append(panel(13, 'Calibration: predicted against observed', 'barchart', """
+        SELECT JSONExtractString(x, 'bin') AS `Predicted chance`, JSONExtractFloat(x, 'predicted') AS `Mean predicted`,
+               JSONExtractFloat(x, 'observed') AS Observed
+        FROM n360.v_risk_model ARRAY JOIN JSONExtractArrayRaw(backtest, 'reliability') AS x""", 12, 42, 12, 8,
+        describe('In the backtest, snapshots grouped by predicted chance: mean predicted beside the share that actually '
+                 'churned or downsold. Bars of equal height = a well-calibrated model.', 'n360.v_risk_model', 'none',
+                 'the newest training run'),
+        field=field_config([override('Mean predicted', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series_light']})),
+                            override('Observed', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series']}))],
+                           unit='percentunit', decimals=0, min=0),
+        options={'xField': 'Predicted chance', 'orientation': 'vertical', 'showValue': 'never', 'groupWidth': 0.7,
+                 'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True}},
+        may_be_empty='not enough history for a backtest'))
+    p.append(panel(14, 'Model weights against the expert prior', 'barchart', f"""
+        SELECT {titles('p.f')} AS Feature, p.w AS `Expert prior`,
+               if(m.kind = 'trained', JSONExtract(m.model, 'coef', p.f, 'Nullable(Float64)'), NULL) AS `Trained`
+        FROM (SELECT f, w FROM values('f String, w Float64', {prior_vals})) AS p
+        CROSS JOIN (SELECT any(kind) AS kind, any(model) AS model FROM n360.v_risk_model) AS m
+        ORDER BY p.w DESC""", 0, 50, 24, 10,
+        describe('Each feature\'s weight on the log-odds of churn: the expert prior (from the scorecard weights in '
+                 'risk_model.json) and, once trained, the weight learned from outcomes. Training is pulled toward the '
+                 'prior (ridge), so with few outcomes the two stay close; a feature the data says nothing about shrinks '
+                 'toward zero. Features that keep no history (Salesforce forecast category, open tickets) are scored but '
+                 'never trained on.', 'code/risk/risk_model.json, n360.v_risk_model', 'none', 'the newest training run'),
+        field=field_config([override('Expert prior', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series_light']})),
+                            override('Trained', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series']}))], decimals=2),
+        options={'xField': 'Feature', 'orientation': 'horizontal', 'showValue': 'never', 'groupWidth': 0.8, 'barWidth': 0.9,
+                 'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True}}))
+    v_customer = query_var('customer', 'Customer', 'SELECT account, display_name FROM n360.account ORDER BY display_name',
+                           multi=False, include_all=False)
+    return dashboard(UID['risk_model'], 'N360 · Risk model', p, [var_csm(), v_customer],
+                     [back_link(), back_link(('n360-risk', 'Risk'))], time={'from': 'now-210d', 'to': 'now'})
+
+
+DASHBOARDS = [overview, contracts, customer, health, risk, risk_model_dashboard, contract_line, va, forecast, anomalies, containment, pipeline,
               adoption, requests]
 
 

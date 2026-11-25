@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import build_dashboards as b  # noqa: E402
 
-V2_PAGES = {'n360-overview', 'n360-contracts', 'n360-customer', 'n360-health', 'n360-adoption', 'n360-requests', 'n360-risk'}
+V2_PAGES = {'n360-overview', 'n360-contracts', 'n360-customer', 'n360-health', 'n360-adoption', 'n360-requests', 'n360-risk', 'n360-risk-model'}
 
 
 def sample():

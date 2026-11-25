@@ -97,6 +97,13 @@ K=(python3 "$ROOT/code/risk_register.py" "${CONN[@]}" --by ci)
 "${K[@]}" close --id R-atlas --outcome saved --note "[SYNTHETIC] renewed at full volume"
 "${K[@]}" pulse --customer "Harbor Telecom" --level amber --note "[SYNTHETIC] budget review in Q1"
 "${K[@]}" pulse --customer "Northwind Outfitters" --level green
+# risk model (docs/21): unit and synthetic-history tests on files, then the N360 path: weekly features back to May,
+# train (falls back to the expert prior: too few outcomes), score every stored date
+python3 "$ROOT/code/risk/test_risk_model.py"
+M=(python3 "$ROOT/code/risk/risk_model.py" "${CONN[@]}")
+"${M[@]}" features --from 2026-05-01 --every 7 > /dev/null
+"${M[@]}" train > /dev/null
+"${M[@]}" score --as-of all > /dev/null
 python3 "$ROOT/code/test_views.py" "${PANEL_CONN[@]}"
 
 # Challenger forecast backtest (B21): writes n360.forecast_challenger; the forecast of record must not change
