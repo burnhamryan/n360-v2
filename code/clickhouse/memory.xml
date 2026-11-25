@@ -1,0 +1,8 @@
+<!-- N360: ClickHouse may use at most 60% of the machine's memory (mounted into config.d).
+     In Docker Desktop on a Mac, ClickHouse sees the whole Docker VM and by default allows itself 90% of it;
+     Grafana and the VM need the rest, so a heavy query got the server killed (exit 137) before ClickHouse's own
+     limit could refuse it. At 60%, a query that is too big fails with MEMORY_LIMIT_EXCEEDED and the server lives. -->
+<clickhouse>
+    <max_server_memory_usage_to_ram_ratio>0.6</max_server_memory_usage_to_ram_ratio>
+    <mark_cache_size>268435456</mark_cache_size>
+</clickhouse>

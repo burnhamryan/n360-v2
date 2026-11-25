@@ -21,6 +21,8 @@ services:
     volumes:
       - ch-data:/var/lib/clickhouse
       - ./init/grafana_user.sh:/docker-entrypoint-initdb.d/grafana_user.sh:ro
+      - ./clickhouse/memory.xml:/etc/clickhouse-server/config.d/n360_memory.xml:ro        # memory caps:
+      - ./clickhouse/query_limits.xml:/etc/clickhouse-server/users.d/n360_limits.xml:ro   # a big query fails, the server lives
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
 

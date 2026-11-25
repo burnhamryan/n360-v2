@@ -1,3 +1,14 @@
+# CHANGES · 25 Nov 2026 · ClickHouse memory caps
+
+ClickHouse was killed on a Mac (`Exited (137)`) when the Risk model dashboard ran its queries: in Docker Desktop it
+allowed itself 90% of the VM, leaving too little for Grafana and the VM. Now (`code/clickhouse/`, mounted by
+`docker-compose.yml`):
+- the server uses at most 60% of the machine's memory;
+- one query uses at most 2 GB, and big GROUP BY and ORDER BY spill to disk after 1 GB.
+
+A query that is too big now fails with "memory limit exceeded"; the server stays up. Tested: an oversized GROUP BY
+as the read-only Grafana user spilled to disk and finished. Pick it up with `docker compose up -d` from `code/`.
+
 # CHANGES · 26 Nov 2026 · Customer risk model
 
 **A customer risk model you can test, tune and run, on its own or inside N360** (`code/risk/`, `docs/21_RISK_MODEL.md`).

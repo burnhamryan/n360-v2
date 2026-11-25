@@ -79,6 +79,9 @@ N360_DROP=~/n360-pipeline/data N360_WORK=~/n360-work code/ops/nightly.sh
 - **Back up the history** (it cannot be rebuilt from exports), e.g. weekly:
   `N360_BACKUP=~/n360-backups code/ops/backup.sh`. The same backup moves the history to AWS later
   (`docs/12_AWS.md`, "Moving your laptop's history to AWS").
+- **Memory.** Give Docker Desktop 8 GB (Settings → Resources). ClickHouse is capped at 60% of that
+  (`code/clickhouse/`), so a query that is too big fails with "memory limit exceeded" instead of the server being
+  killed (`Exited (137)`). If ClickHouse shows `Exited`, run `docker compose up -d` from `code/`.
 - Stop: `docker compose stop` (data kept). Delete everything: `docker compose down -v`.
 - Alerts are off (`docs/11_ALERTS.md`). Anomaly thresholds: `n360.settings` in `code/schema.sql`.
 - This setup has been tested end to end on Linux Docker with synthetic data, not yet on a Mac or with real exports.
