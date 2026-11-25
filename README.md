@@ -52,6 +52,7 @@ Open http://localhost:3000, sign in as `admin` with `GRAFANA_ADMIN_PASSWORD`, an
 | You want to | Read |
 |---|---|
 | Run it on your Mac with real exports, every night | [docs/13_LAPTOP_POC.md](docs/13_LAPTOP_POC.md) |
+| Check what data is missing before trusting the risk model | `python3 code/readiness.py` ([docs/13](docs/13_LAPTOP_POC.md) section 6) |
 | Run it on AWS | [docs/12_AWS.md](docs/12_AWS.md) |
 | Hand the project to another Claude | [docs/14_WORK_CLAUDE_HANDOFF.md](docs/14_WORK_CLAUDE_HANDOFF.md), then [docs/07_WORKING_RULES.md](docs/07_WORKING_RULES.md) |
 | Know what a number means | [docs/03_METRICS.md](docs/03_METRICS.md) |
@@ -167,7 +168,7 @@ The full working rules are in [docs/07_WORKING_RULES.md](docs/07_WORKING_RULES.m
 
 | Doc | What it covers |
 |---|---|
-| [13 Laptop](docs/13_LAPTOP_POC.md) | Set up on a Mac, load every night, look |
+| [13 Laptop](docs/13_LAPTOP_POC.md) | Set up on a Mac, load every night, look; get the risk model running on real data |
 | [12 AWS](docs/12_AWS.md) | Create, load, Google sign-in, backups, upgrades |
 | [11 Alerts](docs/11_ALERTS.md) | Switching alerts on, recipients, timing |
 | [09 Chat](docs/09_CHAT.md) | Asking questions of the data through Grafana's MCP server |

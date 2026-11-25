@@ -1,3 +1,22 @@
+# CHANGES · 25 Nov 2026 · Readiness report and past renewal dates
+
+**`code/readiness.py`: is N360 ready to run the risk model?** A read-only report on every source the dashboards and
+the risk model read: the company export, Salesforce, what CSMs record, the feature store, outcomes and the model in
+use. Each line is READY, PARTIAL, MISSING or INFO, and it ends with a to-do list in order. It prints counts, dates
+and shares only; CI checks it prints no customer name. Steps to act on it: docs/13 section 6.
+
+**Past renewals can now be learned from.** A renewal date came only from contract lines, and the export keeps today's
+lines, so a renewal that happened last year had no date and its outcome could not be used. For a date no line
+covers, the date is now the close date of the account's next Salesforce renewal opportunity, open or closed. On the
+synthetic data this turns 0 judgeable past renewals into 3.
+
+**The Salesforce pull reads two years of activity, not one,** so "days since the last executive meeting" can be
+rebuilt for past dates.
+
+**The backtest report says when there are too few renewals to judge.**
+
+Tested: `code/ci.sh chdb`; the readiness report on an empty database, one night, and the full synthetic setup.
+
 # CHANGES · 25 Nov 2026 · Risk model fixes after two reviews
 
 Fixes to the reworked risk model (`code/risk/`), each with a test. Synthetic data only.

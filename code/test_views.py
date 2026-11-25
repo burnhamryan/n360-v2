@@ -286,6 +286,10 @@ def main():
         ren = q(fe._q(fe.RENEWAL, '2026-11-19').replace('n360.contract_line', lines))
         check('risk model: an account has one renewal date, its largest running line\'s (a small add-on ending first is not the renewal)',
               len(ren) == 1 and int(ren[0]['days_to_renewal']) == 223 and int(ren[0]['billed_lines']) == 2, ren)
+        sfr = {r['account']: int(r['sf_days_to_renewal']) for r in q(fe._q(fe.SF_RENEWAL, '2025-12-01'))}
+        check('risk model: a past date with no contract line takes its renewal date from Salesforce (Kestrel, 1 Dec 2025: '
+              'the renewal closed 28 Feb 2026 is 89 days away), so past renewals can be learned from',
+              sfr.get('Kestrel Travel') == 89 and sfr.get('Orchid Health') == 88, sfr)
         fl = q("SELECT account, value FROM n360.risk_features WHERE feature = 'open_churn_risks' AND as_of = "
                "(SELECT min(as_of) FROM n360.risk_features)")
         check('risk model: before the risk register was first used, "open churn risks" is not reported, never zero',
