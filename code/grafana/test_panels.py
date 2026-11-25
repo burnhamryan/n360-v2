@@ -7,6 +7,7 @@ query errors or a panel listed as must-have-rows returns none.
     python3 code/grafana/test_panels.py --user grafana --password ...             # server, as Grafana's user
 
 Panels without queries (notes) are skipped. A panel with "n360MayBeEmpty": "<reason>" may return no rows.
+One number, one value: panels carrying the same "n360Metric" (on any dashboard) must show the same number.
 Custom (fixed-choice) variables are tested with their default choice.
 Macros handled: ${var}, ${var:singlequote}, $var (variables expand to every value, as "All" does),
 $__dateFilter(col), $__timeFilter(col), $__fromTime, $__toTime, ${__from}, ${__to}.
@@ -41,6 +42,13 @@ def expand(sql, values, frm, to):
     return sql
 
 
+def shown(rows):
+    """The number a stat shows: the newest row's value (tiles), else the first number in the first row."""
+    if 'value' in rows[-1]:
+        return rows[-1]['value']
+    return next((v for v in rows[0].values() if isinstance(v, (int, float))), None)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--url', default='http://localhost:8123')
@@ -60,13 +68,15 @@ def main():
     frm = ch.rows(f"SELECT toString(toDate('{to}') - {a.days}) AS d")[0]['d']
 
     failed = 0
+    metrics = {}          # metric -> [(dashboard, panel title, value shown)]
     for path in sorted(glob.glob(os.path.join(a.dashboards, '*.json'))):
         dash = json.load(open(path))
         print(f"{dash['uid']}  ({frm} to {to})")
         values = {}
         for v in dash.get('templating', {}).get('list', []):
-            if v.get('type') == 'custom':      # fixed choices: test with the default (current) choice
-                values[v['name']] = [str(v.get('current', {}).get('value') or v['options'][0]['value'])]
+            if v.get('type') == 'custom':      # fixed choices: test with the default (current) choice; All = every choice
+                cur = v.get('current', {}).get('value') or v['options'][0]['value']
+                values[v['name']] = [o['value'] for o in v['options']] if cur == '$__all' else [str(cur)]
                 print(f"  var  {v['name']:28s} OK   custom, testing '{values[v['name']][0]}'")
                 continue
             if v.get('type') != 'query':
@@ -91,9 +101,15 @@ def main():
                     print(f"  {p['id']:>3}  {p['title'][:28]:28s} {'OK  ' if ok else 'FAIL'} {len(rows)} rows{note}")
                     if not ok:
                         failed += 1
+                    if p.get('n360Metric') and rows:
+                        metrics.setdefault(p['n360Metric'], []).append((dash['uid'], p['title'], shown(rows)))
                 except Exception as e:  # noqa: BLE001
                     failed += 1
                     print(f"  {p['id']:>3}  {p['title'][:28]:28s} FAIL {str(e)[:300]}")
+    for m, seen in sorted(metrics.items()):
+        same = len({v for _, _, v in seen}) == 1
+        print(f"  metric {m!r}: {'OK  ' if same else 'FAIL'} " + '; '.join(f'{u} "{t}" = {v}' for u, t, v in seen))
+        failed += 0 if same else 1
     print('ALL PANEL QUERIES OK' if not failed else f'{failed} FAILED')
     return 1 if failed else 0
 

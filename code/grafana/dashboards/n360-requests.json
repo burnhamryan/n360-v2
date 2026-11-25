@@ -37,17 +37,17 @@
   "panels": [
     {
       "id": 1,
-      "title": "Data through",
+      "title": "In one sentence",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Last day included in this load (the nightly window ends at 23:59 UTC that day).\n\n**Source:** n360.runs, written by load.py only after every data check passes  \n**Filter:** loaded runs only; the latest  \n**Window:** the latest load",
+      "description": "Support tickets opened in the 90 days to the data-through day, those still open, how many customers raised them, and the ask wanted by the most customers. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket, n360.v_top_asks  \n**Filter:** Customer  \n**Window:** the 90 days to the data-through day",
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 4,
+        "w": 18,
         "h": 3
       },
       "targets": [
@@ -59,19 +59,17 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT formatDateTime(window_end, '%e %b %Y') AS data_through\n        FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
+          "rawSql": "WITH (SELECT argMax(concat(ask, ' (', toString(customers), ' customers)'), tuple(customers, tickets)) FROM n360.v_top_asks) AS top\n        SELECT if(count() = 0, NULL, concat(concat(toString(countIf(opened > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 90)), if(countIf(opened > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 90) = 1, ' ticket', ' tickets')), ' in 90 days \u00b7 ',\n                      toString(countIf(status = 'open')), ' open \u00b7 ',\n                      concat(toString(uniqExactIf(account, opened > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 90)), if(uniqExactIf(account, opened > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 90) = 1, ' customer', ' customers')), ' raising them',\n                      if(top = '', '', concat(' \u00b7 most asked: ', top)))) AS sentence\n        FROM n360.ps_ticket WHERE account IN (${account:singlequote})",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet",
-          "links": [
-            {
-              "title": "Pipeline health",
-              "url": "/d/n360-pipeline?${__url_time_range}"
-            }
-          ]
+          "noValue": "Nothing loaded yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
         },
         "overrides": []
       },
@@ -83,129 +81,23 @@
           "fields": "/.*/"
         },
         "textMode": "value",
-        "colorMode": "none"
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "valueSize": 17
+        }
       }
     },
     {
       "id": 2,
-      "title": "Last night",
+      "title": "Data",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Result of the latest nightly run. A stopped night leaves the previous good night on screen.\n\n**Source:** n360.runs (load.py writes one row per night, loaded or not)  \n**Filter:** none  \n**Window:** the latest run",
-      "gridPos": {
-        "x": 4,
-        "y": 0,
-        "w": 4,
-        "h": 3
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "n360-clickhouse"
-          },
-          "editorType": "sql",
-          "queryType": "table",
-          "format": 1,
-          "rawSql": "SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "Not reported yet",
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "loaded": {
-                  "text": "Loaded",
-                  "color": "green",
-                  "index": 0
-                },
-                "failed_checks": {
-                  "text": "Stopped: data checks failed",
-                  "color": "red",
-                  "index": 1
-                }
-              }
-            }
-          ]
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "/.*/"
-        },
-        "textMode": "value",
-        "colorMode": "background"
-      }
-    },
-    {
-      "id": 3,
-      "title": "Tickets",
-      "type": "stat",
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "n360-clickhouse"
-      },
-      "description": "Support tickets opened in the time range. Tags (product area, ask) are set by hand, never automatically. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** Customer  \n**Window:** dashboard time range (opened)",
-      "gridPos": {
-        "x": 8,
-        "y": 0,
-        "w": 10,
-        "h": 3
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "n360-clickhouse"
-          },
-          "editorType": "sql",
-          "queryType": "table",
-          "format": 1,
-          "rawSql": "SELECT count() AS Opened, countIf(status = 'open') AS `Still open`, countIf(product_area IS NULL) AS `Not tagged yet`\n        FROM n360.ps_ticket WHERE account IN (${account:singlequote}) AND $__dateFilter(opened)",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "Not reported yet"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "/.*/"
-        },
-        "textMode": "value_and_name",
-        "colorMode": "none",
-        "text": {
-          "titleSize": 12,
-          "valueSize": 26
-        }
-      }
-    },
-    {
-      "id": 4,
-      "title": "Top asks",
-      "type": "stat",
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "n360-clickhouse"
-      },
-      "description": "Asks wanted by several customers (2 or more, proposed).\n\n**Source:** n360.v_top_asks  \n**Filter:** none  \n**Window:** all tickets",
+      "description": "The last day of usage in this load, and the day it was loaded. Amber when the data is more than 2 days old (n360.settings stamp_stale_days): the numbers are the last good night's. Click for Pipeline health.\n\n**Source:** n360.v_freshness (n360.runs: loaded runs only)  \n**Filter:** none  \n**Window:** the latest load",
       "gridPos": {
         "x": 18,
         "y": 0,
@@ -221,13 +113,35 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT count() AS asks FROM n360.v_top_asks",
+          "rawSql": "SELECT concat(stamp, if(stale, concat(' \u00b7 ', toString(days_old), ' days old'), '')) AS stamp FROM n360.v_freshness",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet"
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": ".* days old$",
+                "result": {
+                  "color": "#F0C25A",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline"
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
         },
         "overrides": []
       },
@@ -235,25 +149,313 @@
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
-          ]
+          ],
+          "fields": "/.*/"
         },
-        "colorMode": "none"
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 13
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Tickets",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Tickets opened in the 90 days to the data-through day. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** Customer  \n**Window:** the last 90 days",
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if((SELECT count() FROM n360.ps_ticket) = 0, NULL, countIf(opened > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 90)) AS `opened in 90 days`\n        FROM n360.ps_ticket WHERE account IN (${account:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Open",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Tickets still open, whenever opened. The v2 tile marks P1; priority is not in the export yet. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** Customer  \n**Window:** all tickets",
+      "gridPos": {
+        "x": 6,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if((SELECT count() FROM n360.ps_ticket) = 0, NULL, countIf(status = 'open')) AS `priority not exported yet`\n        FROM n360.ps_ticket WHERE account IN (${account:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
       }
     },
     {
       "id": 5,
+      "title": "Customers raising them",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Customers with a ticket opened in the last 90 days. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** Customer  \n**Window:** the last 90 days",
+      "gridPos": {
+        "x": 12,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if((SELECT count() FROM n360.ps_ticket) = 0, NULL, uniqExactIf(account, opened > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 90)) AS `in 90 days`\n        FROM n360.ps_ticket WHERE account IN (${account:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Asks from several customers",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Asks tagged on tickets from 2 or more customers (n360.settings asks_several_customers; the v2 spec says 3 or more: open decision). Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.v_top_asks  \n**Filter:** none (every customer)  \n**Window:** all tickets",
+      "gridPos": {
+        "x": 18,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if((SELECT count() FROM n360.ps_ticket) = 0, NULL, count()) AS `2 or more customers (proposed)`\n        FROM n360.v_top_asks",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Asks, by number of customers",
+      "type": "barchart",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Each ask wanted by 2 or more customers, ranked by how many customers want it; open tickets are noted after the ask. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.v_top_asks, n360.ps_ticket  \n**Filter:** none (every customer)  \n**Window:** all tickets",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(t.ask, if(o.n > 0, concat('  (', toString(o.n), ' open)'), '')) AS Ask, t.customers AS Customers\n        FROM n360.v_top_asks AS t\n        LEFT JOIN (SELECT ask, countIf(status = 'open') AS n FROM n360.ps_ticket WHERE ask IS NOT NULL GROUP BY ask) AS o\n               ON o.ask = t.ask\n        ORDER BY Customers DESC, t.tickets DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "decimals": 0,
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#7F9CC0"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "xField": "Ask",
+        "orientation": "horizontal",
+        "showValue": "always",
+        "barWidth": 0.7,
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "n360MayBeEmpty": "no shared ask"
+    },
+    {
+      "id": 8,
       "title": "Tickets by product area",
       "type": "barchart",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Tickets opened in the time range by product area. \"Not tagged yet\" is a real bucket, not a guess. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** Customer  \n**Window:** dashboard time range (opened)",
+      "description": "Tickets opened in the time range by product area. \"Not tagged yet\" is a real bucket, never a guess. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** Customer  \n**Window:** dashboard time range (opened)",
       "gridPos": {
-        "x": 0,
-        "y": 3,
+        "x": 12,
+        "y": 8,
         "w": 12,
-        "h": 8
+        "h": 9
       },
       "targets": [
         {
@@ -272,9 +474,10 @@
         "defaults": {
           "noValue": "Not reported yet",
           "decimals": 0,
+          "min": 0,
           "color": {
             "mode": "fixed",
-            "fixedColor": "blue"
+            "fixedColor": "#7F9CC0"
           }
         },
         "overrides": []
@@ -282,7 +485,8 @@
       "options": {
         "xField": "Area",
         "orientation": "horizontal",
-        "showValue": "auto",
+        "showValue": "always",
+        "barWidth": 0.7,
         "legend": {
           "showLegend": false,
           "displayMode": "list",
@@ -292,93 +496,19 @@
       "n360MayBeEmpty": "no tickets in the range"
     },
     {
-      "id": 6,
-      "title": "Top asks: several customers wanting the same thing",
-      "type": "table",
+      "id": 9,
+      "title": "Tickets opened per week, last 26 weeks",
+      "type": "timeseries",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Asks tagged on tickets from 2 or more customers (proposed). Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.v_top_asks  \n**Filter:** none  \n**Window:** all tickets",
-      "gridPos": {
-        "x": 12,
-        "y": 3,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "grafana-clickhouse-datasource",
-            "uid": "n360-clickhouse"
-          },
-          "editorType": "sql",
-          "queryType": "table",
-          "format": 1,
-          "rawSql": "SELECT t.ask AS Ask, t.customers AS Customers, t.tickets AS Tickets,\n               arrayStringConcat(t.account_list, ', ') AS Which, t.last_asked AS `Last asked`\n        FROM n360.v_top_asks AS t ORDER BY Customers DESC, Tickets DESC",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "No ask shared by several customers"
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Ask"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 220
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Customers"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Tickets"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 70
-              }
-            ]
-          }
-        ]
-      },
-      "options": {},
-      "n360MayBeEmpty": "no shared ask"
-    },
-    {
-      "id": 7,
-      "title": "Tickets by customer",
-      "type": "barchart",
-      "datasource": {
-        "type": "grafana-clickhouse-datasource",
-        "uid": "n360-clickhouse"
-      },
-      "description": "Tickets opened in the time range per customer. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** Customer  \n**Window:** dashboard time range (opened)",
+      "description": "Tickets opened per week. The v2 page also shows tickets closed per week; the export has no closed date yet. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** Customer  \n**Window:** the 26 weeks to the data-through day",
       "gridPos": {
         "x": 0,
-        "y": 11,
-        "w": 12,
-        "h": 8
+        "y": 17,
+        "w": 24,
+        "h": 7
       },
       "targets": [
         {
@@ -387,9 +517,9 @@
             "uid": "n360-clickhouse"
           },
           "editorType": "sql",
-          "queryType": "table",
-          "format": 1,
-          "rawSql": "SELECT ac.display_name AS Customer, count() AS Tickets\n        FROM n360.ps_ticket AS t INNER JOIN n360.account AS ac ON ac.account = t.account\n        WHERE t.account IN (${account:singlequote}) AND $__dateFilter(t.opened) GROUP BY Customer ORDER BY Tickets DESC",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT toDateTime(toMonday(opened)) AS time, count() AS Opened\n        FROM n360.ps_ticket WHERE account IN (${account:singlequote}) AND opened > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 182 GROUP BY time ORDER BY time",
           "refId": "A"
         }
       ],
@@ -397,39 +527,44 @@
         "defaults": {
           "noValue": "Not reported yet",
           "decimals": 0,
+          "min": 0,
           "color": {
             "mode": "fixed",
-            "fixedColor": "blue"
+            "fixedColor": "#7F9CC0"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 85,
+            "lineWidth": 1,
+            "barAlignment": 1
           }
         },
         "overrides": []
       },
       "options": {
-        "xField": "Customer",
-        "orientation": "horizontal",
-        "showValue": "auto",
         "legend": {
           "showLegend": false,
           "displayMode": "list",
           "placement": "bottom"
         }
       },
-      "n360MayBeEmpty": "no tickets in the range"
+      "n360MayBeEmpty": "no tickets in 26 weeks",
+      "timeFrom": "200d"
     },
     {
-      "id": 8,
-      "title": "Not tagged yet",
+      "id": 10,
+      "title": "Every ticket",
       "type": "table",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Tickets with no product area yet. They are tagged by hand, never automatically. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** Customer; product area empty  \n**Window:** all tickets",
+      "description": "Every ticket, open first then newest. Area and ask are tagged by hand (\"Not tagged yet\" until then). Filter a column from its header; export with the panel menu (Inspect > Data). Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.ps_ticket  \n**Filter:** Customer  \n**Window:** all tickets",
       "gridPos": {
-        "x": 12,
-        "y": 11,
-        "w": 12,
-        "h": 8
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 12
       },
       "targets": [
         {
@@ -440,15 +575,104 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT t.ticket_id AS Ticket, ac.display_name AS Customer, concat(toString(toDayOfMonth(t.opened)), ' ', formatDateTime(t.opened, '%b %Y')) AS Opened, t.title AS Title,\n               t.status AS Status\n        FROM n360.ps_ticket AS t INNER JOIN n360.account AS ac ON ac.account = t.account\n        WHERE t.account IN (${account:singlequote}) AND t.product_area IS NULL ORDER BY t.opened",
+          "rawSql": "SELECT t.ticket_id AS Ticket, ac.display_name AS Customer, concat(toString(toDayOfMonth(t.opened)), ' ', formatDateTime(t.opened, '%b %Y')) AS Opened, t.title AS Title,\n               t.product_area AS Area, t.ask AS Ask, t.status AS Status, t.account AS account\n        FROM n360.ps_ticket AS t INNER JOIN n360.account AS ac ON ac.account = t.account\n        WHERE t.account IN (${account:singlequote}) ORDER BY t.status = 'open' DESC, t.opened DESC",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Every ticket is tagged"
+          "noValue": "No tickets",
+          "custom": {
+            "filterable": true
+          }
         },
         "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "account"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Area"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not tagged yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Ask"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not tagged yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
           {
             "matcher": {
               "id": "byName",
@@ -469,7 +693,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 150
+                "value": 160
               }
             ]
           },
@@ -481,7 +705,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 100
+                "value": 110
               }
             ]
           },
@@ -493,20 +717,39 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 70
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customer"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open customer",
+                    "url": "/d/n360-customer?var-account=${__data.fields.account}&${__url_time_range}"
+                  }
+                ]
               }
             ]
           }
         ]
       },
-      "options": {},
-      "n360MayBeEmpty": "every ticket tagged"
+      "options": {
+        "cellHeight": "sm"
+      },
+      "n360MayBeEmpty": "no tickets"
     }
   ],
   "links": [
     {
       "type": "link",
-      "title": "Back to Portfolio overview",
+      "title": "Back to Overview",
       "url": "/d/n360-overview",
       "icon": "dashboard",
       "keepTime": true,

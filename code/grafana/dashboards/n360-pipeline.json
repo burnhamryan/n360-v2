@@ -17,6 +17,132 @@
   },
   "panels": [
     {
+      "id": 12,
+      "title": "In one sentence",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "The latest nightly run, nights loaded of the last 14, and sources 2 or more days behind.\n\n**Source:** n360.runs, n360.v_source_freshness  \n**Filter:** none  \n**Window:** the last 14 nights",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 18,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat('Last night ', if(argMax(toString(status), (loaded_at, data_date)) = 'loaded', 'loaded',\n                                         'was stopped by a data check (the previous good night stays on screen)'),\n                      ' \u00b7 ', toString((SELECT countIf(s = 'loaded') FROM (SELECT data_date, argMax(toString(status), loaded_at) AS s\n                                       FROM n360.runs GROUP BY data_date) WHERE data_date > (SELECT max(data_date) FROM n360.runs) - 14)),\n                      ' of the last 14 nights loaded \u00b7 ',\n                      concat(toString((SELECT countIf(status != 'green') FROM n360.v_source_freshness)), if((SELECT countIf(status != 'green') FROM n360.v_source_freshness) = 1, ' source', ' sources')), ' behind') AS sentence\n        FROM n360.runs",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Nothing loaded yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "valueSize": 17
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "Data",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "The last day of usage in this load, and the day it was loaded. Amber when the data is more than 2 days old (n360.settings stamp_stale_days): the numbers are the last good night's. Click for Pipeline health.\n\n**Source:** n360.v_freshness (n360.runs: loaded runs only)  \n**Filter:** none  \n**Window:** the latest load",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(stamp, if(stale, concat(' \u00b7 ', toString(days_old), ' days old'), '')) AS stamp FROM n360.v_freshness",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": ".* days old$",
+                "result": {
+                  "color": "#F0C25A",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline"
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 13
+        }
+      }
+    },
+    {
       "id": 1,
       "title": "Data through",
       "type": "stat",
@@ -27,7 +153,7 @@
       "description": "Last day included in this load (the nightly window ends at 23:59 UTC that day).\n\n**Source:** n360.runs, written by load.py only after every data check passes  \n**Filter:** loaded runs only; the latest  \n**Window:** the latest load",
       "gridPos": {
         "x": 0,
-        "y": 0,
+        "y": 3,
         "w": 4,
         "h": 3
       },
@@ -72,8 +198,8 @@
       "description": "Result of the latest nightly run. A stopped night leaves the previous good night on screen.\n\n**Source:** n360.runs (load.py writes one row per night, loaded or not)  \n**Filter:** none  \n**Window:** the latest run",
       "gridPos": {
         "x": 4,
-        "y": 0,
-        "w": 4,
+        "y": 3,
+        "w": 5,
         "h": 3
       },
       "targets": [
@@ -98,12 +224,12 @@
               "options": {
                 "loaded": {
                   "text": "Loaded",
-                  "color": "green",
+                  "color": "#76C893",
                   "index": 0
                 },
                 "failed_checks": {
                   "text": "Stopped: data checks failed",
-                  "color": "red",
+                  "color": "#F0C25A",
                   "index": 1
                 }
               }
@@ -133,8 +259,8 @@
       },
       "description": "Nights whose latest attempt loaded, of the last 14 (by data date).\n\n**Source:** n360.runs  \n**Filter:** none  \n**Window:** the 14 nights to the latest run",
       "gridPos": {
-        "x": 8,
-        "y": 0,
+        "x": 9,
+        "y": 3,
         "w": 5,
         "h": 3
       },
@@ -176,8 +302,8 @@
       },
       "description": "Data checks the latest run passed, of the 8 in code/checks.sql. Any failure stops the load.\n\n**Source:** n360.runs, code/checks.sql  \n**Filter:** none  \n**Window:** the latest run",
       "gridPos": {
-        "x": 13,
-        "y": 0,
+        "x": 14,
+        "y": 3,
         "w": 5,
         "h": 3
       },
@@ -221,9 +347,9 @@
       },
       "description": "Sources whose last day is 2 or more days behind the data-through day (proposed thresholds, in n360.v_source_freshness).\n\n**Source:** n360.v_source_freshness  \n**Filter:** none  \n**Window:** the latest load",
       "gridPos": {
-        "x": 18,
-        "y": 0,
-        "w": 6,
+        "x": 19,
+        "y": 3,
+        "w": 5,
         "h": 3
       },
       "targets": [
@@ -258,7 +384,7 @@
                 "from": 1,
                 "to": 1000000000000000.0,
                 "result": {
-                  "color": "red",
+                  "color": "#F0C25A",
                   "index": 1
                 }
               }
@@ -287,7 +413,7 @@
       "description": "One block per night (by data date): green loaded, red stopped by a data check (the previous night stayed on screen), grey no run. A run that errored before logging (loader exit 2) is not recorded in n360.runs and shows as no run.\n\n**Source:** n360.runs  \n**Filter:** none  \n**Window:** the 14 nights to the latest run",
       "gridPos": {
         "x": 0,
-        "y": 3,
+        "y": 6,
         "w": 24,
         "h": 4
       },
@@ -313,17 +439,17 @@
               "options": {
                 "1": {
                   "text": "Loaded",
-                  "color": "green",
+                  "color": "#76C893",
                   "index": 0
                 },
                 "2": {
                   "text": "Stopped: data checks failed",
-                  "color": "red",
+                  "color": "#F0C25A",
                   "index": 1
                 },
                 "0": {
                   "text": "No run",
-                  "color": "#8e8e8e",
+                  "color": "#B4B4B4",
                   "index": 2
                 }
               }
@@ -331,7 +457,7 @@
           ],
           "color": {
             "mode": "fixed",
-            "fixedColor": "#8e8e8e"
+            "fixedColor": "#B4B4B4"
           }
         },
         "overrides": []
@@ -358,7 +484,7 @@
       "description": "Runs stopped by a data check, with the checks that failed (definitions in code/checks.sql and docs/02_DATA_CONTRACT.md).\n\n**Source:** n360.runs  \n**Filter:** stopped runs  \n**Window:** the latest 20",
       "gridPos": {
         "x": 0,
-        "y": 7,
+        "y": 10,
         "w": 12,
         "h": 6
       },
@@ -395,7 +521,7 @@
       "description": "Each source's last day against the data-through day. Amber 2 days behind, red 3 (proposed, in n360.v_source_freshness).\n\n**Source:** n360.source via n360.v_source_freshness  \n**Filter:** none  \n**Window:** the latest load",
       "gridPos": {
         "x": 12,
-        "y": 7,
+        "y": 10,
         "w": 12,
         "h": 6
       },
@@ -431,17 +557,17 @@
                     "options": {
                       "green": {
                         "text": "On time",
-                        "color": "green",
+                        "color": "#76C893",
                         "index": 0
                       },
                       "amber": {
                         "text": "Behind",
-                        "color": "orange",
+                        "color": "#F0C25A",
                         "index": 1
                       },
                       "red": {
                         "text": "Late",
-                        "color": "red",
+                        "color": "#D9695F",
                         "index": 2
                       }
                     }
@@ -452,7 +578,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -463,6 +589,13 @@
                 "id": "custom.cellOptions",
                 "value": {
                   "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
                 }
               }
             ]
@@ -530,7 +663,7 @@
       "description": "How far each source's last day was behind the data-through day on every loaded night (0 = on time). Amber from 2, red from 3 (n360.settings).\n\n**Source:** n360.source_freshness (append-only, one row per source per night)  \n**Filter:** none  \n**Window:** dashboard time range, by night",
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 24,
         "w": 24,
         "h": 7
       },
@@ -556,7 +689,12 @@
           "custom": {
             "drawStyle": "line",
             "lineWidth": 2,
-            "spanNulls": false
+            "spanNulls": false,
+            "axisSoftMax": 4
+          },
+          "color": {
+            "mode": "shades",
+            "fixedColor": "#7F9CC0"
           }
         },
         "overrides": []
@@ -575,7 +713,7 @@
       "description": "How many contract lines are measured each way. Engaged = no contract rule applies (billable unit unconfirmed).\n\n**Source:** n360.contract_line  \n**Filter:** none  \n**Window:** the latest load",
       "gridPos": {
         "x": 0,
-        "y": 13,
+        "y": 16,
         "w": 12,
         "h": 8
       },
@@ -611,7 +749,7 @@
       "description": "Contract rules that are pending or blocked, so their lines are measured on engaged for now.\n\n**Source:** n360.rule  \n**Filter:** rules not active, or measuring no line  \n**Window:** the latest load",
       "gridPos": {
         "x": 12,
-        "y": 13,
+        "y": 16,
         "w": 12,
         "h": 8
       },
@@ -624,7 +762,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT label AS Rule, status AS Status, counts_plain AS `What it would count`\n        FROM n360.rule WHERE status != 'active' OR empty(lines_measured)",
+          "rawSql": "SELECT label AS Rule, multiIf(status = 'pending_probe', 'Pending: probe not run yet', status = 'blocked', 'Blocked',\n                                      status = 'active', 'Live but measuring no line', status) AS Status,\n               counts_plain AS `What it would count`\n        FROM n360.rule WHERE status != 'active' OR empty(lines_measured)",
           "refId": "A"
         }
       ],
@@ -641,7 +779,7 @@
   "links": [
     {
       "type": "link",
-      "title": "Back to Portfolio overview",
+      "title": "Back to Overview",
       "url": "/d/n360-overview",
       "icon": "dashboard",
       "keepTime": true,

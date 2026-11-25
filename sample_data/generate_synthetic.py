@@ -25,6 +25,10 @@ Edge cases deliberately present (and what each one tests):
   Kestrel Travel      a line running ahead of its term but under billed (pace amber: gap > 10 points)
   Orchid Health       anomaly v2 cases on one VA and line: containment drop and measure gap over the last 2 weeks,
                       and a one-day surge 2 days before the last day that pulls the crossing date > 14 days earlier
+  Maple Clinics       contract states: Chat too early to tell (started 20 days before the last day), Email billed not
+                      recorded (blank on the sheet, no pool), SMS unmapped (no VA yet), Voice under review (rule pending)
+  Willow Energy       renewal risk: under half of billed used with under 120 days left; its VA's conversations fall
+                      by 45% over the last 3 weeks (needs attention: 1,000+ conversations down 25%+)
 A same-day spike hits Northwind, Bluebird and Harbor 6 days before the last day (cross-account event).
 Phase 2 tables (proposed design) are generated too; see phase2() for what is planted.
 
@@ -120,6 +124,9 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
                               counts='Counts: the AI resolves or substantively handles the contact.'),
         'bluebird-sow-3c': dict(kind='contained', status='pending_probe', label='Contained conversations (Bluebird SOW, section 3C)',
                                 contract_text='[SYNTHETIC] Contained conversations only.', counts='Not live: probe pending.'),
+        'maple-sow-5a': dict(kind='meaningful_engagement', status='pending_probe', label='Resolved calls (Maple SOW, section 5A)',
+                             contract_text='[SYNTHETIC] Calls the AI resolves count toward volume.',
+                             counts='Not live: probe pending. Measured on engaged until it is.'),
     }
     rule_hash = {k: uuid.uuid5(uuid.NAMESPACE_URL, k).hex[:12] for k in rules}
 
@@ -144,6 +151,18 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
         ('Kestrel Travel', [dict(ch='Chat', start='2026-03-01', months=12, billed=125000, vas=[('Kestrel Chat', 'Chat', 540, {})])]),
         ('Orchid Health', [dict(ch='Chat', start='2026-03-15', months=12, billed=ORCHID_BILLED, rule='orchid-sow-4b', ratio_drop=True,
                                 vas=[('Orchid Chat', 'Chat', 500, dict(handoff_up=True, pace_jump=True))])]),
+        # contract states (dashboard review, 25 Nov 2026): too early to tell (started 20 days before the last day),
+        # billed not recorded (blank on the sheet, no pool), unmapped (no VA on the line yet), under review (its
+        # contract rule is pending, so measured on engaged for now)
+        ('Maple Clinics', [dict(ch='Chat', start=(anchor - dt.timedelta(20)).isoformat(), months=12, billed=50000,
+                                vas=[('Maple Chat', 'Chat', 140, {})]),
+                           dict(ch='Email', start='2026-02-01', months=12, billed=None, vas=[('Maple Email', 'Email', 60, {})]),
+                           dict(ch='SMS', start='2026-02-01', months=12, billed=30000, vas=[]),
+                           dict(ch='Voice', start='2026-02-01', months=12, billed=90000, rule='maple-sow-5a', rule_pending=True,
+                                vas=[('Maple Voice', 'Voice', 110, {})])]),
+        # renewal risk: under half used with under 120 days left
+        # ... and a busy VA whose conversations fell by a third over the last 3 weeks (needs attention)
+        ('Willow Energy', [dict(ch='Chat', start='2026-01-15', months=12, billed=190000, vas=[('Willow Chat', 'Chat', 150, dict(decline=True))])]),
     ]
     pool_def = dict(account='Bluebird Air', pool=0, name='Bluebird Air: 3 lines, pooled entitlement', billed=3000000, start='2026-01-29')
 
@@ -168,6 +187,8 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
                         c = 0
                     if ex.get('spike') and d == spike_day:
                         c = int(c * 2.6)
+                    if ex.get('decline') and d > anchor - dt.timedelta(21):
+                        c = int(c * 0.55)                             # needs attention: conversations down 25%+
                     if ex.get('pace_jump') and d == anchor - dt.timedelta(2):
                         c = c * 14                                    # anomaly v2: crossing date jumps earlier
                     if multi and (last - d).days < len(SETTLING):
@@ -206,7 +227,7 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
             lk = f"{sc}|{L['ch']}|{sheet(L['start_d'])}"
             skey = f'{acct}|{idx}'
             rule = L.get('rule')
-            kind = rules[rule]['kind'] if rule else None
+            kind = rules[rule]['kind'] if rule and not L.get('rule_pending') else None   # a pending rule measures on engaged
             line_days = [d for d in days(L['start_d'], last)]
             conv = {d: 0 for d in line_days}; eng = dict(conv)
             for (vname, vch, base, ex) in L['vas']:
@@ -228,6 +249,8 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
                 measure, used, last30 = 'not implemented', None, None
             elif L.get('unmeasured'):
                 measure, used, last30 = 'not measurable', None, None
+            elif not L['vas']:                                      # unmapped: no VA on the line, nothing read
+                measure, used, last30 = 'engaged', None, None
             else:
                 measure = ('conversations (contract rule)' if kind == 'all_conversations' else 'billable (contract rule)' if kind else 'engaged')
                 used = sum(meas.values()); last30 = sum(v for d, v in meas.items() if d > last - dt.timedelta(30))
@@ -296,7 +319,8 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
     for rid, r in rules.items():
         T['rule'].append(dict(rule_id=rid, rule_hash=rule_hash[rid], kind=r['kind'], status=r['status'], label=r['label'],
                               contract_text=r['contract_text'], source_document='[SYNTHETIC] contract.pdf', counts_plain=r['counts'],
-                              decisions='[SYNTHETIC]', lines_measured=sorted(x['line_key'] for x in T['contract_line'] if x['rule_id'] == rid),
+                              decisions='[SYNTHETIC]', lines_measured=sorted(x['line_key'] for x in T['contract_line']
+                                                                if x['rule_id'] == rid and r['status'] == 'active'),
                               run_id=run_id))
     for sid, desc in [('consumption_days', 'Daily conversations and engaged per VA and per line'),
                       ('containment_days', 'Daily handoffs per VA'), ('consumption_rules', 'Contract-rule counts per line per day')]:

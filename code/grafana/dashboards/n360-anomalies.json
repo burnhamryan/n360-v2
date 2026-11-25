@@ -84,18 +84,18 @@
   },
   "panels": [
     {
-      "id": 1,
-      "title": "Data through",
+      "id": 10,
+      "title": "In one sentence",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Last day included in this load (the nightly window ends at 23:59 UTC that day).\n\n**Source:** n360.runs, written by load.py only after every data check passes  \n**Filter:** loaded runs only; the latest  \n**Window:** the latest load",
+      "description": "Flags on the 7 newest settled days (the newest 3 days are provisional and never alert), and days when 3 or more customers were flagged in the same direction.\n\n**Source:** n360.v_va_day_anomaly, n360.v_anomaly_events  \n**Filter:** Customer  \n**Window:** the 7 newest settled days; 30 days for events",
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 4,
+        "w": 18,
         "h": 3
       },
       "targets": [
@@ -107,19 +107,17 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT formatDateTime(window_end, '%e %b %Y') AS data_through\n        FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
+          "rawSql": "SELECT concat(concat(toString(countIf(kind IN ('drop', 'went silent') AND NOT provisional AND day >= (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 9)), if(countIf(kind IN ('drop', 'went silent') AND NOT provisional AND day >= (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 9) = 1, ' drop or silence', ' drops or silences')),\n                      ' and ', concat(toString(countIf(kind = 'spike' AND NOT provisional AND day >= (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 9)), if(countIf(kind = 'spike' AND NOT provisional AND day >= (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 9) = 1, ' spike', ' spikes')),\n                      ' on the 7 newest settled days \u00b7 ', toString(countIf(kind != 'normal' AND provisional)), ' provisional \u00b7 ',\n                      toString((SELECT count() FROM n360.v_anomaly_events WHERE day > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 30)),\n                      ' cross-account ', if((SELECT count() FROM n360.v_anomaly_events WHERE day > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 30) = 1, 'event', 'events'),\n                      ' in 30 days') AS sentence\n        FROM n360.v_va_day_anomaly WHERE account IN (${account:singlequote})",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet",
-          "links": [
-            {
-              "title": "Pipeline health",
-              "url": "/d/n360-pipeline?${__url_time_range}"
-            }
-          ]
+          "noValue": "Nothing loaded yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
         },
         "overrides": []
       },
@@ -131,22 +129,27 @@
           "fields": "/.*/"
         },
         "textMode": "value",
-        "colorMode": "none"
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "valueSize": 17
+        }
       }
     },
     {
-      "id": 2,
-      "title": "Last night",
+      "id": 11,
+      "title": "Data",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Result of the latest nightly run. A stopped night leaves the previous good night on screen.\n\n**Source:** n360.runs (load.py writes one row per night, loaded or not)  \n**Filter:** none  \n**Window:** the latest run",
+      "description": "The last day of usage in this load, and the day it was loaded. Amber when the data is more than 2 days old (n360.settings stamp_stale_days): the numbers are the last good night's. Click for Pipeline health.\n\n**Source:** n360.v_freshness (n360.runs: loaded runs only)  \n**Filter:** none  \n**Window:** the latest load",
       "gridPos": {
-        "x": 4,
+        "x": 18,
         "y": 0,
-        "w": 4,
+        "w": 6,
         "h": 3
       },
       "targets": [
@@ -158,7 +161,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
+          "rawSql": "SELECT concat(stamp, if(stale, concat(' \u00b7 ', toString(days_old), ' days old'), '')) AS stamp FROM n360.v_freshness",
           "refId": "A"
         }
       ],
@@ -167,21 +170,26 @@
           "noValue": "Not reported yet",
           "mappings": [
             {
-              "type": "value",
+              "type": "regex",
               "options": {
-                "loaded": {
-                  "text": "Loaded",
-                  "color": "green",
+                "pattern": ".* days old$",
+                "result": {
+                  "color": "#F0C25A",
                   "index": 0
-                },
-                "failed_checks": {
-                  "text": "Stopped: data checks failed",
-                  "color": "red",
-                  "index": 1
                 }
               }
             }
-          ]
+          ],
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline"
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
         },
         "overrides": []
       },
@@ -193,7 +201,12 @@
           "fields": "/.*/"
         },
         "textMode": "value",
-        "colorMode": "background"
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 13
+        }
       }
     },
     {
@@ -206,9 +219,9 @@
       },
       "description": "VA-days flagged on the 7 newest settled days, and flags on the newest 3 days (provisional).\n\n**Source:** n360.v_va_day_anomaly  \n**Filter:** Customer  \n**Window:** the 7 newest settled days; provisional = the newest 3 days",
       "gridPos": {
-        "x": 8,
-        "y": 0,
-        "w": 16,
+        "x": 0,
+        "y": 3,
+        "w": 24,
         "h": 3
       },
       "targets": [
@@ -256,7 +269,7 @@
       "description": "Each VA flagged in the last 30 days, day by day, coloured by distance from its normal: red = flag (z of -4 or lower, or silent), dark red = -4 to -2, grey = normal, dark blue = 2 to 4, blue = spike (4 or higher). Provisional days (newest 3) are faded. Days not scored are blank.\n\n**Source:** n360.v_anomaly_heat (n360.v_va_day_anomaly)  \n**Filter:** Customer; VAs with a flag; Include provisional  \n**Window:** the 30 days to the data-through day",
       "gridPos": {
         "x": 0,
-        "y": 3,
+        "y": 6,
         "w": 24,
         "h": 9
       },
@@ -282,27 +295,27 @@
               "options": {
                 "-2": {
                   "text": "Drop or silent",
-                  "color": "red",
+                  "color": "#D9695F",
                   "index": 0
                 },
                 "8": {
                   "text": "Drop or silent (provisional)",
-                  "color": "rgba(242, 73, 92, 0.35)",
+                  "color": "rgba(217, 105, 95, 0.35)",
                   "index": 1
                 },
                 "-1": {
                   "text": "Low (z -4 to -2)",
-                  "color": "dark-red",
+                  "color": "#E8A89F",
                   "index": 2
                 },
                 "9": {
                   "text": "Low (z -4 to -2) (provisional)",
-                  "color": "rgba(196, 22, 42, 0.35)",
+                  "color": "rgba(232, 168, 159, 0.35)",
                   "index": 3
                 },
                 "0": {
                   "text": "Normal",
-                  "color": "#5a5a5a",
+                  "color": "#5A5A5A",
                   "index": 4
                 },
                 "10": {
@@ -312,22 +325,22 @@
                 },
                 "1": {
                   "text": "High (z 2 to 4)",
-                  "color": "dark-blue",
+                  "color": "#A9C5EC",
                   "index": 6
                 },
                 "11": {
                   "text": "High (z 2 to 4) (provisional)",
-                  "color": "rgba(31, 96, 196, 0.35)",
+                  "color": "rgba(169, 197, 236, 0.35)",
                   "index": 7
                 },
                 "2": {
                   "text": "Spike",
-                  "color": "blue",
+                  "color": "#5E93DB",
                   "index": 8
                 },
                 "12": {
                   "text": "Spike (provisional)",
-                  "color": "rgba(87, 148, 242, 0.35)",
+                  "color": "rgba(94, 147, 219, 0.35)",
                   "index": 9
                 }
               }
@@ -336,7 +349,7 @@
           "displayName": "${__field.labels.va}",
           "color": {
             "mode": "fixed",
-            "fixedColor": "#8e8e8e"
+            "fixedColor": "#B4B4B4"
           }
         },
         "overrides": []
@@ -365,7 +378,7 @@
       "description": "Every flagged VA-day of the chosen kind in the time range, with its review outcome (real / expected / data issue, or \"Not reviewed\"). Reviews are recorded with code/review_anomaly.py. Click a VA to open it.\n\n**Source:** n360.v_anomaly_review (n360.v_va_day_anomaly, n360.anomaly_log)  \n**Filter:** Customer; Kind; Include provisional  \n**Window:** dashboard time range",
       "gridPos": {
         "x": 0,
-        "y": 12,
+        "y": 15,
         "w": 24,
         "h": 9
       },
@@ -480,17 +493,17 @@
                     "options": {
                       "real": {
                         "text": "Real",
-                        "color": "red",
+                        "color": "#D9695F",
                         "index": 0
                       },
                       "expected": {
                         "text": "Expected",
-                        "color": "green",
+                        "color": "#76C893",
                         "index": 1
                       },
                       "data issue": {
                         "text": "Data issue",
-                        "color": "orange",
+                        "color": "#F0C25A",
                         "index": 2
                       }
                     }
@@ -501,7 +514,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not reviewed",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 9
                       }
                     }
@@ -627,6 +640,63 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Kind"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "drop": {
+                        "text": "Drop",
+                        "color": "#D9695F",
+                        "index": 0
+                      },
+                      "went silent": {
+                        "text": "Went silent",
+                        "color": "#D9695F",
+                        "index": 1
+                      },
+                      "spike": {
+                        "text": "Spike",
+                        "color": "#5E93DB",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "Status"
             },
             "properties": [
@@ -636,14 +706,14 @@
                   {
                     "type": "value",
                     "options": {
-                      "Provisional": {
-                        "text": "Provisional",
-                        "color": "orange",
-                        "index": 0
-                      },
                       "Settled": {
                         "text": "Settled",
-                        "color": "red",
+                        "color": "text",
+                        "index": 0
+                      },
+                      "Provisional": {
+                        "text": "Provisional",
+                        "color": "#B4B4B4",
                         "index": 1
                       }
                     }
@@ -691,7 +761,7 @@
       "description": "Settled days when 3 or more customers were flagged in the same direction: one event (for example an industry-wide disruption), not separate customer stories.\n\n**Source:** n360.v_anomaly_events  \n**Filter:** Customer  \n**Window:** dashboard time range, settled days",
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 24,
         "w": 12,
         "h": 7
       },
@@ -777,7 +847,7 @@
       "description": "Anomaly detection v2 (05): a VA's weekly containment more than 10 points below its 8-week median (on 200+ engaged); a rule line's measure share of engaged more than 20 points from its usual level; a crossing date moved more than 14 days earlier overnight; a source 2+ days behind. \"This period\" and \"Usual\" are % (days moved, for pace change). Thresholds in n360.settings. Complete weeks only.\n\n**Source:** n360.v_anomaly_v2 (v_containment_week, v_measure_gap_week, v_forecast_change, v_source_freshness)  \n**Filter:** Customer  \n**Window:** the 60 days to the data-through day",
       "gridPos": {
         "x": 0,
-        "y": 35,
+        "y": 38,
         "w": 24,
         "h": 7
       },
@@ -790,7 +860,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT v2.signal AS Signal, ifNull(ac.display_name, '') AS Customer, v2.subject AS Subject, concat(toString(toDayOfMonth(v2.period)), ' ', formatDateTime(v2.period, '%b %Y')) AS `When`,\n               v2.value AS `This period`, v2.usual AS Usual, v2.detail AS Detail\n        FROM n360.v_anomaly_v2 AS v2 LEFT JOIN n360.account AS ac ON ac.account = v2.account\n        WHERE (v2.account = '' OR v2.account IN (${account:singlequote})) AND v2.period > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 60\n        ORDER BY v2.period DESC",
+          "rawSql": "SELECT v2.signal AS Signal, ifNull(ac.display_name, '') AS Customer,\n               multiIf(c1.full_label != '', c1.full_label, c2.full_label != '', c2.full_label, v2.subject) AS Subject,\n               concat(toString(toDayOfMonth(v2.period)), ' ', formatDateTime(v2.period, '%b %Y')) AS `When`,\n               v2.value AS `This period`, v2.usual AS Usual, v2.detail AS Detail\n        FROM n360.v_anomaly_v2 AS v2 LEFT JOIN n360.account AS ac ON ac.account = v2.account\n        LEFT JOIN (SELECT line_key, full_label FROM n360.v_contract_status WHERE entitlement = 'line') AS c1 ON c1.line_key = v2.subject\n        LEFT JOIN (SELECT series_key, full_label FROM n360.v_contract_status) AS c2 ON c2.series_key = v2.subject\n        WHERE (v2.account = '' OR v2.account IN (${account:singlequote})) AND v2.period > (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') - 60\n        ORDER BY v2.period DESC",
           "refId": "A"
         }
       ],
@@ -910,7 +980,7 @@
       "description": "Settled flags per week and what reviews found. A low share of real flags means the thresholds (n360.settings) flag too much; tuned monthly from these outcomes (05). All customers.\n\n**Source:** n360.v_flag_quality (n360.v_anomaly_review)  \n**Filter:** settled flags  \n**Window:** dashboard time range, by week",
       "gridPos": {
         "x": 0,
-        "y": 28,
+        "y": 31,
         "w": 24,
         "h": 7
       },
@@ -923,7 +993,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT toString(week) AS `Week of`, flags AS Flags, reviewed AS Reviewed, real AS Real, expected AS Expected,\n               data_issue AS `Data issue`, pct_real_of_reviewed AS `Real, of reviewed`\n        FROM n360.v_flag_quality WHERE $__dateFilter(week) ORDER BY week DESC",
+          "rawSql": "SELECT concat(toString(toDayOfMonth(week)), ' ', formatDateTime(week, '%b %Y')) AS `Week of`, flags AS Flags, reviewed AS Reviewed, real AS Real, expected AS Expected,\n               data_issue AS `Data issue`, pct_real_of_reviewed AS `Real, of reviewed`\n        FROM n360.v_flag_quality WHERE $__dateFilter(week) ORDER BY week DESC",
           "refId": "A"
         }
       ],
@@ -963,7 +1033,7 @@
                       "match": "null",
                       "result": {
                         "text": "None reviewed",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -988,7 +1058,7 @@
       "description": "Settled flags per week (Monday start), drops and silences apart from spikes.\n\n**Source:** n360.v_va_day_anomaly  \n**Filter:** Customer; settled days  \n**Window:** dashboard time range, by week",
       "gridPos": {
         "x": 12,
-        "y": 21,
+        "y": 24,
         "w": 12,
         "h": 7
       },
@@ -1029,7 +1099,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "red"
+                  "fixedColor": "#D9695F"
                 }
               }
             ]
@@ -1044,7 +1114,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "blue"
+                  "fixedColor": "#5E93DB"
                 }
               }
             ]
@@ -1057,7 +1127,7 @@
   "links": [
     {
       "type": "link",
-      "title": "Back to Portfolio overview",
+      "title": "Back to Overview",
       "url": "/d/n360-overview",
       "icon": "dashboard",
       "keepTime": true,

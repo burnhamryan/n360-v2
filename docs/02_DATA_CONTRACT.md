@@ -114,6 +114,13 @@ definition changes `rule_hash`.
 | `v_containment_week`, `v_measure_gap_week`, `v_anomaly_v2` | Anomaly detection v2 signals (B20) |
 | `v_challenger_backtest` | Newest challenger backtest MAPE per model and horizon (B21) |
 | `v_anomaly_events` | Cross-account events: the same settled day and direction (spikes, or drops and silences) flagged on 3 or more accounts |
+| `v_contract_status` | One row per entitlement (unpooled line, or pool once): the v1.1 contract status (over billed, will exceed, ahead, on pace, below pace, too early, under review, billed not recorded, unmapped, not built, not measured, not read), `renewal_risk`, forecast at term end (stored rate carried to the end), plain-word `issue` and `issue_date`, `needs_attention`, `decision_due`, `drill`. The dashboards' status, decided here only (25 Nov 2026) |
+| `v_status_night` | The same statuses as each stored night saw them (from `forecast_history`): tiles' "since" and status over time |
+| `v_va_change` | Each VA: conversations and containment, last 30 days against the 30 before; health and attention flags |
+| `v_needs_attention` | The v2 "needs attention" list: lines and pools from `v_contract_status`, busy VAs down sharply from `v_va_change` |
+| `v_freshness` | The freshness stamp: data through, loaded, stale (amber) |
+| `v_feature_use` | Target features per customer used in the last 30 days (Phase 2; NULL = not reported) |
+| `v_customer_notes` | Notes pinned to a customer's header, written from the contract data |
 
 ## Keys and joins
 

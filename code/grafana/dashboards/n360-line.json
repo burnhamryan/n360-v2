@@ -46,18 +46,18 @@
   },
   "panels": [
     {
-      "id": 1,
-      "title": "Data through",
+      "id": 13,
+      "title": "In one sentence",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Last day included in this load (the nightly window ends at 23:59 UTC that day).\n\n**Source:** n360.runs, written by load.py only after every data check passes  \n**Filter:** loaded runs only; the latest  \n**Window:** the latest load",
+      "description": "Where this line stands: its status (n360.v_contract_status, proposed thresholds), and where the stored forecast's rate takes it by the term end.\n\n**Source:** n360.v_contract_status  \n**Filter:** Contract line  \n**Window:** the latest load",
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 4,
+        "w": 18,
         "h": 3
       },
       "targets": [
@@ -69,19 +69,17 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT formatDateTime(window_end, '%e %b %Y') AS data_through\n        FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
+          "rawSql": "SELECT if(c.n > 0, c.s, concat(l.channel, ' is in a pooled entitlement: its use counts toward the pool, which is compared with billed (customer page).')) AS sentence\n        FROM (SELECT count() AS n, any(concat(full_label, ': ', multiIf(\n                  status = 'over billed', concat('over billed, ', toString(round(pct_billed)), '% of billed'),\n                  status = 'will exceed', concat('set to exceed billed on ', concat(toString(toDayOfMonth(cross_date)), ' ', formatDateTime(cross_date, '%b %Y')), ', ',\n                                                 toString(dateDiff('day', cross_date, end_date)), ' days before the term ends'),\n                  pct_billed IS NULL, lower(transform(if(renewal_risk, 'renewal risk', status), ['over billed', 'will exceed', 'renewal risk', 'below pace', 'ahead', 'on pace', 'too early', 'under review', 'billed not recorded', 'unmapped', 'not built', 'not measured', 'not read'], ['Over billed', 'Will exceed', 'Renewal risk', 'Below pace', 'Ahead', 'On pace', 'Too early to tell', 'Under review', 'Billed not recorded', 'Unmapped', 'Not built', 'Not measured', 'Not reported yet'], '')),\n                  concat(lower(transform(if(renewal_risk, 'renewal risk', status), ['over billed', 'will exceed', 'renewal risk', 'below pace', 'ahead', 'on pace', 'too early', 'under review', 'billed not recorded', 'unmapped', 'not built', 'not measured', 'not read'], ['Over billed', 'Will exceed', 'Renewal risk', 'Below pace', 'Ahead', 'On pace', 'Too early to tell', 'Under review', 'Billed not recorded', 'Unmapped', 'Not built', 'Not measured', 'Not reported yet'], '')), ': ', toString(round(pct_billed)), '% used, ', toString(round(pct_term)),\n                         '% of the term gone')),\n                  if(forecast_end_pct IS NULL, '', concat(' \u00b7 ', toString(round(forecast_end_pct)), '% by the term end at the current rate')))) AS s\n              FROM n360.v_contract_status WHERE line_key IN (${line:singlequote})) AS c\n        CROSS JOIN (SELECT channel FROM n360.contract_line WHERE line_key IN (${line:singlequote})) AS l",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet",
-          "links": [
-            {
-              "title": "Pipeline health",
-              "url": "/d/n360-pipeline?${__url_time_range}"
-            }
-          ]
+          "noValue": "Nothing loaded yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
         },
         "overrides": []
       },
@@ -93,22 +91,27 @@
           "fields": "/.*/"
         },
         "textMode": "value",
-        "colorMode": "none"
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "valueSize": 17
+        }
       }
     },
     {
-      "id": 2,
-      "title": "Last night",
+      "id": 14,
+      "title": "Data",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Result of the latest nightly run. A stopped night leaves the previous good night on screen.\n\n**Source:** n360.runs (load.py writes one row per night, loaded or not)  \n**Filter:** none  \n**Window:** the latest run",
+      "description": "The last day of usage in this load, and the day it was loaded. Amber when the data is more than 2 days old (n360.settings stamp_stale_days): the numbers are the last good night's. Click for Pipeline health.\n\n**Source:** n360.v_freshness (n360.runs: loaded runs only)  \n**Filter:** none  \n**Window:** the latest load",
       "gridPos": {
-        "x": 4,
+        "x": 18,
         "y": 0,
-        "w": 4,
+        "w": 6,
         "h": 3
       },
       "targets": [
@@ -120,7 +123,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
+          "rawSql": "SELECT concat(stamp, if(stale, concat(' \u00b7 ', toString(days_old), ' days old'), '')) AS stamp FROM n360.v_freshness",
           "refId": "A"
         }
       ],
@@ -129,21 +132,26 @@
           "noValue": "Not reported yet",
           "mappings": [
             {
-              "type": "value",
+              "type": "regex",
               "options": {
-                "loaded": {
-                  "text": "Loaded",
-                  "color": "green",
+                "pattern": ".* days old$",
+                "result": {
+                  "color": "#F0C25A",
                   "index": 0
-                },
-                "failed_checks": {
-                  "text": "Stopped: data checks failed",
-                  "color": "red",
-                  "index": 1
                 }
               }
             }
-          ]
+          ],
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline"
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
         },
         "overrides": []
       },
@@ -155,7 +163,12 @@
           "fields": "/.*/"
         },
         "textMode": "value",
-        "colorMode": "background"
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 13
+        }
       }
     },
     {
@@ -168,8 +181,8 @@
       },
       "description": "The line's contract measure from its start date, and the last 30 days.\n\n**Source:** n360.contract_line  \n**Filter:** Contract line  \n**Window:** start date to the data-through day",
       "gridPos": {
-        "x": 8,
-        "y": 0,
+        "x": 0,
+        "y": 3,
         "w": 4,
         "h": 3
       },
@@ -250,9 +263,9 @@
       },
       "description": "The billed amount for this line (after any signed SOW override; the basis is under \"How this line is measured\"). A pooled line has none of its own.\n\n**Source:** n360.contract_line  \n**Filter:** Contract line  \n**Window:** the contract term",
       "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 4,
+        "x": 4,
+        "y": 3,
+        "w": 5,
         "h": 3
       },
       "targets": [
@@ -314,11 +327,11 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Used / billed in the line's own measure, and its pace colour (proposed rule, set in n360.v_line_pace). A pooled line has no % of its own: see the pool on the Customer dashboard.\n\n**Source:** n360.v_line_pace  \n**Filter:** Contract line  \n**Window:** start date to the data-through day",
+      "description": "Used / billed in the line's own measure, and its contract status (n360.v_contract_status, proposed thresholds). A pooled line has no % of its own: see the pool on the Customer dashboard.\n\n**Source:** n360.v_contract_status  \n**Filter:** Contract line  \n**Window:** start date to the data-through day",
       "gridPos": {
-        "x": 16,
-        "y": 0,
-        "w": 4,
+        "x": 9,
+        "y": 3,
+        "w": 5,
         "h": 3
       },
       "targets": [
@@ -330,7 +343,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT pct_billed AS `% of billed`, pace AS Pace FROM n360.v_line_pace WHERE line_key IN (${line:singlequote})",
+          "rawSql": "SELECT pct_billed AS `% of billed`, if(renewal_risk, 'renewal risk', status) AS Status FROM n360.v_contract_status WHERE line_key IN (${line:singlequote})",
           "refId": "A"
         }
       ],
@@ -362,7 +375,19 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Pace"
+              "options": "% of billed"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
             },
             "properties": [
               {
@@ -371,35 +396,70 @@
                   {
                     "type": "value",
                     "options": {
-                      "red": {
-                        "text": "Red",
-                        "color": "red",
+                      "over billed": {
+                        "text": "Over billed",
+                        "color": "#F2A07B",
                         "index": 0
                       },
-                      "amber": {
-                        "text": "Amber",
-                        "color": "orange",
+                      "will exceed": {
+                        "text": "Will exceed",
+                        "color": "#C3B0F2",
                         "index": 1
                       },
-                      "green": {
-                        "text": "Green",
-                        "color": "green",
+                      "renewal risk": {
+                        "text": "Renewal risk",
+                        "color": "#3E7CC4",
                         "index": 2
                       },
-                      "not measurable": {
-                        "text": "Not measurable",
-                        "color": "#8e8e8e",
+                      "below pace": {
+                        "text": "Below pace",
+                        "color": "#9CC8EE",
                         "index": 3
                       },
-                      "not implemented": {
-                        "text": "Not implemented",
-                        "color": "#8e8e8e",
+                      "ahead": {
+                        "text": "Ahead",
+                        "color": "#76C893",
                         "index": 4
+                      },
+                      "on pace": {
+                        "text": "On pace",
+                        "color": "#76C893",
+                        "index": 5
+                      },
+                      "too early": {
+                        "text": "Too early to tell",
+                        "color": "#D3D3D3",
+                        "index": 6
+                      },
+                      "under review": {
+                        "text": "Under review",
+                        "color": "#B4B4B4",
+                        "index": 7
+                      },
+                      "billed not recorded": {
+                        "text": "Billed not recorded",
+                        "color": "#B4B4B4",
+                        "index": 8
+                      },
+                      "unmapped": {
+                        "text": "Unmapped",
+                        "color": "#B4B4B4",
+                        "index": 9
+                      },
+                      "not built": {
+                        "text": "Not built",
+                        "color": "#B4B4B4",
+                        "index": 10
+                      },
+                      "not measured": {
+                        "text": "Not measured",
+                        "color": "#B4B4B4",
+                        "index": 11
                       },
                       "not read": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
-                        "index": 5
+                        "color": "#B4B4B4",
+                        "index": 12
                       }
                     }
                   }
@@ -416,7 +476,7 @@
           ],
           "fields": "/.*/"
         },
-        "textMode": "value_and_name",
+        "textMode": "value",
         "colorMode": "value",
         "text": {
           "titleSize": 12,
@@ -435,9 +495,9 @@
       },
       "description": "Days elapsed / term days.\n\n**Source:** n360.v_line_status  \n**Filter:** Contract line  \n**Window:** start date to the data-through day",
       "gridPos": {
-        "x": 20,
-        "y": 0,
-        "w": 4,
+        "x": 14,
+        "y": 3,
+        "w": 5,
         "h": 3
       },
       "targets": [
@@ -501,9 +561,9 @@
       },
       "description": "The stored forecast: used + rate x days to the horizon (the earlier of contract end and the month end 3 months out), as % of billed; rate = last 30 days / 30. Never recomputed here.\n\n**Source:** n360.forecast via n360.v_line_pace  \n**Filter:** Contract line  \n**Window:** to the horizon",
       "gridPos": {
-        "x": 0,
+        "x": 19,
         "y": 3,
-        "w": 8,
+        "w": 5,
         "h": 3
       },
       "targets": [
@@ -584,10 +644,10 @@
       },
       "description": "How the contract measure for this line is counted, from conversations to the measure, and whether this view's % of billed matches the existing page's figure.\n\n**Source:** n360.contract_line, n360.rule, n360.source, n360.v_line_status  \n**Filter:** Contract line  \n**Window:** the contract term",
       "gridPos": {
-        "x": 8,
-        "y": 3,
-        "w": 16,
-        "h": 10
+        "x": 12,
+        "y": 6,
+        "w": 12,
+        "h": 9
       },
       "targets": [
         {
@@ -634,7 +694,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -660,8 +720,8 @@
       "description": "Used so far (solid), the stored forecast from the data-through day to its horizon (dashed), and the billed amount (dashed red) over the term. Days not read add nothing to the running total. Not measurable and not implemented lines have no usage line.\n\n**Source:** n360.line_day, n360.v_line_pace (n360.forecast), n360.contract_line  \n**Filter:** Contract line  \n**Window:** start date to the end of the term",
       "gridPos": {
         "x": 0,
-        "y": 13,
-        "w": 24,
+        "y": 6,
+        "w": 12,
         "h": 9
       },
       "targets": [
@@ -711,7 +771,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "blue"
+                  "fixedColor": "#7F9CC0"
                 }
               }
             ]
@@ -744,7 +804,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "red"
+                  "fixedColor": "#6E6E6E"
                 }
               }
             ]
@@ -763,7 +823,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "green"
+                  "fixedColor": "#7F9CC0"
                 }
               }
             ]
@@ -783,9 +843,9 @@
       "description": "Per month: the contract measure beside the platform engaged flag, so a contract rule's effect is visible (for lines with no rule they are the same). Never one replaced by the other.\n\n**Source:** n360.line_day  \n**Filter:** Contract line  \n**Window:** start date to the data-through day, by calendar month",
       "gridPos": {
         "x": 0,
-        "y": 22,
+        "y": 15,
         "w": 12,
-        "h": 9
+        "h": 8
       },
       "targets": [
         {
@@ -806,7 +866,38 @@
           "unit": "locale",
           "decimals": 0
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Contract measure"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#7F9CC0"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Engaged (platform flag)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#C3D2E6"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "xField": "Month",
@@ -835,9 +926,9 @@
       "description": "The VAs feeding this line and each one's share of the line's conversations (conversations, not the contract measure). Click a VA to open it.\n\n**Source:** n360.line_va, n360.va_day  \n**Filter:** Contract line  \n**Window:** the 30 days to the data-through day",
       "gridPos": {
         "x": 12,
-        "y": 22,
+        "y": 15,
         "w": 12,
-        "h": 9
+        "h": 8
       },
       "targets": [
         {
@@ -970,7 +1061,7 @@
       "description": "What N360 said each night for this line, so a jump between nights is visible. Shown once 7 nights are stored.\n\n**Source:** n360.line_totals_history (append-only, one row per line per night)  \n**Filter:** Contract line  \n**Window:** every stored night",
       "gridPos": {
         "x": 0,
-        "y": 31,
+        "y": 23,
         "w": 24,
         "h": 7
       },
@@ -991,7 +1082,11 @@
         "defaults": {
           "noValue": "Shows once 7 nights are stored",
           "unit": "percent",
-          "decimals": 1
+          "decimals": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#7F9CC0"
+          }
         },
         "overrides": []
       },
@@ -1014,7 +1109,7 @@
     },
     {
       "type": "link",
-      "title": "Back to Portfolio overview",
+      "title": "Back to Overview",
       "url": "/d/n360-overview",
       "icon": "dashboard",
       "keepTime": true,

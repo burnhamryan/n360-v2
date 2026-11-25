@@ -60,7 +60,7 @@ dashboards back). To load the full history, either skip step 3, or start clean f
 
 ## 5. Look
 
-http://localhost:3000 → N360 → **Portfolio overview**. Then **Pipeline health** shows every night loaded or refused.
+http://localhost:3000 → N360 → **Overview**. Then **Pipeline health** shows every night loaded or refused.
 
 Optional, once enough nights are in: `python3 code/forecast/challenger.py --user n360 --password "$N360_CH_PASSWORD"`
 (challenger backtest; changes nothing else).

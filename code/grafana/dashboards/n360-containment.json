@@ -36,18 +36,18 @@
   },
   "panels": [
     {
-      "id": 1,
-      "title": "Data through",
+      "id": 6,
+      "title": "In one sentence",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Last day included in this load (the nightly window ends at 23:59 UTC that day).\n\n**Source:** n360.runs, written by load.py only after every data check passes  \n**Filter:** loaded runs only; the latest  \n**Window:** the latest load",
+      "description": "Containment = 1 - handoffs / engaged, per VA (never across channels), last 30 days against the 30 before (proposed thresholds, n360.settings).\n\n**Source:** n360.v_va_change  \n**Filter:** Customer  \n**Window:** the 60 days to the data-through day",
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 12,
+        "w": 18,
         "h": 3
       },
       "targets": [
@@ -59,19 +59,17 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT formatDateTime(window_end, '%e %b %Y') AS data_through\n        FROM n360.runs WHERE status = 'loaded' ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
+          "rawSql": "SELECT concat(concat(toString(countIf(containment_30 IS NOT NULL)), if(countIf(containment_30 IS NOT NULL) = 1, ' VA', ' VAs')), ' with handoff data \u00b7 ',\n                      toString(countIf(containment_30 < (SELECT containment_low_pct FROM n360.settings))), ' contain under 50% \u00b7 ',\n                      toString(countIf(containment_down)), ' down 3+ points on the 30 days before \u00b7 ',\n                      toString(countIf(containment_30 IS NULL)), ' without handoff data (not reported)') AS sentence\n        FROM n360.v_va_change WHERE account IN (${account:singlequote})",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet",
-          "links": [
-            {
-              "title": "Pipeline health",
-              "url": "/d/n360-pipeline?${__url_time_range}"
-            }
-          ]
+          "noValue": "Nothing loaded yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
         },
         "overrides": []
       },
@@ -83,22 +81,27 @@
           "fields": "/.*/"
         },
         "textMode": "value",
-        "colorMode": "none"
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "valueSize": 17
+        }
       }
     },
     {
-      "id": 2,
-      "title": "Last night",
+      "id": 7,
+      "title": "Data",
       "type": "stat",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Result of the latest nightly run. A stopped night leaves the previous good night on screen.\n\n**Source:** n360.runs (load.py writes one row per night, loaded or not)  \n**Filter:** none  \n**Window:** the latest run",
+      "description": "The last day of usage in this load, and the day it was loaded. Amber when the data is more than 2 days old (n360.settings stamp_stale_days): the numbers are the last good night's. Click for Pipeline health.\n\n**Source:** n360.v_freshness (n360.runs: loaded runs only)  \n**Filter:** none  \n**Window:** the latest load",
       "gridPos": {
-        "x": 12,
+        "x": 18,
         "y": 0,
-        "w": 12,
+        "w": 6,
         "h": 3
       },
       "targets": [
@@ -110,7 +113,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT toString(status) AS status FROM n360.runs ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
+          "rawSql": "SELECT concat(stamp, if(stale, concat(' \u00b7 ', toString(days_old), ' days old'), '')) AS stamp FROM n360.v_freshness",
           "refId": "A"
         }
       ],
@@ -119,21 +122,26 @@
           "noValue": "Not reported yet",
           "mappings": [
             {
-              "type": "value",
+              "type": "regex",
               "options": {
-                "loaded": {
-                  "text": "Loaded",
-                  "color": "green",
+                "pattern": ".* days old$",
+                "result": {
+                  "color": "#F0C25A",
                   "index": 0
-                },
-                "failed_checks": {
-                  "text": "Stopped: data checks failed",
-                  "color": "red",
-                  "index": 1
                 }
               }
             }
-          ]
+          ],
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline"
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
         },
         "overrides": []
       },
@@ -145,7 +153,12 @@
           "fields": "/.*/"
         },
         "textMode": "value",
-        "colorMode": "background"
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 13
+        }
       }
     },
     {
@@ -310,7 +323,7 @@
                       "match": "null",
                       "result": {
                         "text": "Not reported yet",
-                        "color": "#8e8e8e",
+                        "color": "#B4B4B4",
                         "index": 0
                       }
                     }
@@ -372,7 +385,7 @@
   "links": [
     {
       "type": "link",
-      "title": "Back to Portfolio overview",
+      "title": "Back to Overview",
       "url": "/d/n360-overview",
       "icon": "dashboard",
       "keepTime": true,

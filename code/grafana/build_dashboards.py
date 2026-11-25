@@ -20,45 +20,64 @@ OUT = os.path.join(HERE, 'dashboards')
 DS = {'type': 'grafana-clickhouse-datasource', 'uid': 'n360-clickhouse'}
 NOT_READ = 'Not reported yet'
 ACCT = "account IN (${account:singlequote})"
-HOME = ('n360-overview', 'Portfolio overview')      # every dashboard's Back link and header link
+HOME = ('n360-overview', 'Overview')      # every dashboard's Back link and header link
 PIPELINE = ('n360-pipeline', 'Pipeline health')     # "Data through" drills here (04 conventions)
 DEFAULT_RANGE = {'from': 'now-90d', 'to': 'now'}
 UID = {'overview': 'n360-overview', 'contracts': 'n360-contracts', 'customer': 'n360-customer', 'line': 'n360-line',
        'va': 'n360-va', 'forecast': 'n360-forecast', 'anomalies': 'n360-anomalies',
-       'adoption': 'n360-adoption', 'requests': 'n360-requests'}   # never change (links depend on them)
-CROSS_WINDOW_DAYS = 90      # Portfolio "Crossing billed in 90 days" (spec 1.4): a display window, not a pace rule
+       'adoption': 'n360-adoption', 'requests': 'n360-requests',
+       'containment': 'n360-containment', 'pipeline': 'n360-pipeline', 'health': 'n360-health'}   # never change (links depend on them)
 FORECAST_WINDOWS = (30, 60, 90)   # Forecast "Crossing billed" stat (spec 6): display windows
-TOP_CUSTOMERS = 5           # Portfolio "Conversations per week": top 5 + Other (spec 1.7)
 
-# Pace: n360.v_line_pace decides the colour (decided 24 Nov 2026) and holds the PROPOSED thresholds.
-# This file only says how each of the view's `pace` values looks: {stored: (shown, colour key)}.
-PACE_LABEL = {
-    'red': ('Red', 'red'),              # the reason is in the view's pace_reason, shown beside the chip
-    'amber': ('Amber', 'amber'),
-    'green': ('Green', 'green'),
-    'not measurable': ('Not measurable', 'grey'),
-    'not implemented': ('Not implemented', 'grey'),
-    'not read': (NOT_READ, 'grey'),
+# Display colours: ONE palette (v2 principle 6: colour means status, nowhere else). Mid tones chosen to read on both
+# the light and the dark theme; Grafana picks black or white text on a coloured cell by contrast. Empty is grey, never
+# a status colour. Contract statuses use the v1.1 page's colours (no red: a renewal risk is a stronger blue).
+COLOUR = {
+    # contract status (v_contract_status)
+    'peach': '#F2A07B', 'lavender': '#C3B0F2', 'lavender_light': '#E0D6F8', 'green': '#76C893', 'light_blue': '#9CC8EE', 'risk_blue': '#3E7CC4',
+    'grey': '#B4B4B4', 'grey_light': '#D3D3D3',
+    # operations: amber = look at it (stale data, a stopped night); green = loaded
+    'amber': '#F0C25A',
+    # anomalies: down warm, up cool; provisional days faded; 'normal' a neutral grey
+    'down': '#D9695F', 'down_watch': '#E8A89F', 'up': '#5E93DB', 'up_watch': '#A9C5EC', 'normal': '#5A5A5A',
+    'down_faded': 'rgba(217, 105, 95, 0.35)', 'down_watch_faded': 'rgba(232, 168, 159, 0.35)',
+    'normal_faded': 'rgba(90, 90, 90, 0.35)', 'up_watch_faded': 'rgba(169, 197, 236, 0.35)', 'up_faded': 'rgba(94, 147, 219, 0.35)',
+    # not a status: series in charts are shades of one neutral blue-grey; reference marks (billed, 100%) dark grey
+    'series': '#7F9CC0', 'series_light': '#C3D2E6', 'reference': '#6E6E6E', 'dark': '#4A4A4A',
+    'none': 'text', 'neutral': '#7F9CC0',
 }
 
-# Display colours (Grafana colour names). Empty is grey, never red.
-COLOUR = {'green': 'green', 'amber': 'orange', 'red': 'red', 'grey': '#8e8e8e', 'none': 'text', 'neutral': 'blue',
-          'blue': 'blue', 'dark': '#3d3d3d', 'dark_red': 'dark-red', 'dark_blue': 'dark-blue', 'normal': '#5a5a5a',
-          # provisional anomaly days are shown faded (spec 7)
-          'red_faded': 'rgba(242, 73, 92, 0.35)', 'dark_red_faded': 'rgba(196, 22, 42, 0.35)', 'normal_faded': 'rgba(90, 90, 90, 0.35)',
-          'dark_blue_faded': 'rgba(31, 96, 196, 0.35)', 'blue_faded': 'rgba(87, 148, 242, 0.35)'}
+# Contract status (n360.v_contract_status.status, plus 'renewal risk' when its flag is set): {stored: (shown, colour)}.
+# Order = urgency, the order of every legend and sorted list.
+STATUS = {
+    'over billed': ('Over billed', 'peach'),
+    'will exceed': ('Will exceed', 'lavender'),
+    'renewal risk': ('Renewal risk', 'risk_blue'),
+    'below pace': ('Below pace', 'light_blue'),
+    'ahead': ('Ahead', 'green'),
+    'on pace': ('On pace', 'green'),
+    'too early': ('Too early to tell', 'grey_light'),
+    'under review': ('Under review', 'grey'),
+    'billed not recorded': ('Billed not recorded', 'grey'),
+    'unmapped': ('Unmapped', 'grey'),
+    'not built': ('Not built', 'grey'),
+    'not measured': ('Not measured', 'grey'),
+    'not read': (NOT_READ, 'grey'),
+}
+STATUS_SHOWN = "if(renewal_risk, 'renewal risk', status)"     # the status a screen shows (renewal risk on top)
+BULLET_CAP = 250            # bullet bars stop here; the true % is printed in the label (v2 visual grammar)
 
 # Runway words (from n360.v_line_pace.runway), source freshness (v_source_freshness.status), heatmap bands (v_anomaly_heat.band)
-RUNWAY_LABEL = {'above billed': ('Already above billed', 'red'), 'crosses soon': ('Crosses billed soon', 'red'),
-                'crosses before term end': ('Crosses before term end', 'blue'),
+RUNWAY_LABEL = {'above billed': ('Already above billed', 'peach'), 'crosses soon': ('Crosses billed soon', 'lavender'),
+                'crosses before term end': ('Crosses before term end', 'lavender'),
                 'runs out after term end': ('Runs out after term end', 'grey'),
                 'no use in the last 30 days': ('No use in the last 30 days', 'grey'),
                 'not measurable': ('Not measurable', 'grey'), 'not implemented': ('Not implemented', 'grey'),
                 'not read': (NOT_READ, 'grey')}
-REVIEW_LABEL = {'real': ('Real', 'red'), 'expected': ('Expected', 'green'), 'data issue': ('Data issue', 'amber')}
-FRESH_LABEL = {'green': ('On time', 'green'), 'amber': ('Behind', 'amber'), 'red': ('Late', 'red')}
-HEAT_BANDS = [(-2, 'Drop or silent', 'red'), (-1, 'Low (z -4 to -2)', 'dark_red'), (0, 'Normal', 'normal'),
-              (1, 'High (z 2 to 4)', 'dark_blue'), (2, 'Spike', 'blue')]
+REVIEW_LABEL = {'real': ('Real', 'down'), 'expected': ('Expected', 'green'), 'data issue': ('Data issue', 'amber')}
+FRESH_LABEL = {'green': ('On time', 'green'), 'amber': ('Behind', 'amber'), 'red': ('Late', 'down')}
+HEAT_BANDS = [(-2, 'Drop or silent', 'down'), (-1, 'Low (z -4 to -2)', 'down_watch'), (0, 'Normal', 'normal'),
+              (1, 'High (z 2 to 4)', 'up_watch'), (2, 'Spike', 'up')]
 N_CHECKS = open(os.path.join(os.path.dirname(HERE), 'checks.sql')).read().count('-- check: ')   # the data checks, counted
 
 PHASE2_NOTE = ('Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in '
@@ -66,11 +85,15 @@ PHASE2_NOTE = ('Phase 2 (proposed design, tested on synthetic only): field meani
 
 # VA status words (VA dashboard): settled flags red, provisional orange (spec 4)
 VA_STATUS = {'Normal': ('Normal', 'none'), 'Not scored': ('Not scored', 'grey'),
-             **{f'{k}{p}': (f'{k}{p}', 'amber' if p else 'red') for k in ('Went silent', 'Drop', 'Spike')
+             **{f'{k}{p}': (f'{k}{p}', c + ('_faded' if p else '')) for k, c in (('Went silent', 'down'), ('Drop', 'down'),
+                                                                                   ('Spike', 'up'))
                 for p in ('', ' (provisional)')}}
 
+# A flag's state: settled flags count; provisional ones (the newest 3 days) may still change and are greyed
+FLAG_STATE = {'Settled': ('Settled', 'none'), 'Provisional': ('Provisional', 'grey')}
+
 # Words for run status, as stored in n360.runs.status
-RUN_STATUS = {'loaded': ('Loaded', 'green'), 'failed_checks': ('Stopped: data checks failed', 'red')}
+RUN_STATUS = {'loaded': ('Loaded', 'green'), 'failed_checks': ('Stopped: data checks failed', 'amber')}
 
 
 # ───────────────────────── building blocks ─────────────────────────
@@ -257,18 +280,20 @@ def empty_grey():
 def coloured(column, labels, cell='color-text'):
     """Table column coloured by the label a view stored, empty in grey. Use for every coloured column.
     Colours come from labels, never from thresholds here: rules live in views (rule 4)."""
-    return override(column, ('mappings', label_colours(labels) + [empty_grey()]), ('custom.cellOptions', {'type': cell}))
+    return override(column, ('mappings', label_colours(labels) + [empty_grey()]), ('custom.cellOptions', {'type': cell}),
+                    ('color', {'mode': 'fixed', 'fixedColor': COLOUR['none']}))   # unmapped values: plain text, never green
 
 
-def pace_chip(column='Pace'):
-    """The pace column from n360.v_line_pace / v_customer_attention, as a coloured word."""
-    return coloured(column, PACE_LABEL, cell='color-background')
-
-
-def red_when_any():
-    """A count stat: red when above zero, uncoloured at zero (spec 1.3)."""
+def amber_when_any(colour='amber'):
+    """A count stat: coloured when above zero (amber = look at it, or a status colour), uncoloured at zero."""
     return [{'type': 'value', 'options': {'0': {'color': 'transparent', 'index': 0}}},
-            {'type': 'range', 'options': {'from': 1, 'to': 1e15, 'result': {'color': COLOUR['red'], 'index': 1}}}]
+            {'type': 'range', 'options': {'from': 1, 'to': 1e15, 'result': {'color': COLOUR[colour], 'index': 1}}}]
+
+
+# a line or pool as "Customer · Line" from v_line_pace (alias pc) and n360.account (alias a); a pool's name not twice
+PC_LABEL = ("if(startsWith(pc.label, concat(a.display_name, ':')), concat(a.display_name, ' · ', "
+            "trimLeft(substring(pc.label, length(a.display_name) + 2))), concat(a.display_name, ' · ', pc.label))")
+KIND = {'drop': ('Drop', 'down'), 'went silent': ('Went silent', 'down'), 'spike': ('Spike', 'up')}
 
 
 def label_colours(labels):
@@ -301,11 +326,6 @@ def last_load(pid, x, y, w, h):
                  'colorMode': 'background'})
 
 
-def header(first_id=1, y=0, w=6):
-    """Top row of every dashboard: Data through (drills to Pipeline health) and last night's result."""
-    return [data_through(first_id, 0, y, w, 3), last_load(first_id + 1, w, y, w, 3)]
-
-
 def dashboard(uid, title, panels, variables=(), links=(), time=None):
     return {
         'uid': uid, 'title': title, 'tags': ['n360'], 'editable': False,
@@ -315,6 +335,153 @@ def dashboard(uid, title, panels, variables=(), links=(), time=None):
         'panels': panels,
         **({'links': list(links)} if links else {}),
     }
+
+
+# ───────────────────────── v2 building blocks (dashboard review, 25 Nov 2026) ─────────────────────────
+# Every page reads: question (the title) -> sentence that answers it with a number -> at most 4 tiles, each with a
+# reference -> one lead chart -> one action list -> tables. Nothing below repeats what is above.
+
+def status_chip(column='Status'):
+    """A contract status column as a coloured chip (the stored status, or 'renewal risk' on top)."""
+    return coloured(column, STATUS, cell='color-background')
+
+
+def series_colours(**custom):
+    """Charts whose series are not statuses: shades of one neutral colour (colour means status, nowhere else)."""
+    return {'color': {'mode': 'shades', 'fixedColor': COLOUR['series']}, **custom}
+
+
+def reference_line(value):
+    """A reference mark (billed, 100%) drawn as a line. Not a status rule: one step, the reference colour.
+    test_build.py allows thresholds only in this shape."""
+    return {'thresholds': {'mode': 'absolute', 'steps': [{'color': 'transparent', 'value': None},
+                                                          {'color': COLOUR['reference'], 'value': value}]},
+            'custom': {'thresholdsStyle': {'mode': 'dashed'}}}
+
+
+def stamp(pid, x, y, w=6, h=3):
+    """Freshness stamp on every page: "Usage to 19 Nov 2026 · loaded 25 Nov", amber when the data is old."""
+    return panel(pid, 'Data', 'stat', """
+        SELECT concat(stamp, if(stale, concat(' · ', toString(days_old), ' days old'), '')) AS stamp FROM n360.v_freshness""",
+        x, y, w, h,
+        describe('The last day of usage in this load, and the day it was loaded. Amber when the data is more than '
+                 '2 days old (n360.settings stamp_stale_days): the numbers are the last good night\'s. Click for '
+                 'Pipeline health.', 'n360.v_freshness (n360.runs: loaded runs only)', 'none', 'the latest load'),
+        field=plain(field_config(mappings=[{'type': 'regex', 'options': {'pattern': '.* days old$', 'result': {
+            'color': COLOUR['amber'], 'index': 0}}}], links=[{'title': PIPELINE[1], 'url': f'/d/{PIPELINE[0]}'}])),
+        options={'reduceOptions': {'calcs': ['lastNotNull'], 'fields': '/.*/'}, 'textMode': 'value',
+                 'colorMode': 'background', 'graphMode': 'none', 'justifyMode': 'center', 'text': {'valueSize': 13}})
+
+
+def sentence(pid, sql, x, y, w, h, desc):
+    """The page's answer in one computed sentence (v2 row 1). A stat showing a string: no plugin needed."""
+    return panel(pid, 'In one sentence', 'stat', sql, x, y, w, h, desc,
+                 field=plain(field_config(noValue='Nothing loaded yet')),
+                 options={'reduceOptions': {'calcs': ['lastNotNull'], 'fields': '/.*/'}, 'textMode': 'value',
+                          'colorMode': 'none', 'graphMode': 'none', 'justifyMode': 'auto', 'text': {'valueSize': 17}})
+
+
+def page_header(pid, sentence_sql, sentence_desc, y=0):
+    """Row 1 of every page: the sentence (18 columns) and the freshness stamp (6)."""
+    return [sentence(pid, sentence_sql, 0, y, 18, 3, sentence_desc), stamp(pid + 1, 18, y)]
+
+
+def change_text(now, then, then_date):
+    """SQL: "+3 since 21 Oct" / "no change since 21 Oct" (the tile's reference, v2 principle 3)."""
+    return (f"if({then_date} IS NULL, 'no earlier night stored', concat(multiIf({now} > {then}, concat('+', toString({now} - {then})), "
+            f"{now} < {then}, concat('−', toString({then} - {now})), 'no change'), ' since ', "
+            f"toString(toDayOfMonth({then_date})), ' ', formatDateTime({then_date}, '%b')))")
+
+
+def tile(pid, title, nightly_sql, x, y, desc, w=6, h=5, unit='locale', links=None, metric=None):
+    """A headline number with its change since 30 nights ago (or the oldest stored night) and a 30-night line.
+    nightly_sql returns one row per night: (night Date, value). The tile shows the newest night's value."""
+    sql = f"""
+        WITH nightly AS ({nightly_sql.strip()}),
+             (SELECT max(night) FROM nightly) AS newest,
+             (SELECT max(night) FROM nightly WHERE night <= newest - 30) AS ref_30,
+             (SELECT min(night) FROM nightly) AS oldest,
+             if(ref_30 IS NULL OR ref_30 = toDate(0), if(oldest < newest, oldest, NULL), ref_30) AS ref,
+             (SELECT any(value) FROM nightly WHERE night = newest) AS v_now,
+             (SELECT any(value) FROM nightly WHERE night = ref) AS v_then
+        SELECT toDateTime(night) AS time, value, {change_text('v_now', 'v_then', 'ref')} AS change
+        FROM nightly WHERE night > newest - 30 ORDER BY time"""
+    p = panel(pid, title, 'stat', sql, x, y, w, h, desc, fmt='timeseries',
+              field=plain(field_config(unit=unit, decimals=0, displayName='${__field.labels.change}',
+                                       color={'mode': 'fixed', 'fixedColor': COLOUR['series']})),
+              options={'reduceOptions': {'calcs': ['lastNotNull'], 'fields': ''}, 'textMode': 'value_and_name',
+                       'colorMode': 'none', 'graphMode': 'area', 'justifyMode': 'auto', 'showPercentChange': False,
+                       'text': {'titleSize': 13, 'valueSize': 34}}, links=links)
+    p['timeFrom'] = '35d'                 # the 30-night line fills the tile whatever the dashboard's range
+    p['hideTimeOverride'] = True
+    if metric:
+        p['n360Metric'] = metric          # test_panels.py: panels with the same metric must show the same value
+    return p
+
+
+def single_tile(pid, title, sql, x, y, desc, w=6, h=5, unit='locale', links=None, metric=None, field=None):
+    """A headline number with no stored history (the reference is in the name, e.g. "of 23 VAs")."""
+    p = panel(pid, title, 'stat', sql, x, y, w, h, desc,
+              field=field or plain(field_config(unit=unit, decimals=0)),
+              options={'reduceOptions': {'calcs': ['lastNotNull'], 'fields': '/.*/'}, 'textMode': 'value_and_name',
+                       'colorMode': 'none', 'graphMode': 'none', 'justifyMode': 'auto',
+                       'text': {'titleSize': 13, 'valueSize': 34}}, links=links)
+    if metric:
+        p['n360Metric'] = metric
+    return p
+
+
+def status_night_count(cond, acct='1'):
+    """nightly_sql for tile(): entitlements per stored night matching a status condition (v_status_night)."""
+    return f"""SELECT data_date AS night, toUInt64(countIf({cond})) AS value FROM n360.v_status_night
+               WHERE {acct} GROUP BY night"""
+
+
+def status_filter_note(pid, x, y, w, h, where, total_where='1'):
+    """"12 of 19 lines · filtered to Below pace" above a filtered table (v2 interaction), with a clear link."""
+    return panel(pid, 'Showing', 'stat', f"""
+        SELECT concat(toString(countIf({where})), ' of ', toString(countIf({total_where})), ' lines and pools',
+                      if(countIf({where}) = countIf({total_where}), '', ' · filtered (Status / Customer above)')) AS shown
+        FROM n360.v_contract_status""", x, y, w, h,
+        describe('How many lines the tables below show, and whether a filter is on. Clear it with the Status and '
+                 'Customer pickers (All), or the Clear filters link.', 'n360.v_contract_status', 'Customer; Status',
+                 'the latest load'),
+        field=plain(field_config()), links=[{'title': 'Clear filters', 'url': '/d/n360-contracts'}],
+        options={'reduceOptions': {'calcs': ['lastNotNull'], 'fields': '/.*/'}, 'textMode': 'value', 'colorMode': 'none',
+                 'graphMode': 'none', 'justifyMode': 'auto', 'text': {'valueSize': 14}})
+
+
+def var_status():
+    """Status filter (Contracts): every status the view can store, shown in plain words."""
+    v = custom_var('status', 'Status', [(t, k) for k, (t, _) in STATUS.items()])
+    v.update({'multi': True, 'includeAll': True, 'current': {'text': 'All', 'value': '$__all'}})
+    for o in v['options']:
+        o['selected'] = False
+    return v
+
+
+def var_csm():
+    return query_var('csm', 'CSM', 'SELECT DISTINCT csm_rocketlane FROM n360.account ORDER BY 1')
+
+
+CSM = "csm_rocketlane IN (${csm:singlequote})"
+
+
+def with_header(p, sentence_sql, desc):
+    """Put the v2 header (sentence and freshness stamp) above a dashboard's panels: everything moves down 3 rows and
+    the top row's tiles are spread over the full width (no gap where the old header was)."""
+    top = sorted((x for x in p if x['gridPos']['y'] == 0), key=lambda x: x['gridPos']['x'])
+    for i, x in enumerate(top):
+        x['gridPos'].update(x=24 * i // len(top), w=24 * (i + 1) // len(top) - 24 * i // len(top))
+    shift = 3 - min(x['gridPos']['y'] for x in p)       # the old header's row may already be empty
+    for x in p:
+        x['gridPos']['y'] += shift
+    first = max(x['id'] for x in p) + 1
+    return page_header(first, sentence_sql, desc) + p
+
+
+STATUS_WORDS = (f"transform({STATUS_SHOWN}, ['" + "', '".join(STATUS) + "'], ['"
+                + "', '".join(t for t, _ in STATUS.values()) + "'], '')")
 
 
 # ───────────────────────── dashboards ─────────────────────────
@@ -341,273 +508,356 @@ def containment_weekly(pid, x, y, w, h, acct=ACCT, filter_text='Customer'):
 
 
 def overview():
-    """1. Portfolio overview: which customers need attention this week, and why? (04, spec 1). The home page:
-    no Back link. Colours come from n360.v_line_pace (pace) and v_customer_attention; nothing is re-ruled here."""
-    stat = {'reduceOptions': {'calcs': ['lastNotNull'], 'fields': '/.*/'}, 'textMode': 'value', 'colorMode': 'none'}
-    p = header(1, 0, w=8)
-    p.append(panel(3, 'Customers', 'stat', """
-        SELECT (SELECT count() FROM n360.account) AS Customers,
-               (SELECT count() FROM n360.contract_line) AS `Contract lines`,
-               (SELECT count() FROM n360.pool) AS Pools""", 16, 0, 8, 3,
-        describe('Customers in N360, with their contract lines and pooled entitlements. Includes customers with '
-                 'VAs but no contract line.', 'n360.account, n360.contract_line, n360.pool', 'none', 'the latest load'),
-        field=field_config(unit='locale'),
-        options={**stat, 'textMode': 'value_and_name', 'text': {'titleSize': 12, 'valueSize': 30}}))
-    p.append(panel(4, 'Lines above billed', 'stat', """
-        SELECT countIf(pct_billed > 100) AS above FROM n360.v_line_pace""", 0, 3, 8, 3,
-        describe('Lines and pools whose use is over the billed amount, each in its own contract measure. '
-                 'A pool is counted once, as the pool; its lines are never compared with billed alone.',
-                 'n360.v_line_pace', 'none (every customer)', 'each from its start date to the data-through day'),
-        field=field_config(mappings=red_when_any()), options={**stat, 'colorMode': 'background'},
-        links=[panel_link('contracts', 'Contracts')]))
-    p.append(panel(5, f'Crossing billed in {CROSS_WINDOW_DAYS} days', 'stat', f"""
-        SELECT countIf(days_to_cross BETWEEN 0 AND {CROSS_WINDOW_DAYS}) AS crossing FROM n360.v_line_pace""", 8, 3, 8, 3,
-        describe(f'Lines and pools under billed today that the stored forecast says will cross billed within '
-                 f'{CROSS_WINDOW_DAYS} days, before their term ends. Already above billed is counted in "Lines above billed".',
-                 'n360.forecast (straight line at the last-30-day rate, never recomputed), via n360.v_line_pace',
-                 'none (every customer)', f'next {CROSS_WINDOW_DAYS} days from the data-through day'),
-        options=stat, links=[panel_link('forecast', 'Forecast and runway')]))
-    p.append(panel(6, 'Drops or silences, 7 settled days', 'stat', """
-        SELECT sum(drops_silences_7d) AS flags FROM n360.v_customer_attention""", 16, 3, 8, 3,
-        describe('VA-days flagged as a drop (z of -4 or lower) or went silent (0 conversations), on settled days only. '
-                 'Provisional days (the newest 3) are not counted.',
-                 'n360.v_va_day_anomaly, via n360.v_customer_attention', 'none (every customer)',
-                 'the 7 newest settled days (data-through minus 9 to minus 3)'),
-        options=stat, links=[panel_link('anomalies', 'Anomalies')]))
-    p.append(panel(7, 'Customers needing attention', 'table', f"""
-        SELECT display_name AS Customer, account, worst_label AS `Worst line`, measure AS Measure,
-               pct_billed AS `% of billed`, pct_term AS `% of term`, pace AS Pace, pace_reason AS Why,
-               multiIf(cross_date IS NOT NULL, {date_sql('cross_date')}, pct_billed IS NULL, NULL,
-                       pct_billed > 100, 'Already above billed', 'Not before term end') AS `Crosses billed`,
-               drops_silences_7d AS `Drops 7d`
-        FROM n360.v_customer_attention
-        WHERE pace IN ('red', 'amber') OR drops_silences_7d > 0
-        ORDER BY pace_rank DESC, pace_gap DESC, Customer""", 0, 6, 24, 9,
-        describe('Customers with a line or pool off pace (red or amber), or a drop or silence on a settled day. '
-                 'Worst line = the customer\'s most off-pace line or pool (red, then amber, then the larger pace gap). '
-                 'Pace colours are proposed, set in n360.v_line_pace. Sorted red first, then by pace gap. '
-                 'Drops 7d = settled drops or silences in the 7 newest settled days (the newest 3 days are '
-                 'provisional and not counted). Click a customer to open it.',
-                 'n360.v_customer_attention (pace from n360.v_line_pace and n360.forecast; flags from n360.v_va_day_anomaly)',
-                 'red or amber pace, or a settled drop or silence',
-                 'use: start date to the data-through day; flags: the 7 newest settled days'),
-        field=field_config([
-            hidden('account'), pct('% of billed'), pct('% of term'), pace_chip('Pace'),
-            width('Customer', 140), width('Worst line', 130), width('Measure', 185), width('% of billed', 90),
-            width('% of term', 80), width('Pace', 65), width('Why', 235), width('Crosses billed', 145), width('Drops 7d', 75),
-            override('Crosses billed', ('mappings', [empty_grey()])),
-            override('Worst line', ('mappings', [empty_grey()])),
-            with_links('Customer', drill(UID['customer'], 'account', 'account', 'Open customer')),
-        ], custom={'align': 'auto'})))
-    p.append(panel(8, 'Conversations per week, top customers', 'timeseries', f"""
-        WITH top AS (SELECT account FROM n360.va_day WHERE $__dateFilter(day)
-                     GROUP BY account ORDER BY sum(conversations) DESC LIMIT {TOP_CUSTOMERS})
-        SELECT toDateTime(toMonday(d.day)) AS time,
-               if(d.account IN (SELECT account FROM top), a.display_name, 'Other') AS customer,
-               if(d.account IN (SELECT account FROM top), d.account, '') AS account,
-               if(countIf(d.conversations IS NULL) > 0, NULL, sum(d.conversations)) AS conversations
-        FROM n360.va_day AS d INNER JOIN n360.account AS a ON a.account = d.account
-        WHERE $__dateFilter(d.day) AND toMonday(d.day) >= toDate($__fromTime)
-          AND toMonday(d.day) + 6 <= (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded')
-        GROUP BY time, customer, account ORDER BY time""", 0, 15, 10, 14,
-        describe(f'Conversations started per week (Monday to Sunday), for the {TOP_CUSTOMERS} customers with the most '
-                 f'conversations in the time range, and every other customer together as Other. Conversations are the '
-                 f'platform count, not a contract measure. A week with any day not read shows as a gap, not a lower bar. '
-                 f'Only complete weeks. Click a bar to open the customer.',
-                 'n360.va_day (the platform daily conversation aggregate table and the conversation records reader)',
-                 'none (every customer)', 'dashboard time range, complete weeks only'),
+    """Overview (v2): where does the book stand, and which customers need attention? Leadership, under a minute.
+    The home page: no Back link. Statuses come from n360.v_contract_status; nothing is re-ruled here."""
+    p = page_header(1, f"""
+        SELECT concat({plural('c', 'customer needs', 'customers need')}, ' attention · ',
+                      {plural('e', 'line ends', 'lines end')}, ' in the next ', toString(days), ' days · ',
+                      toString(r), ' at renewal risk') AS sentence
+        FROM (SELECT (SELECT uniqExact(account) FROM n360.v_needs_attention) AS c,
+                     (SELECT ending_soon_days FROM n360.settings) AS days,
+                     (SELECT countIf(days_left BETWEEN 0 AND days) FROM n360.v_contract_status) AS e,
+                     (SELECT countIf(renewal_risk) FROM n360.v_contract_status) AS r)""",
+        describe('Customers with something needing attention (the list below), contract lines and pools whose term '
+                 'ends within 30 days (n360.settings ending_soon_days), and lines at renewal risk (under 50% used '
+                 'with 120 days or fewer left; proposed).', 'n360.v_needs_attention, n360.v_contract_status',
+                 'none (every customer)', 'the latest load'))
+    p.append(tile(3, 'Lines over or set to exceed billed', status_night_count("status IN ('over billed', 'will exceed')"),
+                  0, 3, describe('Contract lines and pools already over billed, or that the stored forecast says will '
+                                 'cross billed before their term ends. A pool counts once. The line under the number is '
+                                 'the last 30 nights; the change is against 30 nights ago (or the oldest stored night).',
+                                 'n360.v_status_night (n360.forecast_history), the same rules as n360.v_contract_status',
+                                 'none (every customer)', 'the last 30 stored nights'),
+                  links=[{'title': 'Contracts: over or will exceed',
+                          'url': f"/d/{UID['contracts']}?var-status=over billed&var-status=will exceed"}],
+                  metric='lines over or will exceed'))
+    p.append(tile(4, 'Lines below pace', status_night_count("status = 'below pace'"), 6, 3,
+                  describe('Contract lines and pools whose % of billed is more than 10 points behind their % of term '
+                           '(proposed, n360.settings status_pace_pts), renewal risks included.',
+                           'n360.v_status_night (n360.forecast_history)', 'none (every customer)', 'the last 30 stored nights'),
+                  links=[{'title': 'Contracts: below pace',
+                          'url': f"/d/{UID['contracts']}?var-status=below pace&var-status=renewal risk"}],
+                  metric='lines below pace'))
+    p.append(tile(5, 'VAs on V8 or later', f"""
+        SELECT snapshot_date AS night, toUInt64(countIf(engine_major >= (SELECT engine_current_major FROM n360.settings))) AS value
+        FROM n360.va_config_snapshot GROUP BY night""", 12, 3,
+        describe('VAs whose weekly configuration read shows engine V8 or later. The change is against the read 30 days '
+                 'earlier (or the oldest stored). ' + PHASE2_NOTE, 'n360.va_config_snapshot', 'none (every customer)',
+                 'weekly reads, the last 30 days'),
+        links=[panel_link('adoption', 'Adoption')], metric='vas on v8'))
+    p.append(panel(6, 'Customers using 3+ target features', 'stat', f"""
+        SELECT now() AS time, if(countIf(f.n_read > 0) = 0, NULL, toUInt64(countIf(f.n_used >= m))) AS value,
+               concat('of ', toString(countIf(f.n_read > 0)), ' customers · history not stored yet') AS change
+        FROM (SELECT account, countIf(used) AS n_used, countIf(used IS NOT NULL) AS n_read FROM n360.v_feature_use
+              GROUP BY account) AS f
+        CROSS JOIN (SELECT target_features_min AS m FROM n360.settings) AS s""", 18, 3, 6, 5,
+        describe('Customers using at least 3 of the 5 target features in the last 30 days: V8 playbooks run, the '
+                 'authoring tool, the analytics assistant, MCP servers live, supervisory rules on (proposed list; the '
+                 'v1.1 page also counts Testing, Calibration and Recipes, not exported yet). ' + PHASE2_NOTE,
+                 'n360.v_feature_use', 'none (every customer)', 'the 30 days to the data-through day'),
+        fmt='timeseries', field=plain(field_config(unit='locale', decimals=0, displayName='${__field.labels.change}')),
+        options={'reduceOptions': {'calcs': ['lastNotNull'], 'fields': ''}, 'textMode': 'value_and_name', 'colorMode': 'none',
+                 'graphMode': 'none', 'justifyMode': 'auto', 'text': {'titleSize': 13, 'valueSize': 34}},
+        links=[panel_link('adoption', 'Adoption')]))
+    p[-1]['n360Metric'] = 'customers on 3+ features'
+    p.append(panel(7, 'Contract lines by status', 'barchart', f"""
+        SELECT 'Lines and pools' AS Book, {status_columns()} FROM n360.v_contract_status""", 0, 8, 16, 8,
+        describe('Every contract line and pool (a pool counts once) by its status, as a share of the book. Grey = no '
+                 'reading yet (not built, not measured, billed not recorded, unmapped, under review, not reported). '
+                 'Click a segment to open Contracts filtered to it. Rules: n360.v_contract_status (proposed thresholds '
+                 'in n360.settings).', 'n360.v_contract_status', 'none (every customer)', 'the latest load'),
+        field=field_config(status_overrides(link=True), unit='locale', decimals=0, min=0,
+                           max=1, custom={'fillOpacity': 90, 'lineWidth': 0, 'axisPlacement': 'hidden'}),
+        options={'xField': 'Book', 'orientation': 'horizontal', 'stacking': 'percent', 'showValue': 'never', 'barWidth': 0.9,
+                 'groupWidth': 0.9, 'xTickLabelMaxLength': 0,
+                 'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True, 'calcs': ['sum']},
+                 'tooltip': {'mode': 'multi', 'sort': 'none'}, 'text': {'valueSize': 14}}))
+    p.append(panel(8, 'Status, last 30 nights', 'timeseries', f"""
+        SELECT toDateTime(data_date) AS time, {status_columns()}
+        FROM n360.v_status_night WHERE data_date > (SELECT max(data_date) FROM n360.v_status_night) - 30
+        GROUP BY time ORDER BY time""", 16, 8, 8, 8,
+        describe('The same statuses, night by night, as a share of the lines with a stored forecast (lines with no use '
+                 'or no billed amount have no stored forecast and are left out here).', 'n360.v_status_night '
+                 '(n360.forecast_history)', 'none (every customer)', 'the last 30 stored nights'),
         fmt='timeseries',
-        field=field_config(unit='locale', decimals=0, displayName='${__field.labels.customer}',
-                           links=[{'title': 'Open customer',
-                                   'url': f"/d/{UID['customer']}?var-account=${{__field.labels.account}}&${{__url_time_range}}"}],
-                           custom={'drawStyle': 'bars', 'fillOpacity': 80, 'lineWidth': 1, 'spanNulls': False,
-                                   'stacking': {'mode': 'normal', 'group': 'A'}}),
-        options={'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
-                 'tooltip': {'mode': 'multi', 'sort': 'desc'}}))
-    p.append(panel(9, 'Use against billed, by line', 'table', f"""
-        SELECT if(l.entitlement = 'pool', l.label, concat(a.display_name, ' · ', l.label)) AS Line,
-               l.pct_billed AS `% of billed`, l.pct_billed AS `Used`, l.pct_term AS `% of term`,
-               if(l.entitlement = 'pool',
-                  concat('/d/{UID['customer']}?var-account=', l.account),
-                  concat('/d/{UID['line']}?var-line=', l.line_key, '&var-account=', l.account))
-                   AS drill
-        FROM n360.v_line_pace AS l INNER JOIN n360.account AS a ON a.account = l.account
-        WHERE l.pct_billed IS NOT NULL
-        ORDER BY l.pct_billed DESC""", 10, 15, 14, 14,
-        describe('Each line and pool: use as % of billed, in its own contract measure. The bar stops at 100%; the '
-                 'number beside it is the true %. % of term beside it (a tick mark on the bar is not available in '
-                 'Grafana OSS). Not measurable, not implemented and unread lines are left out (see Contracts). '
-                 'Click a line to open it; a pool opens its customer.',
-                 'n360.v_line_pace', 'lines and pools with a % of billed', 'start date to the data-through day'),
-        field=field_config([
-            hidden('drill'), width('% of billed', 90), width('% of term', 90), pct('% of billed'), pct('% of term'),
-            override('Used', ('unit', 'percent'), ('min', 0), ('max', 100), ('color', {'mode': 'fixed', 'fixedColor': COLOUR['neutral']}),
-                     ('custom.cellOptions', {'type': 'gauge', 'mode': 'basic', 'valueDisplayMode': 'hidden'})),
-            with_links('Line', path_link('drill', 'Open')),
-        ], custom={'align': 'auto'})))
-    return dashboard(UID['overview'], 'N360 · Portfolio overview', p)
+        field=field_config(status_overrides(), unit='percentunit', min=0,
+                           custom={'drawStyle': 'bars', 'fillOpacity': 90, 'lineWidth': 0, 'barAlignment': 0,
+                                   'stacking': {'mode': 'percent', 'group': 'A'}}),
+        options={'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'},
+                 'tooltip': {'mode': 'multi', 'sort': 'none'}}))
+    p[-1]['timeFrom'] = '35d'
+    p.append(panel(9, 'Needs attention', 'table', f"""
+        SELECT display_name AS Customer, subject AS `Line or VA`, issue AS Issue, {date_sql('issue_date')} AS `Date`,
+               status AS Status, csm AS CSM, account, drill
+        FROM (SELECT n.*, if(c.renewal_risk, 'renewal risk', n.status) AS status
+              FROM n360.v_needs_attention AS n
+              LEFT JOIN (SELECT full_label, renewal_risk FROM n360.v_contract_status) AS c ON c.full_label = n.subject)
+        ORDER BY issue_date, rank LIMIT 8""", 0, 16, 24, 9,
+        describe('At most 8 items, soonest date first: a line or pool over billed, set to exceed (date = when it '
+                 'crosses), at renewal risk, or whose term ended in the last 90 days; or a VA with 1,000+ '
+                 'conversations down 25% or more (last 30 days against the 30 before). Thresholds proposed '
+                 '(n360.settings). Click a customer, a line or a VA to open it; "View all" opens Customer health.',
+                 'n360.v_needs_attention (n360.v_contract_status, n360.v_va_change)', 'none (every customer)',
+                 'the latest load'),
+        field=field_config([hidden('account'), hidden('drill'),
+                            coloured('Status', {**STATUS, 'conversations down': ('Conversations down', 'down')}, 'color-background'),
+                            width('Customer', 180),
+                            width('Line or VA', 300), width('Issue', 230), width('Date', 120), width('Status', 130),
+                            with_links('Customer', drill(UID['customer'], 'account', 'account', 'Open customer')),
+                            with_links('Line or VA', path_link('drill', 'Open'))], noValue='Nothing needs attention'),
+        links=[{'title': 'View all: Customer health', 'url': f"/d/{UID['health']}?${{__url_time_range}}"}],
+        may_be_empty='nothing needs attention'))
+    p.append(conversations_chart(10, 0, 25, 24, 9))
+    return dashboard(UID['overview'], 'N360 · Overview', p, [var_period()])
 
 
 STATS = {'reduceOptions': {'calcs': ['lastNotNull'], 'fields': '/.*/'}, 'textMode': 'value_and_name', 'colorMode': 'none',
          'text': {'titleSize': 12, 'valueSize': 26}}
 ONE_ACCT = "account IN (${account:singlequote})"
 STATS_TEXT = {**STATS, 'text': {'titleSize': 12, 'valueSize': 18}}   # stats that carry words
-AT_POOL = {'type': 'special', 'options': {'match': 'null', 'result': {'text': 'At the pool', 'color': 'transparent', 'index': 0}}}
 TIMELINE = {'noValue': '', 'custom': {'spanNulls': True}}
 LINE = "line_key IN (${line:singlequote})"
 VA = "toString(bot_id) IN (${va:singlequote})"
 
 
 def customer():
-    """2. Customer (spec 2): one customer, every line, pool, VA and flag. Drills: line -> Contract line, VA -> VA."""
-    p = header(1, 0, w=6)
-    p.append(panel(3, 'Contract lines', 'stat', f"""
-        SELECT count() AS `Contract lines`, countIf(measure = 'not implemented') AS `Not implemented`,
-               countIf(measure = 'not measurable') AS `Not measurable`
-        FROM n360.contract_line WHERE {ONE_ACCT}""", 12, 0, 6, 3,
-        describe('Contract lines on the entitlement sheet for this customer, and how many have no usage to show: '
-                 'not implemented (contracted, nothing built) or not measurable (unit the platform does not count).',
-                 'n360.contract_line', 'Customer', 'the latest load'), options=STATS))
-    p.append(panel(4, 'Anomalies, 7 settled days', 'stat', f"""
-        SELECT drops_silences_7d AS `Drops or silences`, spikes_7d AS Spikes, provisional_flags AS Provisional
-        FROM n360.v_customer_attention WHERE {ONE_ACCT}""", 18, 0, 6, 3,
-        describe('VA-days flagged on the 7 newest settled days, and flags on the newest 3 days (provisional: may '
-                 'still change, never an alert).', 'n360.v_va_day_anomaly via n360.v_customer_attention', 'Customer',
-                 'the 7 newest settled days; provisional = the newest 3 days'), options=STATS))
-    p.append(panel(5, 'Worst line', 'stat', f"""
-        SELECT if(worst_entitlement = 'pool', 'Pooled entitlement', worst_label) AS Line, pct_billed AS `% of billed`, pct_term AS `% of term`, pace AS Pace
-        FROM n360.v_customer_attention WHERE {ONE_ACCT}""", 0, 3, 8, 3,
-        describe('The most off-pace line or pool (red, then amber, then the larger pace gap), in its own measure.',
-                 'n360.v_customer_attention (from n360.v_line_pace)', 'Customer', 'start date to the data-through day'),
-        field=plain(field_config([pct('% of billed'), pct('% of term'), override('Pace', ('mappings', label_colours(PACE_LABEL)))])),
-        options={**STATS_TEXT, 'colorMode': 'value'}))
-    p.append(panel(6, 'Total used against billed', 'stat', f"""
-        SELECT if(same, sum(used), NULL) AS Used, if(same, sum(billed), NULL) AS Billed,
-               if(same, round(100 * sum(used) / sum(billed), 1), NULL) AS `% of billed`,
-               if(same, any(measure), 'Not added up: lines differ in measure or term') AS Measure
-        FROM (SELECT *, (SELECT uniqExact(measure, start_date, end_date) = 1 FROM n360.v_line_pace
-                         WHERE {ONE_ACCT} AND pct_billed IS NOT NULL) AS same
-              FROM n360.v_line_pace WHERE {ONE_ACCT} AND pct_billed IS NOT NULL)
-        GROUP BY same""", 8, 3, 8, 3,
-        describe('Used against billed across this customer\'s lines and pools, only when they share one measure and '
-                 'one term (rules 2 and 5): never across different measures or contracts. Not implemented, not measurable '
-                 'and unread lines are left out. A pool counts once.',
-                 'n360.v_line_pace', 'Customer; lines and pools with a % of billed', 'start date to the data-through day'),
-        field=field_config([count_col('Used'), count_col('Billed'), pct('% of billed')], noValue='Not added up'),
-        options=STATS_TEXT, may_be_empty='a customer with no measured line'))
-    p.append(panel(7, 'Main line, last 30 days', 'stat', f"""
-        SELECT argMax(if(entitlement = 'pool', 'Pooled entitlement', label), used) AS Line, argMax(round(rate_per_day), used) AS `Per day`,
-               argMax(ifNull(step_change, 'none'), used) AS `Step change`
-        FROM n360.v_line_pace WHERE {ONE_ACCT} AND rate_per_day IS NOT NULL""", 16, 3, 8, 3,
-        describe('The line or pool with the most use: its rate per day over the last 30 days (the stored forecast\'s '
-                 'rate), and whether that rate is a step change from its term average (more than 50% different, '
-                 'flagged upstream).', 'n360.forecast via n360.v_line_pace', 'Customer', 'last 30 days to the data-through day'),
-        field=field_config([count_col('Per day')]), options=STATS_TEXT, may_be_empty='a customer with no forecast'))
-    p.append(panel(8, 'Contract lines', 'table', f"""
-        SELECT label AS Line, measure AS Measure, used AS Used, billed AS Billed, pct_billed AS `% of billed`,
-               pace AS Pace, pct_term AS `% of term`, forecast_m3 AS `Forecast to horizon`,
-               multiIf(exhaust_date IS NOT NULL, {date_sql('exhaust_date')}, pct_billed > 100, 'Already above billed', NULL) AS `Runs out`,
-               concat('/d/n360-line?var-account=', account, '&var-line=', line_key) AS drill
-        FROM n360.v_line_pace WHERE {ONE_ACCT} AND entitlement = 'line'
-        ORDER BY pace_rank DESC, label""", 0, 6, 24, 7,
-        describe('Every contract line not in a pool, in its own measure. A not implemented or not measurable line '
-                 'shows grey and "Not reported yet": it has no usage, never zero. Forecast to horizon and Runs out are '
-                 'the stored forecast (straight line at the last-30-day rate). Click a line to open it.',
-                 'n360.v_line_pace (n360.v_line_status, n360.forecast)', 'Customer; lines not in a pool (pools below)',
-                 'start date to the data-through day; forecast to its horizon'),
-        field=field_config([hidden('drill'), count_col('Used'), count_col('Billed'), count_col('Forecast to horizon'),
-                            pct('% of billed'), pct('% of term'), pace_chip('Pace'), width('Pace', 70), width('Measure', 190),
-                            *[override(c, ('mappings', [empty_grey()])) for c in ('Used', '% of billed', 'Forecast to horizon',
-                                                                                  'Runs out')],
-                            with_links('Line', path_link('drill', 'Open line'))], custom={'align': 'auto'},
-                           noValue='All lines are pooled: see Pooled entitlement below'),
-        may_be_empty='a customer whose lines are all pooled'))
-    p.append(panel(9, 'Pooled entitlement', 'table', f"""
-        SELECT label AS Entitlement, used AS Used, toNullable(billed) AS Billed, pct_billed AS `% of billed`,
-               pace AS Pace, pct_term AS `% of term`
-        FROM (SELECT 0 AS o, label, used, billed, pct_billed, pace, pct_term
-              FROM n360.v_line_pace WHERE {ONE_ACCT} AND entitlement = 'pool'
-              UNION ALL
-              SELECT 1, concat('  ', l.channel, ' (in the pool)'), s.consumed, NULL, NULL, NULL, NULL
-              FROM n360.v_line_status AS s INNER JOIN n360.contract_line AS l ON l.line_key = s.line_key
-              WHERE s.{ONE_ACCT} AND s.pool_id IS NOT NULL)
-        ORDER BY o, label""", 0, 13, 24, 6,
-        describe('One billed amount shared by several lines of this customer. Use is compared with billed only at the '
-                 'pool; each line\'s own use is shown for information, never against billed. Shown only for customers '
-                 'with a pool.', 'n360.v_line_pace, n360.v_line_status (consumption_mapping.json "pools")', 'Customer',
+    """One customer (v2): everything about one account, in meeting order. Is this contract on track, and what is the
+    customer running? Drills: line -> Contract line, VA -> VA."""
+    A = ONE_ACCT
+    worst = f"""(SELECT argMin(tuple(line_label, {STATUS_SHOWN}, pct_billed, pct_term, days_left, cross_date),
+                                tuple(status_rank, -ifNull(pct_billed, 0))) AS w
+                 FROM n360.v_contract_status WHERE {A})"""
+    p = page_header(1, f"""
+        WITH {worst} AS ws,
+             (SELECT count() FROM n360.v_contract_status WHERE {A}) AS n_lines,
+             (SELECT minIf(end_date, days_left >= 0) FROM n360.v_contract_status WHERE {A}) AS next_end,
+             (SELECT count() FROM n360.va WHERE {A}) AS n_vas
+        SELECT concat(a.display_name, ': ',
+                      if(n_lines = 0, 'no contract line (unbilled)', multiIf(
+                          ws.2 = 'over billed', concat(ws.1, ' is over billed (', toString(round(ws.3)), '%)'),
+                          ws.2 = 'will exceed', concat(ws.1, ' is set to exceed billed on ', {date_sql('ws.6')}),
+                          ws.2 = 'renewal risk', concat(ws.1, ' is at renewal risk: ', toString(round(ws.3)), '% used, ',
+                                                        toString(ws.5), ' days left'),
+                          ws.2 = 'below pace', concat(ws.1, ' is below pace: ', toString(round(ws.3)), '% used, ',
+                                                      toString(round(ws.4)), '% of the term gone'),
+                          ws.2 IN ('on pace', 'ahead'), 'every line on pace',
+                          ws.2 = 'too early', 'too early to tell',
+                          'no line has a reading yet')),
+                      ' · ', {plural('n_vas', 'VA', 'VAs')},
+                      if(next_end = toDate(0) OR n_lines = 0, '', concat(' · next term end ', {date_sql('next_end')},
+                         ' (', toString(dateDiff('day', (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded'), next_end)), ' days)')),
+                      ' · CSM ', a.csm_rocketlane) AS sentence
+        FROM n360.account AS a WHERE a.{A}""",
+        describe('The customer\'s most urgent line or pool (statuses from n360.v_contract_status, proposed thresholds), '
+                 'how many VAs it runs, its next term end and its CSM.', 'n360.v_contract_status, n360.va, n360.account',
+                 'Customer', 'the latest load'))
+    shown = "', '".join(t for t, _ in STATUS.values())
+    keys = "', '".join(STATUS)
+    p.append(text_tile(3, 'Contract status (most urgent line)', f"""
+        SELECT concat(arrayElement(['{shown}'], indexOf(['{keys}'], argMin({STATUS_SHOWN}, tuple(status_rank, -ifNull(pct_billed, 0))))),
+                      ' · ', argMin(line_label, tuple(status_rank, -ifNull(pct_billed, 0)))) AS status
+        FROM n360.v_contract_status WHERE {A} HAVING count() > 0""",
+        0, 3, 6, 5, describe('The status of this customer\'s most urgent line or pool, and which one it is. Colours: the '
+                             'contract status palette (Contracts).', 'n360.v_contract_status', 'Customer', 'the latest load'),
+        mappings=status_regex_colours(), no_value='No contract line (unbilled)', colour_mode='background',
+        may_be_empty='an unbilled customer'))
+    p.append(text_tile(4, 'VAs on V8 or later', f"""
+        SELECT if(count() = 0, NULL, concat(toString(countIf(current_engine)), ' of ', toString(count()))) AS vas
+        FROM n360.v_va_config_latest WHERE {A}""", 6, 3, 6, 5,
+        describe('VAs whose newest weekly configuration read shows engine V8 or later. ' + PHASE2_NOTE,
+                 'n360.v_va_config_latest', 'Customer', 'the newest read per VA')))
+    p.append(text_tile(5, 'Target features used', f"""
+        SELECT if(countIf(used IS NOT NULL) = 0, NULL, concat(toString(countIf(used)), ' of ', toString(count()))) AS f
+        FROM n360.v_feature_use WHERE {A}""", 12, 3, 6, 5,
+        describe('Target features this customer used in the last 30 days (proposed list: V8 playbooks, authoring tool, '
+                 'analytics assistant, MCP servers, supervisory rules). Which ones: Adoption, below. ' + PHASE2_NOTE,
+                 'n360.v_feature_use', 'Customer', 'the 30 days to the data-through day')))
+    p.append(text_tile(6, 'Open tickets', f"""
+        SELECT if((SELECT count() FROM n360.ps_ticket) = 0, NULL,
+                  if(countIf(status = 'open') = 0, 'None open', toString(countIf(status = 'open')))) AS t
+        FROM n360.ps_ticket WHERE {A}""", 18, 3, 6, 5,
+        describe('Support tickets still open for this customer ("None open": tickets are exported and none is open; '
+                 '"Not reported yet": no ticket export). Priority is not exported yet. ' + PHASE2_NOTE,
+                 'n360.ps_ticket', 'Customer', 'all tickets')))
+    p.append(panel(7, 'Notes', 'table', f"""
+        SELECT note AS Note FROM n360.v_customer_notes WHERE {A} ORDER BY o""", 0, 8, 12, 5,
+        describe('Pinned facts about this customer\'s contracts, from the contract data: pools, signed SOW terms, contract '
+                 'rules (live or pending), lines with no reading, ended terms, VAs on no contract.',
+                 'n360.v_customer_notes (n360.pool, n360.contract_line, n360.rule, n360.v_contract_status, n360.va)',
+                 'Customer', 'the latest load'),
+        field=field_config(noValue='No notes'), options={'showHeader': False, 'cellHeight': 'sm'},
+        may_be_empty='a customer with nothing to note'))
+    p.append(panel(8, 'Needs attention', 'table', f"""
+        SELECT subject AS `Line or VA`, issue AS Issue, {date_sql('issue_date')} AS `Date`, drill
+        FROM n360.v_needs_attention WHERE {A} ORDER BY issue_date""", 12, 8, 12, 5,
+        describe('Items from the Overview\'s Needs attention list for this customer (same rule, proposed thresholds). '
+                 'Click one to open it.', 'n360.v_needs_attention', 'Customer', 'the latest load'),
+        field=field_config([hidden('drill'), width('Issue', 210), width('Date', 115),
+                            with_links('Line or VA', path_link('drill', 'Open'))], noValue='Nothing needs attention'),
+        may_be_empty='nothing needs attention'))
+    p.append(panel(9, 'Contract lines', 'table', f"""
+        SELECT Line, Status, `% of billed`, `% of term`, Used, Billed, `At term end`, `Term ends`, `Days left`, Measure, drill
+        FROM (
+            SELECT 0 AS o, status_rank AS r, line_label AS Line, {STATUS_SHOWN} AS Status, pct_billed AS `% of billed`,
+                   pct_term AS `% of term`, used AS Used, billed AS Billed, forecast_end_pct AS `At term end`,
+                   {date_sql('end_date')} AS `Term ends`, days_left AS `Days left`, measure AS Measure, drill
+            FROM n360.v_contract_status WHERE {A}
+            UNION ALL
+            SELECT 1, 99, concat('   in the pool: ', l.channel), 'in pool', NULL, NULL, s.consumed, NULL, NULL,
+                   {date_sql('l.end_date')}, NULL, l.measure, concat('/d/n360-line?var-account=', l.account, '&var-line=', l.line_key)
+            FROM n360.v_line_status AS s INNER JOIN n360.contract_line AS l ON l.line_key = s.line_key
+            WHERE s.{A} AND s.pool_id IS NOT NULL)
+        ORDER BY o, r, Line""", 0, 13, 24, 6,
+        describe('Every line and pool, in its own contract measure; a pool\'s lines are listed under it for information, '
+                 'never against billed. The bar is % of billed (full at 100%; the number is the true %). At term end = '
+                 'the stored forecast\'s rate carried to the term end. Grey statuses have no reading ("Not reported '
+                 'yet", never zero). Click a line to open it.', 'n360.v_contract_status, n360.v_line_status', 'Customer',
                  'start date to the data-through day'),
-        field=field_config([count_col('Used'), count_col('Billed'), pct('% of billed'), pct('% of term'),
-                            *[override(c, ('mappings', [AT_POOL])) for c in ('Billed', '% of billed', '% of term')],
-                            override('Pace', ('mappings', label_colours(PACE_LABEL) + [AT_POOL]),
-                                     ('custom.cellOptions', {'type': 'color-background'})), width('Pace', 90)],
-                           custom={'align': 'auto'}, noValue='No pooled entitlement for this customer'),
-        may_be_empty='a customer with no pool'))
-    p.append(panel(10, 'Used per week, per line', 'timeseries', f"""
-        SELECT toDateTime(toMonday(d.day)) AS time, {LINE_LABEL} AS line,
-               if(countIf(d.measured IS NULL) > 0, NULL, sum(d.measured)) AS used
-        FROM n360.line_day AS d INNER JOIN n360.contract_line AS l ON l.series_key = d.series_key
-        WHERE d.kind = 'line' AND d.{ONE_ACCT} AND l.measure NOT IN ('not measurable', 'not implemented')
-          AND $__dateFilter(d.day) AND toMonday(d.day) >= toDate($__fromTime) AND toMonday(d.day) + 6 <= {DATA_THROUGH_SQL}
-        GROUP BY time, line ORDER BY time""", 0, 18, 12, 9,
-        describe('Each line\'s contract measure per week, one series per line (never added up across lines). '
-                 'Not measurable and not implemented lines have no usage and are left out. A week with an unread day is a '
-                 'gap. Complete weeks only.', 'n360.line_day with n360.contract_line', 'Customer; measured lines',
-                 'dashboard time range, complete weeks (Monday start)'),
-        fmt='timeseries', field=field_config(unit='locale', decimals=0, displayName='${__field.labels.line}',
-                                             custom={'spanNulls': False, 'lineWidth': 2})))
-    p.append(containment_weekly(11, 12, 18, 12, 9, acct=ONE_ACCT))
+        field=field_config([hidden('drill'), coloured('Status', {**STATUS, 'in pool': ('In the pool', 'none')}, 'color-background'),
+                            count_col('Used'), count_col('Billed'),
+                            override('% of billed', ('unit', 'percent'), ('decimals', 0), ('min', 0), ('max', 100),
+                                     ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series']}),
+                                     ('custom.cellOptions', {'type': 'gauge', 'mode': 'basic', 'valueDisplayMode': 'text'})),
+                            pct('% of term'), override('% of term', ('decimals', 0)), pct('At term end'),
+                            override('At term end', ('decimals', 0)),
+                            override('Days left', ('mappings', [{'type': 'range', 'options': {'from': -100000, 'to': -1,
+                                     'result': {'text': 'Ended', 'index': 0}}}])),
+                            *[override(c, ('mappings', [{'type': 'special', 'options': {'match': 'null', 'result': {
+                                'text': '', 'index': 0}}}])) for c in ('% of billed', 'At term end', 'Billed', '% of term', 'Days left')],
+                            override('Used', ('mappings', [empty_grey()])),
+                            width('Line', 220), width('Status', 140), width('% of billed', 160), width('% of term', 80),
+                            width('Used', 135), width('Billed', 110), width('At term end', 100), width('Term ends', 115),
+                            width('Days left', 80), with_links('Line', path_link('drill', 'Open line'))],
+                           noValue='No contract line (unbilled customer)'),
+        options={'cellHeight': 'sm'}, may_be_empty='an unbilled customer'))
+    p.append(panel(10, '% of billed over the term', 'timeseries', f"""
+        WITH ent AS (
+            SELECT l.series_key AS sk, if(l.pool_id IS NULL, c1.line_label, c2.line_label) AS lab,
+                   if(l.pool_id IS NULL, c1.billed, c2.billed) AS b, if(l.pool_id IS NULL, l.start_date, c2.start_date) AS st
+            FROM n360.contract_line AS l
+            LEFT JOIN (SELECT line_key, line_label, billed FROM n360.v_contract_status WHERE entitlement = 'line') AS c1
+                   ON c1.line_key = l.line_key
+            LEFT JOIN (SELECT account, pool_id, line_label, billed, start_date FROM n360.v_contract_status
+                       WHERE entitlement = 'pool') AS c2 ON c2.account = l.account AND c2.pool_id = l.pool_id
+            WHERE l.{A}),
+             daily AS (SELECT d.day AS day, ent.lab AS lab, any(ent.b) AS b, sum(d.measured) AS m
+                       FROM n360.line_day AS d INNER JOIN ent ON ent.sk = d.series_key
+                       WHERE d.kind = 'line' AND d.day >= ent.st AND ent.b > 0 GROUP BY day, lab)
+        SELECT toDateTime(day) AS time, lab AS line,
+               round(100 * sum(m) OVER (PARTITION BY lab ORDER BY day ROWS UNBOUNDED PRECEDING) / b, 1) AS pct
+        FROM daily ORDER BY time""", 0, 19, 12, 9,
+        describe('Each line or pool\'s running total as % of its billed amount, from its start date (a pool as one line). '
+                 'The dashed line is 100% of billed. Days not read add nothing. Lines with no reading are left out.',
+                 'n360.line_day, n360.v_contract_status', 'Customer; lines and pools with a billed amount',
+                 'each term from its start date'),
+        fmt='timeseries',
+        field=field_config(unit='percent', decimals=0, min=0, displayName='${__field.labels.line}',
+                           custom={'lineWidth': 2, 'spanNulls': False, **reference_line(100)['custom']},
+                           thresholds=reference_line(100)['thresholds'], **series_colours()),
+        options={'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'desc'}}, may_be_empty='no line with a billed amount'))
+    p[-1]['n360Reference'] = True
+    p[-1]['timeFrom'] = '1y'
+    conv = conversations_chart(11, 12, 21, 12, 9, acct=f"d.{A}", title='Conversations, and containment', va_filter='va')
+    conv['gridPos'].update(y=19)
+    conv['targets'][0]['rawSql'] = conv['targets'][0]['rawSql'].replace(
+        "AS `Still counting`\n", """AS `Still counting`,
+               -- containment only when the chosen VAs share one channel (never across channels)
+               if(uniqExact(arrayStringConcat(v.channels, ',')) = 1 AND sum(d.engaged) > 0 AND countIf(d.handoffs IS NULL) = 0,
+                  round(100 * (1 - sum(d.handoffs) / sum(d.engaged)), 1), NULL) AS `Containment %`
+""").replace("              FROM n360.va_day) AS d\n", "              FROM n360.va_day) AS d\n        INNER JOIN n360.va AS v ON v.bot_id = d.bot_id\n")
+    conv['description'] = describe(
+        'Conversations per day, week or month (Period picker) for the VAs chosen in the VA picker. The newest period is '
+        'faded ("Still counting") while it is not over or holds days that may still settle. The line is containment '
+        '(1 - handoffs / engaged, right axis), drawn only when the chosen VAs share one channel: containment is never '
+        'added up across channels. Pick one VA to see its own.', 'n360.va_day, n360.va', 'Customer; VA',
+        'dashboard time range, by the Period picker')
+    conv['fieldConfig']['overrides'].append(override('Containment %', ('unit', 'percent'), ('custom.drawStyle', 'line'),
+                                                     ('custom.lineWidth', 2), ('custom.axisPlacement', 'right'),
+                                                     ('custom.stacking', {'mode': 'none'}), ('min', 0), ('max', 100),
+                                                     ('color', {'mode': 'fixed', 'fixedColor': COLOUR['dark']})))
+    p.append(conv)
     p.append(panel(12, 'VAs', 'table', f"""
-        SELECT {VA_LABEL} AS VA, toString(v.region) AS Region, toString(v.consumption_source) AS Reader,
-               if(countIf(d.conversations IS NULL) > 0, NULL, sum(d.conversations)) AS `Conversations, 30 days`,
-               if(countIf(d.handoffs IS NOT NULL) = 0, NULL, 1 - sumIf(d.handoffs, d.handoffs IS NOT NULL) / sumIf(d.engaged, d.handoffs IS NOT NULL)) AS `Containment, 30 days`,
-               any(f.n_settled) AS `Flags, 30 days`, any(f.n_provisional) AS `Provisional`,
-               concat('/d/n360-va?var-account=', v.account, '&var-va=', toString(v.bot_id)) AS drill
-        FROM n360.va AS v
-        LEFT JOIN n360.va_day AS d ON d.bot_id = v.bot_id AND d.day > {DATA_THROUGH_SQL} - 30
-        LEFT JOIN (SELECT bot_id, countIf(NOT provisional) AS n_settled, countIf(provisional) AS n_provisional
-                   FROM n360.v_va_day_anomaly WHERE kind != 'normal' AND day > {DATA_THROUGH_SQL} - 30 GROUP BY bot_id) AS f
-               ON f.bot_id = v.bot_id
-        WHERE v.{ONE_ACCT}
-        GROUP BY v.bot_id, v.account, v.va_name, v.channels, v.region, v.consumption_source ORDER BY VA""", 0, 27, 24, 6,
-        describe('Every VA of this customer. Containment = 1 - handoffs / engaged, per VA; "Not reported yet" where '
-                 'handoffs are not read (conversation records reader), never 0% or 100%. Flags = drops, silences and '
-                 'spikes on settled days; provisional = the newest 3 days. Click a VA to open it.',
-                 'n360.va, n360.va_day, n360.v_va_day_anomaly', 'Customer', 'the 30 days to the data-through day'),
-        field=field_config([hidden('drill'), count_col('Conversations, 30 days'), count_col('Flags, 30 days'),
-                            count_col('Provisional'),
-                            override('Containment, 30 days', ('unit', 'percentunit'), ('decimals', 1), ('mappings', [empty_grey()])),
-                            override('Conversations, 30 days', ('mappings', [empty_grey()])),
-                            with_links('VA', path_link('drill', 'Open VA'))], custom={'align': 'auto'})))
-    p.append(panel(13, 'Recent anomalies', 'table', f"""
+        SELECT c.va AS VA, cfg.engine_version AS Engine, if(cfg.bot_id IS NULL, NULL, if(cfg.current_engine, 'V8 or later', 'Older'))
+                   AS `Engine status`, cfg.v8_playbooks AS `V8 playbooks`, cfg.legacy_intents AS `Legacy intents`,
+               c.convs_30 AS `Conversations, 30 days`, c.convs_change_pct AS `vs previous 30`,
+               c.containment_30 AS Containment, c.containment_change_pts AS `Change (points)`,
+               arrayStringConcat(arrayFilter(x -> x != '', [if(c.convs_down, 'Conversations down', ''),
+                                                            if(c.containment_down, 'Containment down', '')]), ' · ') AS Flag,
+               concat('/d/n360-va?var-account=', c.account, '&var-va=', toString(c.bot_id)) AS drill
+        FROM n360.v_va_change AS c
+        LEFT JOIN (SELECT toNullable(bot_id) AS bot_id, engine_version, current_engine, v8_playbooks, legacy_intents
+                   FROM n360.v_va_config_latest) AS cfg ON cfg.bot_id = c.bot_id
+        WHERE c.{A} ORDER BY `Conversations, 30 days` DESC""", 0, 28, 24, 5,
+        describe('Every VA of this customer: engine and coverage (V8 playbooks against legacy intents, from the newest '
+                 'weekly configuration read), conversations and containment over the last 30 days against the 30 '
+                 'before. Containment is per VA, never across channels; "Not reported yet" where handoffs are not read. '
+                 'Flags: conversations down 10%+ or containment down 3+ points (proposed, n360.settings). Click a VA '
+                 'to open it.', 'n360.v_va_change (n360.va_day), n360.v_va_config_latest', 'Customer',
+                 'the 60 days to the data-through day; the newest configuration read'),
+        field=field_config([hidden('drill'), count_col('Conversations, 30 days'),
+                            override('vs previous 30', ('unit', 'percent'), ('decimals', 0)),
+                            override('Containment', ('unit', 'percent'), ('decimals', 0)),
+                            override('Change (points)', ('decimals', 1)),
+                            coloured('Engine status', {'V8 or later': ('V8 or later', 'green'), 'Older': ('Older', 'amber')},
+                                     'color-background'),
+                            coloured('Flag', {'Conversations down': ('Conversations down', 'down'),
+                                              'Containment down': ('Containment down', 'down'),
+                                              'Conversations down · Containment down': ('Conversations and containment down', 'down'),
+                                              '': ('', 'none')}),
+                            *[override(c, ('mappings', [empty_grey()])) for c in
+                              ('Engine', 'V8 playbooks', 'Legacy intents', 'Conversations, 30 days', 'vs previous 30',
+                               'Containment', 'Change (points)')],
+                            width('VA', 200), width('Engine', 80), width('Engine status', 120), width('Flag', 230),
+                            with_links('VA', path_link('drill', 'Open VA'))]),
+        options={'cellHeight': 'sm'}))
+    p.append(panel(13, 'Target features', 'table', f"""
+        SELECT feature AS Feature, if(used IS NULL, NULL, if(used, 'Used', 'Not used')) AS `Last 30 days`
+        FROM n360.v_feature_use WHERE {A} ORDER BY feature""", 0, 33, 8, 7,
+        describe('Which target features this customer used in the last 30 days (proposed list). ' + PHASE2_NOTE,
+                 'n360.v_feature_use', 'Customer', 'the 30 days to the data-through day'),
+        field=field_config([coloured('Last 30 days', {'Used': ('Used', 'green'), 'Not used': ('Not used', 'grey_light')},
+                                     'color-background')]), options={'cellHeight': 'sm'}))
+    p.append(panel(14, 'Playbooks, last 31 days', 'table', f"""
+        SELECT pb.playbook AS Playbook, {VA_LABEL} AS VA, sum(pb.executions) AS Executions,
+               if(sum(pb.executions) = 0, 'Built, not run', 'Running') AS Status
+        FROM n360.playbook_day AS pb INNER JOIN n360.va AS v ON v.bot_id = pb.bot_id
+        WHERE pb.{A} AND pb.day > {DATA_THROUGH_SQL} - 31
+        GROUP BY pb.playbook, v.va_name, v.channels ORDER BY Executions, Playbook""", 8, 33, 16, 7,
+        describe('Executions per playbook. "Built, not run" = authored and live but run 0 times (v1.1 "Authored, not '
+                 'live"). ' + PHASE2_NOTE, 'n360.playbook_day', 'Customer', 'the 31 days to the data-through day'),
+        field=field_config([count_col('Executions'), width('Status', 130),
+                            coloured('Status', {'Built, not run': ('Built, not run', 'amber'), 'Running': ('Running', 'none')})],
+                           noValue='No playbook data for this customer'),
+        options={'cellHeight': 'sm'}, may_be_empty='no playbook data'))
+    p.append(panel(15, 'Recent anomalies', 'table', f"""
         SELECT {date_sql('a.day')} AS Day, {VA_LABEL} AS VA, a.kind AS Kind, a.actual AS Actual, a.expected AS Expected,
-               a.z AS z, if(a.provisional, 'Provisional', 'Settled') AS Status
+               if(a.provisional, 'Provisional', 'Settled') AS State
         FROM n360.v_va_day_anomaly AS a INNER JOIN n360.va AS v ON v.bot_id = a.bot_id
-        WHERE a.{ONE_ACCT} AND a.kind != 'normal' AND a.day > {DATA_THROUGH_SQL} - 30
-        ORDER BY a.day DESC""", 0, 33, 24, 6,
-        describe('Days a VA went silent, dropped (z of -4 or lower) or spiked (4 or higher) against the same weekday '
-                 'over the previous 8 weeks. Provisional days (the newest 3) may still change and never alert.',
+        WHERE a.{A} AND a.kind != 'normal' AND a.day > {DATA_THROUGH_SQL} - 30
+        ORDER BY a.day DESC""", 0, 40, 12, 6,
+        describe('Days a VA went silent, dropped (z of -4 or lower) or spiked (4 or higher) against the same weekday over '
+                 'the previous 8 weeks. Provisional days (the newest 3) may still change and never alert.',
                  'n360.v_va_day_anomaly', 'Customer; flagged days only', 'the 30 days to the data-through day'),
         field=field_config([count_col('Actual'), count_col('Expected'),
-                            override('Status', ('mappings', label_colours({'Provisional': ('Provisional', 'amber'),
-                                                                          'Settled': ('Settled', 'red')})),
-                                     ('custom.cellOptions', {'type': 'color-text'}))],
-                           noValue='No flags in the last 30 days'),
-        may_be_empty='a customer with no flags'))
-    p.append(panel(14, 'Requests', 'table', f"""
+                            coloured('Kind', KIND),
+                            override('State', ('mappings', label_colours(FLAG_STATE)))], noValue='No flags in the last 30 days'),
+        options={'cellHeight': 'sm'}, may_be_empty='a customer with no flags'))
+    p.append(panel(16, 'Requests', 'table', f"""
         SELECT {date_sql('opened')} AS Opened, title AS Title, product_area AS Area, ask AS Ask, status AS Status
-        FROM n360.ps_ticket WHERE {ONE_ACCT} ORDER BY opened DESC""", 0, 39, 24, 6,
-        describe('This customer\'s support tickets; area and ask are tagged by hand ("Not tagged yet" until then). ' + PHASE2_NOTE,
-                 'n360.ps_ticket', 'Customer', 'all tickets'),
+        FROM n360.ps_ticket WHERE {A} ORDER BY status = 'open' DESC, opened DESC""", 12, 40, 12, 6,
+        describe('This customer\'s support tickets, open first; area and ask are tagged by hand ("Not tagged yet" until '
+                 'then). ' + PHASE2_NOTE, 'n360.ps_ticket', 'Customer', 'all tickets'),
         field=field_config([*[override(c, ('mappings', [{'type': 'special', 'options': {'match': 'null', 'result':
-                                {'text': 'Not tagged yet', 'color': COLOUR['grey'], 'index': 0}}}])) for c in ('Area', 'Ask')]],
-                           noValue='No tickets for this customer'),
-        may_be_empty='a customer with no tickets'))
-    return dashboard(UID['customer'], 'N360 · Customer', p, [var_one_account()], [back_link()])
+                                {'text': 'Not tagged yet', 'color': COLOUR['grey'], 'index': 0}}}])) for c in ('Area', 'Ask')],
+                            width('Opened', 110), width('Status', 80)], noValue='No tickets for this customer'),
+        options={'cellHeight': 'sm'}, may_be_empty='a customer with no tickets'))
+    return dashboard(UID['customer'], 'N360 · Customer', p, [var_one_account(), var_vas(), var_period()], [back_link()])
 
 
 def contract_line():
-    """3. Contract line (spec 3): one line, how it is measured and where it is heading."""
-    p = header(1, 0, w=4)
+    """3. Contract line (spec 3): one line, how it is measured and where it is heading. The Contracts drawer."""
+    p = []
     p.append(panel(3, 'Used', 'stat', f"""
         SELECT reported_measured AS Used, reported_last30_measured AS `Last 30 days`
         FROM n360.contract_line WHERE {LINE}""", 8, 0, 4, 3,
@@ -620,12 +870,13 @@ def contract_line():
                  'measured"). A pooled line has none of its own.', 'n360.contract_line', 'Contract line', 'the contract term'),
         field=field_config([count_col('Billed')], noValue='None of its own'), options={**STATS, 'textMode': 'value'}))
     p.append(panel(5, '% of billed', 'stat', f"""
-        SELECT pct_billed AS `% of billed`, pace AS Pace FROM n360.v_line_pace WHERE {LINE}""", 16, 0, 4, 3,
-        describe('Used / billed in the line\'s own measure, and its pace colour (proposed rule, set in n360.v_line_pace). '
-                 'A pooled line has no % of its own: see the pool on the Customer dashboard.',
-                 'n360.v_line_pace', 'Contract line', 'start date to the data-through day'),
-        field=plain(field_config([pct('% of billed'), override('Pace', ('mappings', label_colours(PACE_LABEL)))])),
-        options={**STATS, 'colorMode': 'value'}, may_be_empty='a pooled line (measured at the pool)'))
+        SELECT pct_billed AS `% of billed`, {STATUS_SHOWN} AS Status FROM n360.v_contract_status WHERE {LINE}""", 16, 0, 4, 3,
+        describe('Used / billed in the line\'s own measure, and its contract status (n360.v_contract_status, proposed '
+                 'thresholds). A pooled line has no % of its own: see the pool on the Customer dashboard.',
+                 'n360.v_contract_status', 'Contract line', 'start date to the data-through day'),
+        field=plain(field_config([pct('% of billed'), override('% of billed', ('decimals', 0)),
+                                  override('Status', ('mappings', label_colours(STATUS)))])),
+        options={**STATS, 'colorMode': 'value', 'textMode': 'value'}, may_be_empty='a pooled line (measured at the pool)'))
     p.append(panel(6, '% of term', 'stat', f"""
         SELECT s.pct_term_elapsed AS `% of term`,
                toUInt32(round(s.pct_term_elapsed * l.term_days / 100)) AS `Days in`, l.term_days AS `Term days`
@@ -635,7 +886,7 @@ def contract_line():
     p.append(panel(7, 'Forecast to horizon', 'stat', f"""
         SELECT round(100 * forecast_m3 / billed, 1) AS `% of billed`, round(rate_per_day) AS `Per day`,
                {date_sql('horizon')} AS Horizon
-        FROM n360.v_line_pace WHERE {LINE} AND forecast_m3 IS NOT NULL""", 0, 3, 8, 3,
+        FROM n360.v_line_pace WHERE {LINE} AND forecast_m3 IS NOT NULL""", 20, 0, 4, 3,
         describe('The stored forecast: used + rate x days to the horizon (the earlier of contract end and the month end '
                  '3 months out), as % of billed; rate = last 30 days / 30. Never recomputed here.',
                  'n360.forecast via n360.v_line_pace', 'Contract line', 'to the horizon'),
@@ -664,7 +915,7 @@ def contract_line():
             UNION ALL SELECT 7, 'Source', ifNull(any(src.description), '')
                 FROM n360.contract_line AS l LEFT JOIN n360.source AS src
                   ON src.source_id = if(l.rule_id IS NULL, 'consumption_days', 'consumption_rules') WHERE l.{LINE}
-        ) ORDER BY o""", 8, 3, 16, 10,
+        ) ORDER BY o""", 12, 3, 12, 9,
         describe('How the contract measure for this line is counted, from conversations to the measure, and whether '
                  'this view\'s % of billed matches the existing page\'s figure.',
                  'n360.contract_line, n360.rule, n360.source, n360.v_line_status', 'Contract line', 'the contract term'),
@@ -681,7 +932,7 @@ def contract_line():
             UNION ALL SELECT toDateTime(horizon), NULL, toFloat64(forecast_m3), NULL FROM n360.v_line_pace WHERE {LINE} AND forecast_m3 IS NOT NULL
             UNION ALL SELECT toDateTime(start_date), NULL, NULL, toFloat64(billed) FROM n360.contract_line WHERE {LINE} AND billed IS NOT NULL
             UNION ALL SELECT toDateTime(end_date), NULL, NULL, toFloat64(billed) FROM n360.contract_line WHERE {LINE} AND billed IS NOT NULL
-        ) ORDER BY time""", 0, 13, 24, 9,
+        ) ORDER BY time""", 0, 3, 12, 9,
         describe('Used so far (solid), the stored forecast from the data-through day to its horizon (dashed), and the '
                  'billed amount (dashed red) over the term. Days not read add nothing to the running total. '
                  'Not measurable and not implemented lines have no usage line.',
@@ -692,19 +943,21 @@ def contract_line():
             override('Forecast', ('custom.lineStyle', {'fill': 'dash', 'dash': [10, 10]}), ('custom.spanNulls', True),
                      ('color', {'mode': 'fixed', 'fixedColor': COLOUR['neutral']})),
             override('Billed', ('custom.lineStyle', {'fill': 'dash', 'dash': [4, 6]}), ('custom.spanNulls', True), ('custom.lineWidth', 2),
-                     ('color', {'mode': 'fixed', 'fixedColor': COLOUR['red']})),
-            override('Used', ('custom.lineWidth', 2), ('color', {'mode': 'fixed', 'fixedColor': COLOUR['green']}))],
+                     ('color', {'mode': 'fixed', 'fixedColor': COLOUR['reference']})),
+            override('Used', ('custom.lineWidth', 2), ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series']}))],
             unit='locale', decimals=0, custom={'spanNulls': False})))
     p.append(panel(10, 'Measure against the engaged flag, by month', 'barchart', f"""
         SELECT formatDateTime(toStartOfMonth(d.day), '%b %y') AS Month, sum(d.measured) AS `Contract measure`,
                sum(d.engaged) AS `Engaged (platform flag)`
         FROM n360.line_day AS d INNER JOIN n360.contract_line AS l ON l.series_key = d.series_key
         WHERE d.kind = 'line' AND l.{LINE} AND d.day >= l.start_date
-        GROUP BY toStartOfMonth(d.day) ORDER BY toStartOfMonth(d.day)""", 0, 22, 12, 9,
+        GROUP BY toStartOfMonth(d.day) ORDER BY toStartOfMonth(d.day)""", 0, 12, 12, 8,
         describe('Per month: the contract measure beside the platform engaged flag, so a contract rule\'s effect is '
                  'visible (for lines with no rule they are the same). Never one replaced by the other.',
                  'n360.line_day', 'Contract line', 'start date to the data-through day, by calendar month'),
-        field=field_config(unit='locale', decimals=0),
+        field=field_config([override('Contract measure', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series']})),
+                            override('Engaged (platform flag)', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series_light']}))],
+                           unit='locale', decimals=0),
         options={'xField': 'Month', 'orientation': 'vertical', 'xTickLabelRotation': -45, 'xTickLabelSpacing': 0, 'groupWidth': 0.7, 'barWidth': 0.9, 'showValue': 'never',
                  'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True}},
         may_be_empty='a line with no daily series (not implemented)'))
@@ -715,7 +968,7 @@ def contract_line():
         FROM n360.line_va AS lv INNER JOIN n360.va AS v ON v.bot_id = lv.bot_id
         LEFT JOIN n360.va_day AS d ON d.bot_id = lv.bot_id AND d.day > {DATA_THROUGH_SQL} - 30
         WHERE lv.{LINE}
-        GROUP BY lv.bot_id, lv.account, lv.region, v.va_name, v.channels ORDER BY `Conversations, 30 days` DESC""", 12, 22, 12, 9,
+        GROUP BY lv.bot_id, lv.account, lv.region, v.va_name, v.channels ORDER BY `Conversations, 30 days` DESC""", 12, 12, 12, 8,
         describe('The VAs feeding this line and each one\'s share of the line\'s conversations (conversations, not the '
                  'contract measure). Click a VA to open it.', 'n360.line_va, n360.va_day', 'Contract line',
                  'the 30 days to the data-through day'),
@@ -727,20 +980,35 @@ def contract_line():
         SELECT toDateTime(data_date) AS time, pct_billed_page AS `% of billed`
         FROM n360.line_totals_history
         WHERE {LINE} AND (SELECT count(DISTINCT data_date) FROM n360.line_totals_history) >= 7
-        ORDER BY time""", 0, 31, 24, 7,
+        ORDER BY time""", 0, 20, 24, 7,
         describe('What N360 said each night for this line, so a jump between nights is visible. Shown once 7 nights '
                  'are stored.', 'n360.line_totals_history (append-only, one row per line per night)', 'Contract line',
                  'every stored night'),
-        fmt='timeseries', field=field_config(unit='percent', decimals=1, noValue='Shows once 7 nights are stored'),
+        fmt='timeseries', field=field_config(unit='percent', decimals=1, noValue='Shows once 7 nights are stored',
+                                             color={'mode': 'fixed', 'fixedColor': COLOUR['series']}),
         may_be_empty='fewer than 7 nights stored'))
     p[-1]['timeFrom'] = '45d'      # nightly history: the last weeks, not the whole term
+    p = with_header(p, f"""
+        SELECT if(c.n > 0, c.s, concat(l.channel, ' is in a pooled entitlement: its use counts toward the pool, which is compared with billed (customer page).')) AS sentence
+        FROM (SELECT count() AS n, any(concat(full_label, ': ', multiIf(
+                  status = 'over billed', concat('over billed, ', toString(round(pct_billed)), '% of billed'),
+                  status = 'will exceed', concat('set to exceed billed on ', {date_sql('cross_date')}, ', ',
+                                                 toString(dateDiff('day', cross_date, end_date)), ' days before the term ends'),
+                  pct_billed IS NULL, lower({STATUS_WORDS}),
+                  concat(lower({STATUS_WORDS}), ': ', toString(round(pct_billed)), '% used, ', toString(round(pct_term)),
+                         '% of the term gone')),
+                  if(forecast_end_pct IS NULL, '', concat(' · ', toString(round(forecast_end_pct)), '% by the term end at the current rate')))) AS s
+              FROM n360.v_contract_status WHERE {LINE}) AS c
+        CROSS JOIN (SELECT channel FROM n360.contract_line WHERE {LINE}) AS l""",
+        describe('Where this line stands: its status (n360.v_contract_status, proposed thresholds), and where the stored '
+                 'forecast\'s rate takes it by the term end.', 'n360.v_contract_status', 'Contract line', 'the latest load'))
     return dashboard(UID['line'], 'N360 · Contract line', p, [var_one_account(), var_line()],
                      [back_link(CUSTOMER, keep_vars=True), back_link()], time={'from': 'now-400d', 'to': 'now+120d'})
 
 
 def va():
     """4. VA (spec 4): one VA against its own normal."""
-    p = header(1, 0, w=4)
+    p = []
     p.append(panel(3, 'Status', 'stat', f"""
         SELECT if(count() = 0, 'Not scored',
                   if(argMax(kind, day) = 'normal', 'Normal',
@@ -794,9 +1062,9 @@ def va():
             override('Expected range low', ('custom.lineWidth', 0), ('color', {'mode': 'fixed', 'fixedColor': COLOUR['grey']}),
                      ('custom.hideFrom', {'legend': True, 'tooltip': False, 'viz': False})),
             override('Flag (settled)', ('custom.drawStyle', 'points'), ('custom.pointSize', 10),
-                     ('color', {'mode': 'fixed', 'fixedColor': COLOUR['red']})),
+                     ('color', {'mode': 'fixed', 'fixedColor': COLOUR['down']})),
             override('Flag (provisional)', ('custom.drawStyle', 'points'), ('custom.pointSize', 10),
-                     ('color', {'mode': 'fixed', 'fixedColor': COLOUR['amber']}))],
+                     ('color', {'mode': 'fixed', 'fixedColor': COLOUR['down_faded']}))],
             unit='locale', decimals=0, custom={'spanNulls': False})))
     p.append(panel(8, 'Flags', 'table', f"""
         SELECT {date_sql('day')} AS Day, kind AS Kind, actual AS Actual, expected AS Expected, z AS z,
@@ -804,10 +1072,9 @@ def va():
         FROM n360.v_va_day_anomaly WHERE {VA} AND kind != 'normal' AND $__dateFilter(day) ORDER BY day DESC""", 0, 13, 12, 10,
         describe('Every flagged day for this VA in the time range. Provisional days may still change.',
                  'n360.v_va_day_anomaly', 'VA; flagged days', 'dashboard time range'),
-        field=field_config([count_col('Actual'), count_col('Expected'), width('Day', 110), width('Kind', 100),
+        field=field_config([count_col('Actual'), count_col('Expected'), width('Day', 110), width('Kind', 100), coloured('Kind', KIND),
                             override('z', ('decimals', 1)),
-                            override('Status', ('mappings', label_colours({'Provisional': ('Provisional', 'amber'),
-                                                                          'Settled': ('Settled', 'red')})),
+                            override('Status', ('mappings', label_colours(FLAG_STATE)),
                                      ('custom.cellOptions', {'type': 'color-text'}))],
                            noValue='No flags in this time range'),
         may_be_empty='a VA with no flags'))
@@ -834,80 +1101,149 @@ def va():
                  'the latest load; the newest configuration read'),
         field=field_config([width('Item', 290), override('Value', ('mappings', [empty_grey()]))]),
         options={'showHeader': False}))
+    p = with_header(p, f"""
+        SELECT concat(c.va, ': ', if(c.convs_30 IS NULL, 'conversations not reported for every day of the last 30',
+                      concat({num_sql('c.convs_30')}, ' conversations in 30 days',
+                             if(c.convs_change_pct IS NULL, '', concat(' (', if(c.convs_change_pct >= 0, '+', ''),
+                                toString(round(c.convs_change_pct)), '% on the 30 before)')))),
+                      ' · containment ', if(c.containment_30 IS NULL, 'not reported (no handoff data)',
+                                            concat(toString(round(c.containment_30)), '%')),
+                      ' · newest scored day: ', ifNull(a.k, 'not scored')) AS sentence
+        FROM n360.v_va_change AS c
+        LEFT JOIN (SELECT bot_id, toNullable(concat(argMax(kind, day), if(argMax(provisional, day), ' (provisional)', ''))) AS k
+                   FROM n360.v_va_day_anomaly GROUP BY bot_id) AS a ON a.bot_id = c.bot_id
+        WHERE toString(c.bot_id) IN (${{va:singlequote}})""",
+        describe('This VA\'s conversations over the last 30 days against the 30 before, its containment (per VA only), '
+                 'and the newest scored day against its own normal.', 'n360.v_va_change, n360.v_va_day_anomaly', 'VA',
+                 'the 60 days to the data-through day'))
     return dashboard(UID['va'], 'N360 · VA', p, [var_one_account(), var_va()],
                      [back_link(CUSTOMER, keep_vars=True), back_link()])
 
 
 def contracts():
-    """5. Contracts (spec 5, B10): every line and pool, with pace colours, header, links and Back link."""
-    p = [data_through(1, 0, 0, 6, 3), last_load(7, 6, 0, 6, 3)]
-    p.append(panel(2, 'Lines above billed', 'stat', f"""
-        SELECT countIf(pct_billed > 100) AS above FROM n360.v_line_pace WHERE {ACCT}""", 12, 0, 12, 3,
-        describe('Lines and pools whose use is over the billed amount, each in its own contract measure (a contract rule '
-                 'where one is mapped, otherwise the platform engaged flag, billable unit unconfirmed). A pool is counted '
-                 'once, as the pool.', 'n360.v_line_pace', 'Customer', 'each from its start date to the data-through day'),
-        field=field_config(mappings=red_when_any()), options={**STAT_LAST, 'colorMode': 'background'}))
-    p.append(panel(3, 'Contract lines', 'table', f"""
-        SELECT a.display_name AS Customer, {LINE_LABEL} AS Line, l.measure AS Measure,
-               s.consumed AS Used, s.billed AS Billed, s.pct_billed AS `% of billed`, s.pct_term_elapsed AS `% of term`,
-               pc.pace AS Pace, concat({date_sql('l.start_date')}, ' to ', {date_sql('l.end_date')}) AS Term,
-               l.unit AS `Contract unit`,
-               l.account AS account, concat('/d/n360-line?var-account=', l.account, '&var-line=', l.line_key) AS drill
-        FROM n360.v_line_status AS s
-        INNER JOIN n360.contract_line AS l ON l.line_key = s.line_key
-        INNER JOIN n360.account AS a ON a.account = l.account
-        LEFT JOIN n360.v_line_pace AS pc ON pc.line_key = l.line_key
-        WHERE s.pool_id IS NULL AND s.{ACCT}
-        ORDER BY Customer, Line""", 0, 3, 24, 14,
-        describe('One row per contract line not in a pool (pools below). Used = the contract measure. Not measurable and '
-                 'not implemented lines have no usage ("Not reported yet", grey), never zero. Contract unit: the unit '
-                 'of a signed SOW that overrides the entitlement sheet. Click a customer or a line to open it.',
-                 'the platform daily conversation aggregate table and the conversation records reader; contract terms '
-                 'from the entitlement sheet unless a signed SOW overrides it. Via n360.v_line_status, n360.v_line_pace',
-                 'Customer; lines not in a pool', 'Used: from the start date to the data-through day'),
-        field=field_config([hidden('account'), hidden('drill'), count_col('Used'), count_col('Billed'),
-                            pct('% of billed'), pct('% of term'), pace_chip('Pace'), width('Pace', 70), width('Measure', 185),
-                            width('Term', 200), width('Customer', 150), width('Line', 160), width('Used', 100),
-                            width('Billed', 95), width('% of billed', 95), width('% of term', 85),
-                            *[override(c, ('mappings', [empty_grey()])) for c in ('Used', 'Billed', '% of billed')],
-                            override('Contract unit', ('mappings', [{'type': 'value', 'options': {
-                                '': {'text': 'Sheet terms (no SOW override)', 'index': 0}}}])),
+    """Contracts (v2): what renews when, and which lines are over or under? Account management, weekly.
+    The Contract line dashboard is each line's drawer."""
+    st = "status_shown IN (${status:singlequote})"
+    where = f"{ACCT} AND {st}"
+    base = f"(SELECT *, {STATUS_SHOWN} AS status_shown FROM n360.v_contract_status)"
+    p = page_header(1, f"""
+        SELECT concat({plural('e', 'line ends', 'lines end')}, ' in the next ', toString(days), ' days · ',
+                      toString(o), ' over billed · ', toString(w), ' set to exceed · ', toString(r), ' at renewal risk') AS sentence
+        FROM (SELECT (SELECT decision_window_days FROM n360.settings) AS days,
+                     countIf(days_left BETWEEN 0 AND days) AS e, countIf(status = 'over billed') AS o,
+                     countIf(status = 'will exceed') AS w, countIf(renewal_risk) AS r
+              FROM n360.v_contract_status WHERE {ACCT})""",
+        describe('Lines and pools whose term ends within 90 days (n360.settings decision_window_days), over billed, '
+                 'set to exceed billed before the term ends, and at renewal risk (proposed thresholds).',
+                 'n360.v_contract_status', 'Customer', 'the latest load'))
+    acct_h = ACCT
+    p.append(tile(3, 'Ending in 90 days', f"""
+        SELECT r.data_date AS night,
+               toUInt64(countIf(dateDiff('day', r.data_date - 1, c.end_date) BETWEEN 0 AND (SELECT decision_window_days FROM n360.settings))) AS value
+        FROM (SELECT DISTINCT data_date FROM n360.runs WHERE status = 'loaded') AS r
+        CROSS JOIN (SELECT end_date FROM n360.v_contract_status WHERE {acct_h}) AS c GROUP BY night""", 0, 3,
+        describe('Lines and pools (every one, a pool once) whose term ends within 90 days of each loaded night\'s '
+                 'data-through day (n360.settings decision_window_days).',
+                 'n360.v_contract_status, n360.runs', 'Customer', 'the last 30 loaded nights'), metric='ending in 90 days'))
+    p.append(tile(4, 'Over billed', status_night_count("status = 'over billed'", acct_h), 6, 3,
+                  describe('Lines and pools whose use is above billed, in their own contract measure.',
+                           'n360.v_status_night', 'Customer', 'the last 30 stored nights')))
+    p.append(tile(5, 'Set to exceed billed', status_night_count("status = 'will exceed'", acct_h), 12, 3,
+                  describe('Lines and pools under billed that the stored forecast says will cross billed before the '
+                           'term ends.', 'n360.v_status_night (n360.forecast_history)', 'Customer', 'the last 30 stored nights')))
+    p.append(tile(6, 'At renewal risk', status_night_count('renewal_risk', acct_h), 18, 3,
+                  describe('Lines and pools under 50% used with 120 days or fewer left (proposed, n360.settings).',
+                           'n360.v_status_night', 'Customer', 'the last 30 stored nights')))
+    cap = BULLET_CAP
+    bars = ',\n               '.join(
+        f"if(status_shown = {k!r}, least(pct_billed, {cap}), NULL) AS `{t}`" for k, (t, c) in STATUS.items() if c != 'grey')
+    p.append(panel(7, '% of billed now, and by the term end at the current rate', 'barchart', f"""
+        SELECT concat(full_label, '   ', toString(round(pct_billed)), '% · term ', toString(round(pct_term)), '%') AS Line,
+               {bars},
+               greatest(least(forecast_end_pct, {cap}) - least(pct_billed, {cap}), 0) AS `More by the term end (forecast)`
+        FROM {base} WHERE {where} AND pct_billed IS NOT NULL
+          AND status_shown NOT IN ({', '.join(repr(g) for g in GREY_STATUSES)})
+        ORDER BY status_rank, pct_billed DESC""", 0, 8, 24, 16,
+        describe(f'A bullet chart per line and pool (a pool once). Solid: % of billed now, in its status colour. Pale, '
+                 f'after it: how much more the stored forecast\'s rate adds by the term end, so the bar ends at the '
+                 f'forecast. The dashed line is 100% of billed. The label prints the true % and how much of the term has '
+                 f'gone (Grafana OSS has no tick mark inside a bar). Bars stop at {cap}%. Sorted by status, then %. '
+                 f'Lines with no reading (grey statuses) are in the table below.',
+                 'n360.v_contract_status (n360.v_line_pace, n360.forecast: rate never refitted)', 'Customer; Status',
+                 'start date to the data-through day; forecast to the term end'),
+        field=field_config([*status_overrides(group_grey=False)[:7],
+                            override('More by the term end (forecast)', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series_light']}),
+                                     ('custom.fillOpacity', 45))],
+                           unit='percent', decimals=0, min=0, max=cap,
+                           custom={'fillOpacity': 90, 'lineWidth': 0, 'stacking': {'mode': 'normal', 'group': 'A'},
+                                   **reference_line(100)['custom']},
+                           thresholds=reference_line(100)['thresholds']),
+        options={'xField': 'Line', 'orientation': 'horizontal', 'stacking': 'normal', 'showValue': 'never',
+                 'barWidth': 0.85, 'groupWidth': 0.8, 'xTickLabelMaxLength': 60, 'fullHighlight': False,
+                 'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'none'}}))
+    p[-1]['n360Reference'] = True
+    p.append(panel(8, 'Decisions due', 'table', f"""
+        SELECT display_name AS Customer, line_label AS Line, issue AS Issue, {date_sql('end_date')} AS `Term ends`,
+               days_left AS `Days left`, pct_billed AS `% used`, forecast_end_pct AS `At term end`,
+               status_shown AS Status, account, drill
+        FROM {base} WHERE {where} AND decision_due
+        ORDER BY days_left < 0 DESC, days_left, status_rank""", 0, 24, 24, 11,
+        describe('Every line or pool needing a decision: over billed, set to exceed, at renewal risk, ended in the last '
+                 '90 days, or ending within 90 days (proposed, n360.settings). At term end = the stored forecast\'s '
+                 'rate carried to the end of the term, as % of billed. Ended terms first, then soonest. Click a '
+                 'customer or a line to open it.', 'n360.v_contract_status', 'Customer; Status',
+                 'the latest load; forecast to the term end'),
+        field=field_config([hidden('account'), hidden('drill'), status_chip('Status'), pct('% used'), pct('At term end'),
+                            override('% used', ('decimals', 0)), override('At term end', ('decimals', 0)),
+                            override('Days left', ('mappings', [{'type': 'range', 'options': {'from': -100000, 'to': -1,
+                                     'result': {'text': 'Ended', 'index': 0}}}])),
+                            *[override(c, ('mappings', [empty_grey()])) for c in ('% used', 'At term end')],
+                            width('Customer', 170), width('Line', 230), width('Issue', 200), width('Term ends', 120),
+                            width('Days left', 90), width('% used', 80), width('At term end', 100), width('Status', 140),
                             with_links('Customer', drill(UID['customer'], 'account', 'account', 'Open customer')),
-                            with_links('Line', path_link('drill', 'Open line'))], custom={'align': 'auto'})))
-    p.append(panel(4, 'Pooled entitlements', 'table', f"""
-        SELECT a.display_name AS Customer, pc.label AS Pool, pc.billed AS Billed, pc.used AS Used,
-               pc.pct_billed AS `% of billed`, pc.pct_term AS `% of term`, pc.pace AS Pace,
-               concat({date_sql('pc.start_date')}, ' to ', {date_sql('pc.end_date')}) AS Term, pc.account AS account
-        FROM n360.v_line_pace AS pc INNER JOIN n360.account AS a ON a.account = pc.account
-        WHERE pc.entitlement = 'pool' AND pc.{ACCT}""", 0, 17, 24, 4,
-        describe('One entitlement shared by several lines of one account. Lines in a pool are never compared with '
-                 'the billed amount one by one.', 'consumption_mapping.json "pools", via n360.v_line_pace', 'Customer',
-                 'Used: the pooled lines, each from its start date to the data-through day'),
-        field=field_config([hidden('account'), count_col('Used'), count_col('Billed'), pct('% of billed'), pct('% of term'),
-                            pace_chip('Pace'), width('Pace', 70),
-                            with_links('Customer', drill(UID['customer'], 'account', 'account', 'Open customer'))],
-                           noValue='No pooled entitlement'),
-        may_be_empty='no customer in the selection has a pool'))
-    p.append(panel(5, 'Daily use per contract line', 'timeseries', f"""
-        SELECT toDateTime(d.day) AS time, concat(a.display_name, ' · ', {LINE_LABEL}) AS line, d.measured AS used
-        FROM n360.line_day AS d INNER JOIN n360.contract_line AS l ON l.series_key = d.series_key
-        INNER JOIN n360.account AS a ON a.account = l.account
-        WHERE d.kind = 'line' AND d.{ACCT} AND l.measure NOT IN ('not measurable', 'not implemented') AND $__dateFilter(d.day)
-        ORDER BY time""", 0, 21, 24, 9,
-        describe('Daily contract measure per line (conversations for rules that bill every conversation, billable for '
-                 'meaningful-engagement rules, engaged otherwise). Not measurable and not implemented lines have no usage '
-                 'and are left out. Days not read show as gaps, not zero.',
-                 'n360.line_day with n360.contract_line', 'Customer; measured contract lines', 'dashboard time range, per day'),
-        fmt='timeseries', field=field_config(unit='locale', decimals=0, displayName='${__field.labels.line}',
-                                             custom={'spanNulls': False, 'lineWidth': 1})))
-    p.append(containment_weekly(6, 0, 30, 24, 8))
-    return dashboard('n360-contracts', 'N360 · Contracts', p, [var_account()], [back_link()])
+                            with_links('Line', path_link('drill', 'Open line'))], noValue='No decision due'),
+        may_be_empty='no decision due for the selection'))
+    p.append(status_filter_note(9, 0, 35, 24, 2, f"{ACCT} AND {STATUS_SHOWN} IN (${{status:singlequote}})", ACCT))
+    p.append(panel(10, 'Every line', 'table', f"""
+        SELECT display_name AS Customer, line_label AS Line, status_shown AS Status, pct_billed AS `% of billed`,
+               pct_term AS `% of term`, used AS Used, billed AS Billed, forecast_end_pct AS `At term end`,
+               {date_sql('end_date')} AS `Term ends`, days_left AS `Days left`, measure AS Measure,
+               concat('Q', toString(toQuarter(end_date)), ' ', toString(toYear(end_date))) AS `Term-end quarter`,
+               csm AS CSM, account, drill
+        FROM {base} WHERE {where}
+        ORDER BY status_rank, pct_billed DESC""", 0, 37, 24, 18,
+        describe('Every contract line and pool (a pool once, its lines on the customer page), in its own contract '
+                 'measure. The bar is % of billed (full at 100%; the number is the true %). Grey statuses have no '
+                 'reading: "Not reported yet", never zero. Sort by any column; group by term-end quarter with its '
+                 'column; filter with Status and Customer. Click a customer or a line to open it.',
+                 'n360.v_contract_status (n360.v_line_pace, n360.contract_line, n360.forecast)', 'Customer; Status',
+                 'start date to the data-through day'),
+        field=field_config([hidden('account'), hidden('drill'), status_chip('Status'), count_col('Used'), count_col('Billed'),
+                            override('% of billed', ('unit', 'percent'), ('decimals', 0), ('min', 0), ('max', 100),
+                                     ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series']}),
+                                     ('custom.cellOptions', {'type': 'gauge', 'mode': 'basic', 'valueDisplayMode': 'text'})),
+                            pct('% of term'), override('% of term', ('decimals', 0)), pct('At term end'),
+                            override('At term end', ('decimals', 0)),
+                            override('Days left', ('mappings', [{'type': 'range', 'options': {'from': -100000, 'to': -1,
+                                     'result': {'text': 'Ended', 'index': 0}}}])),
+                            *[override(c, ('mappings', [empty_grey()])) for c in ('% of billed', 'Used', 'At term end')],
+                            override('Billed', ('mappings', [{'type': 'special', 'options': {'match': 'null', 'result': {
+                                'text': 'Not on the sheet', 'color': COLOUR['grey'], 'index': 0}}}])),
+                            width('Customer', 160), width('Line', 200), width('Status', 140), width('% of billed', 160),
+                            width('% of term', 80), width('Used', 125), width('Billed', 125), width('At term end', 125),
+                            width('Term ends', 115), width('Days left', 80), width('Measure', 190),
+                            with_links('Customer', drill(UID['customer'], 'account', 'account', 'Open customer')),
+                            with_links('Line', path_link('drill', 'Open line'))], noValue='No line matches the filter'),
+        options={'showHeader': True, 'cellHeight': 'sm', 'footer': {'show': False}},
+        may_be_empty='no line matches the filter'))
+    return dashboard(UID['contracts'], 'N360 · Contracts', p, [var_account(), var_status()], [back_link()])
 
 
 def forecast():
     """6. Forecast and runway (spec 6): when each line runs out, from the stored forecast only."""
     w30, w60, w90 = FORECAST_WINDOWS
-    p = header(1, 0, w=4)
+    p = []
     p.append(panel(3, 'Crossing billed', 'stat', f"""
         SELECT countIf(days_to_cross BETWEEN 0 AND {w30}) AS `In {w30} days`,
                countIf(days_to_cross BETWEEN 0 AND {w60}) AS `In {w60} days`,
@@ -920,7 +1256,7 @@ def forecast():
         SELECT countIf(runway = 'above billed') AS above FROM n360.v_line_pace WHERE {ACCT}""", 16, 0, 4, 3,
         describe('Lines and pools already over billed (a pool counted once).', 'n360.v_line_pace', 'Customer',
                  'start date to the data-through day'),
-        field=field_config(mappings=red_when_any()), options={**STAT_LAST, 'colorMode': 'background'},
+        field=field_config(mappings=amber_when_any('peach')), options={**STAT_LAST, 'colorMode': 'background'},
         links=[panel_link('contracts', 'Contracts')]))
     p.append(panel(5, 'Step changes', 'stat', f"""
         SELECT countIf(step_change IS NOT NULL) AS steps FROM n360.v_line_pace WHERE {ACCT}""", 20, 0, 4, 3,
@@ -929,7 +1265,7 @@ def forecast():
         options=STAT_LAST))
     p.append(panel(6, 'Runway', 'state-timeline', f"""
         WITH lanes AS (
-                 SELECT concat(a.display_name, ' · ', pc.label) AS lane, pc.data_through AS dt, pc.end_date AS term_end,
+                 SELECT {PC_LABEL} AS lane, pc.data_through AS dt, pc.end_date AS term_end,
                         pc.exhaust_date AS runs_out,
                         multiIf(pc.runway = 'crosses soon', 3, pc.runway = 'crosses before term end', 2, 1) AS cat
                  FROM n360.v_line_pace AS pc INNER JOIN n360.account AS a ON a.account = pc.account
@@ -949,8 +1285,8 @@ def forecast():
                  'from the data-through day forward'),
         fmt='timeseries',
         field=field_config(mappings=[{'type': 'value', 'options': {
-            '3': {'text': 'Crosses billed soon', 'color': COLOUR['red'], 'index': 0},
-            '2': {'text': 'Crosses billed before term end', 'color': COLOUR['blue'], 'index': 1},
+            '3': {'text': 'Crosses billed soon', 'color': COLOUR['lavender'], 'index': 0},
+            '2': {'text': 'Crosses billed before term end', 'color': COLOUR['lavender_light'], 'index': 1},
             '1': {'text': 'Runs out after term end', 'color': COLOUR['grey'], 'index': 2},
             '9': {'text': 'After the term end', 'color': COLOUR['dark'], 'index': 3},
             '0': {'text': 'Runs out', 'color': 'transparent', 'index': 4}}}],
@@ -958,7 +1294,7 @@ def forecast():
         options={'showValue': 'never', 'mergeValues': True, 'rowHeight': 0.8, 'alignValue': 'left',
                  'legend': {'showLegend': True, 'displayMode': 'list', 'placement': 'bottom'}}))
     p.append(panel(7, 'Runway by line', 'table', f"""
-        SELECT concat(a.display_name, ' · ', pc.label) AS Line, pc.measure AS Measure, pc.used AS Used, pc.billed AS Billed,
+        SELECT {PC_LABEL} AS Line, pc.measure AS Measure, pc.used AS Used, pc.billed AS Billed,
                round(pc.rate_per_day) AS `Per day`,
                multiIf(pc.exhaust_date IS NOT NULL, {date_sql('pc.exhaust_date')}, pc.runway = 'above billed', 'Already above billed', NULL) AS `Runs out`,
                {date_sql('pc.end_date')} AS `Term ends`, pc.runway AS Runway,
@@ -987,7 +1323,7 @@ def forecast():
         may_be_empty='no line has a step change'))
     p.append(panel(9, 'Forecast accuracy (MAPE)', 'table', f"""
         SELECT Line, `30 days`, `60 days`, `90 days`, Forecasts FROM (
-            SELECT 0 AS o, concat(a.display_name, ' · ', pc.label) AS Line,
+            SELECT 0 AS o, {PC_LABEL} AS Line,
                    anyIf(fa.mape, fa.horizon_days = 30) AS `30 days`, anyIf(fa.mape, fa.horizon_days = 60) AS `60 days`,
                    anyIf(fa.mape, fa.horizon_days = 90) AS `90 days`, maxIf(fa.forecasts, fa.horizon_days = 30) AS Forecasts
             FROM n360.v_forecast_accuracy AS fa
@@ -1011,7 +1347,7 @@ def forecast():
                            noValue='Shows once forecasts 30 days old are stored'),
         may_be_empty='fewer than 30 nights of stored forecasts'))
     p.append(panel(10, 'Crossing date drift', 'table', f"""
-        SELECT concat(a.display_name, ' · ', pc.label) AS Line,
+        SELECT {PC_LABEL} AS Line,
                {date_sql('d.cross_now')} AS `Crosses billed`, {date_sql('d.cross_7_nights_ago')} AS `7 nights ago`,
                {date_sql('d.cross_30_nights_ago')} AS `30 nights ago`, d.moved_7 AS `Moved, 7 nights`,
                d.moved_30 AS `Moved, 30 nights`
@@ -1043,6 +1379,19 @@ def forecast():
                               ('Straight line (forecast of record)', 'Weekday Holt-Winters (challenger)')],
                             count_col('Forecasts')], noValue='No backtest run yet: run code/forecast/challenger.py'),
         may_be_empty='no backtest run yet'))
+    p = with_header(p, f"""
+        WITH (SELECT round(sumIf(mape * forecasts, horizon_days = 30) / nullIf(sumIf(forecasts, horizon_days = 30), 0), 1)
+              FROM n360.v_forecast_accuracy WHERE {ACCT}) AS err
+        SELECT concat({plural('countIf(status = ' + repr('will exceed') + ')', 'line or pool crosses', 'lines and pools cross')},
+                      ' billed before the term ends',
+                      if(countIf(status = 'will exceed') = 0, '', concat('; soonest: ', argMinIf(full_label, cross_date, status = 'will exceed'),
+                         ' on ', {date_sql("minIf(cross_date, status = 'will exceed')")})),
+                      ' · ', toString(countIf(status = 'over billed')), ' already over',
+                      ' · 30-day forecast error ', if(err IS NULL, 'shows once 30 nights are stored', concat(toString(err), '%'))) AS sentence
+        FROM n360.v_contract_status WHERE {ACCT}""",
+        describe('Lines and pools the stored forecast says will cross billed before their term ends (the soonest named), '
+                 'those already over, and how far the forecast was off 30 days ahead (MAPE, weighted by forecasts).',
+                 'n360.v_contract_status, n360.v_forecast_accuracy', 'Customer', 'the latest load; every stored night'))
     return dashboard(UID['forecast'], 'N360 · Forecast and runway', p, [var_account()], [back_link()],
                      time={'from': 'now-14d', 'to': 'now+18M'})
 
@@ -1052,7 +1401,7 @@ def anomalies():
     kind_sql = "if(${kind:singlequote} = 'spikes', kind = 'spike', kind IN ('drop', 'went silent'))"
     prov_sql = "(NOT provisional OR ${provisional:singlequote} = 'yes')"
     settled7 = f"NOT provisional AND day >= {DATA_THROUGH_SQL} - 9"
-    p = header(1, 0, w=4)
+    p = []
     p.append(panel(3, 'Flags, 7 settled days', 'stat', f"""
         SELECT countIf(kind = 'drop' AND {settled7}) AS Drops, countIf(kind = 'went silent' AND {settled7}) AS Silences,
                countIf(kind = 'spike' AND {settled7}) AS Spikes, countIf(kind != 'normal' AND provisional) AS Provisional
@@ -1103,8 +1452,8 @@ def anomalies():
                                      ('custom.cellOptions', {'type': 'color-text'})), width('Review', 100),
                             width('Day', 110), width('Customer', 150), width('VA', 170), width('Actual', 70),
                             width('Expected', 80), width('z', 60), width('Kind', 100), width('Status', 90),
-                            override('Status', ('mappings', label_colours({'Provisional': ('Provisional', 'amber'),
-                                                                          'Settled': ('Settled', 'red')})),
+                            coloured('Kind', KIND),
+                            override('Status', ('mappings', label_colours(FLAG_STATE)),
                                      ('custom.cellOptions', {'type': 'color-text'})),
                             with_links('VA', path_link('drill', 'Open VA'))], noValue='No flags of this kind'),
         may_be_empty='no flags of the chosen kind in the time range'))
@@ -1120,9 +1469,13 @@ def anomalies():
         field=field_config([width('Day', 110), width('Direction', 120), width('Customers', 90), width('VAs', 60)],
                            noValue='No cross-account events'), may_be_empty='no cross-account event in the range'))
     p.append(panel(9, 'Other signals: containment, measure, pace, freshness', 'table', f"""
-        SELECT v2.signal AS Signal, ifNull(ac.display_name, '') AS Customer, v2.subject AS Subject, {date_sql('v2.period')} AS `When`,
+        SELECT v2.signal AS Signal, ifNull(ac.display_name, '') AS Customer,
+               multiIf(c1.full_label != '', c1.full_label, c2.full_label != '', c2.full_label, v2.subject) AS Subject,
+               {date_sql('v2.period')} AS `When`,
                v2.value AS `This period`, v2.usual AS Usual, v2.detail AS Detail
         FROM n360.v_anomaly_v2 AS v2 LEFT JOIN n360.account AS ac ON ac.account = v2.account
+        LEFT JOIN (SELECT line_key, full_label FROM n360.v_contract_status WHERE entitlement = 'line') AS c1 ON c1.line_key = v2.subject
+        LEFT JOIN (SELECT series_key, full_label FROM n360.v_contract_status) AS c2 ON c2.series_key = v2.subject
         WHERE (v2.account = '' OR v2.{ACCT}) AND v2.period > {DATA_THROUGH_SQL} - 60
         ORDER BY v2.period DESC""", 0, 35, 24, 7,
         describe('Anomaly detection v2 (05): a VA\'s weekly containment more than 10 points below its 8-week median '
@@ -1137,7 +1490,7 @@ def anomalies():
                            noValue='No other signals in the last 60 days'),
         may_be_empty='no v2 signal in the last 60 days'))
     p.append(panel(8, 'Flag quality per week', 'table', f"""
-        SELECT toString(week) AS `Week of`, flags AS Flags, reviewed AS Reviewed, real AS Real, expected AS Expected,
+        SELECT {date_sql('week')} AS `Week of`, flags AS Flags, reviewed AS Reviewed, real AS Real, expected AS Expected,
                data_issue AS `Data issue`, pct_real_of_reviewed AS `Real, of reviewed`
         FROM n360.v_flag_quality WHERE $__dateFilter(week) ORDER BY week DESC""", 0, 28, 24, 7,
         describe('Settled flags per week and what reviews found. A low share of real flags means the thresholds '
@@ -1154,9 +1507,20 @@ def anomalies():
         describe('Settled flags per week (Monday start), drops and silences apart from spikes.', 'n360.v_va_day_anomaly',
                  'Customer; settled days', 'dashboard time range, by week'),
         fmt='timeseries',
-        field=field_config([override('Drops and silences', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['red']})),
-                            override('Spikes', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['blue']}))],
+        field=field_config([override('Drops and silences', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['down']})),
+                            override('Spikes', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['up']}))],
                            decimals=0, custom={'drawStyle': 'bars', 'fillOpacity': 80, 'stacking': {'mode': 'normal', 'group': 'A'}})))
+    p = with_header(p, f"""
+        SELECT concat({plural("countIf(kind IN ('drop', 'went silent') AND " + settled7 + ")", 'drop or silence', 'drops or silences')},
+                      ' and ', {plural("countIf(kind = 'spike' AND " + settled7 + ")", 'spike', 'spikes')},
+                      ' on the 7 newest settled days · ', toString(countIf(kind != 'normal' AND provisional)), ' provisional · ',
+                      toString((SELECT count() FROM n360.v_anomaly_events WHERE day > {DATA_THROUGH_SQL} - 30)),
+                      ' cross-account ', if((SELECT count() FROM n360.v_anomaly_events WHERE day > {DATA_THROUGH_SQL} - 30) = 1, 'event', 'events'),
+                      ' in 30 days') AS sentence
+        FROM n360.v_va_day_anomaly WHERE {ACCT}""",
+        describe('Flags on the 7 newest settled days (the newest 3 days are provisional and never alert), and days when '
+                 '3 or more customers were flagged in the same direction.', 'n360.v_va_day_anomaly, n360.v_anomaly_events',
+                 'Customer', 'the 7 newest settled days; 30 days for events'))
     return dashboard(UID['anomalies'], 'N360 · Anomalies', p,
                      [var_account(), custom_var('kind', 'Kind', [('Drops and silences', 'drops'), ('Spikes', 'spikes')]),
                       custom_var('provisional', 'Include provisional', [('No', 'no'), ('Yes', 'yes')])], [back_link()])
@@ -1164,7 +1528,7 @@ def anomalies():
 
 def containment():
     """8. Containment (spec 8): per VA only, never one number across channels."""
-    p = header(1, 0, w=12)
+    p = []
     p.append(panel(3, 'Containment per VA: last 4 weeks against the 4 before', 'table', f"""
         SELECT {VA_LABEL} AS VA, ac.display_name AS Customer,
                1 - sumIf(d.handoffs, d.day > dt - 28) / sumIf(d.engaged, d.day > dt - 28) AS `Last 4 weeks`,
@@ -1196,7 +1560,16 @@ def containment():
         field=field_config([override('Containment', ('mappings', [empty_grey()]))], noValue='Every VA has handoff data'),
         may_be_empty='every VA has handoff data'))
     p.append(containment_weekly(5, 0, 17, 24, 10))
-    return dashboard('n360-containment', 'N360 · Containment', p, [var_account()], [back_link()])
+    p = with_header(p, f"""
+        SELECT concat({plural('countIf(containment_30 IS NOT NULL)', 'VA', 'VAs')}, ' with handoff data · ',
+                      toString(countIf(containment_30 < (SELECT containment_low_pct FROM n360.settings))), ' contain under 50% · ',
+                      toString(countIf(containment_down)), ' down 3+ points on the 30 days before · ',
+                      toString(countIf(containment_30 IS NULL)), ' without handoff data (not reported)') AS sentence
+        FROM n360.v_va_change WHERE {ACCT}""",
+        describe('Containment = 1 - handoffs / engaged, per VA (never across channels), last 30 days against the 30 '
+                 'before (proposed thresholds, n360.settings).', 'n360.v_va_change', 'Customer',
+                 'the 60 days to the data-through day'))
+    return dashboard(UID['containment'], 'N360 · Containment', p, [var_account()], [back_link()])
 
 
 def pipeline():
@@ -1218,7 +1591,7 @@ def pipeline():
         SELECT countIf(status != 'green') AS stale FROM n360.v_source_freshness""", 18, 0, 6, 3,
         describe('Sources whose last day is 2 or more days behind the data-through day (proposed thresholds, in '
                  'n360.v_source_freshness).', 'n360.v_source_freshness', 'none', 'the latest load'),
-        field=field_config(mappings=red_when_any()), options={**STAT_LAST, 'colorMode': 'background'}))
+        field=field_config(mappings=amber_when_any()), options={**STAT_LAST, 'colorMode': 'background'}))
     p.append(panel(6, 'Nightly loads, last 14 nights', 'state-timeline', """
         SELECT toDateTime(n.night) AS time,
                toNullable(multiIf(r.status = 'loaded', 1, r.status = 'failed_checks', 2, 0)) AS `Nightly load`
@@ -1232,7 +1605,7 @@ def pipeline():
         fmt='timeseries',
         field=field_config(mappings=[{'type': 'value', 'options': {
             '1': {'text': 'Loaded', 'color': COLOUR['green'], 'index': 0},
-            '2': {'text': 'Stopped: data checks failed', 'color': COLOUR['red'], 'index': 1},
+            '2': {'text': 'Stopped: data checks failed', 'color': COLOUR['amber'], 'index': 1},
             '0': {'text': 'No run', 'color': COLOUR['grey'], 'index': 2}}}],
             color={'mode': 'fixed', 'fixedColor': COLOUR['grey']}, noValue=''),
         options={'showValue': 'never', 'mergeValues': False, 'rowHeight': 0.9,
@@ -1259,7 +1632,8 @@ def pipeline():
                  'Amber from 2, red from 3 (n360.settings).', 'n360.source_freshness (append-only, one row per source '
                  'per night)', 'none', 'dashboard time range, by night'),
         fmt='timeseries', field=field_config(decimals=0, min=0, displayName='${__field.labels.source}',
-                                             custom={'drawStyle': 'line', 'lineWidth': 2, 'spanNulls': False}),
+                                             custom={'drawStyle': 'line', 'lineWidth': 2, 'spanNulls': False, 'axisSoftMax': 4},
+                                             **series_colours()),
         may_be_empty='no night stored in the time range'))
     p.append(panel(9, 'Contract measure mix', 'table', """
         SELECT measure AS Measure, count() AS Lines FROM n360.contract_line GROUP BY measure ORDER BY Lines DESC""",
@@ -1267,147 +1641,512 @@ def pipeline():
         describe('How many contract lines are measured each way. Engaged = no contract rule applies (billable unit '
                  'unconfirmed).', 'n360.contract_line', 'none', 'the latest load')))
     p.append(panel(10, 'Contract rules not live', 'table', """
-        SELECT label AS Rule, status AS Status, counts_plain AS `What it would count`
+        SELECT label AS Rule, multiIf(status = 'pending_probe', 'Pending: probe not run yet', status = 'blocked', 'Blocked',
+                                      status = 'active', 'Live but measuring no line', status) AS Status,
+               counts_plain AS `What it would count`
         FROM n360.rule WHERE status != 'active' OR empty(lines_measured)""", 12, 13, 12, 8,
         describe('Contract rules that are pending or blocked, so their lines are measured on engaged for now.',
                  'n360.rule', 'rules not active, or measuring no line', 'the latest load'),
         field=field_config(noValue='Every rule is live'), may_be_empty='every rule is live'))
-    return dashboard('n360-pipeline', 'N360 · Pipeline health', p, links=[back_link()], time={'from': 'now-30d', 'to': 'now'})
+    p = with_header(p, f"""
+        SELECT concat('Last night ', if(argMax(toString(status), (loaded_at, data_date)) = 'loaded', 'loaded',
+                                         'was stopped by a data check (the previous good night stays on screen)'),
+                      ' · ', toString((SELECT countIf(s = 'loaded') FROM (SELECT data_date, argMax(toString(status), loaded_at) AS s
+                                       FROM n360.runs GROUP BY data_date) WHERE data_date > (SELECT max(data_date) FROM n360.runs) - 14)),
+                      ' of the last 14 nights loaded · ',
+                      {plural("(SELECT countIf(status != 'green') FROM n360.v_source_freshness)", 'source', 'sources')}, ' behind') AS sentence
+        FROM n360.runs""",
+        describe('The latest nightly run, nights loaded of the last 14, and sources 2 or more days behind.',
+                 'n360.runs, n360.v_source_freshness', 'none', 'the last 14 nights'))
+    return dashboard(UID['pipeline'], 'N360 · Pipeline health', p, links=[back_link()], time={'from': 'now-30d', 'to': 'now'})
 
 
 
 
 def adoption():
-    """9. Adoption and coverage (spec 9, Phase 2): engine, playbooks, MCP, supervisory rules, authoring, assistant."""
-    p = header(1, 0, w=4)
-    p.append(panel(3, 'Configuration', 'stat', f"""
-        SELECT countIf(current_engine) AS `VAs on V8 or later`, count() AS `VAs read`,
-               sum(mcp_servers_live) AS `MCP servers live`, sum(supervisory_rules_on) AS `Supervisory rules on`
-        FROM n360.v_va_config_latest WHERE {ACCT}""", 8, 0, 11, 3,
-        describe('From the newest weekly configuration read of each VA. ' + PHASE2_NOTE,
-                 'n360.v_va_config_latest (n360.va_config_snapshot)', 'Customer', 'the newest read per VA'),
-        options=STATS, may_be_empty='no configuration read loaded'))
-    p.append(panel(4, 'Changed since last read', 'stat', f"""
-        SELECT count() AS changed FROM n360.v_va_config_change WHERE {ACCT}""", 19, 0, 5, 3,
-        describe('VAs whose configuration differs between their two newest weekly reads.', 'n360.v_va_config_change',
-                 'Customer', 'the two newest reads per VA'), options=STAT_LAST))
-    p.append(panel(5, 'Engine and configuration per VA', 'table', f"""
-        SELECT {VA_LABEL} AS VA, ac.display_name AS Customer, c.engine_version AS Engine,
-               toString(c.current_engine) AS `V8 or later`, c.v8_playbooks AS `V8 playbooks`,
-               c.legacy_intents AS `Legacy intents`, c.mcp_servers_live AS `MCP servers`,
-               c.supervisory_rules_on AS `Supervisory rules`, {date_sql('c.snapshot_date')} AS `Read on`,
+    """Adoption (v2): what do customers use, and what do we move next? Customer architects, product (Phase 2 data)."""
+    p = page_header(1, f"""
+        WITH (SELECT argMax(c.va, c.convs_30) FROM n360.v_va_change AS c
+              INNER JOIN n360.v_va_config_latest AS g ON g.bot_id = c.bot_id WHERE NOT g.current_engine AND c.{ACCT}) AS busiest,
+             (SELECT argMin(feature, n) FROM (SELECT feature, countIf(used) AS n FROM n360.v_feature_use
+                                               WHERE {ACCT} GROUP BY feature HAVING countIf(used IS NOT NULL) > 0)) AS least
+        SELECT if((SELECT count() FROM n360.v_va_config_latest) = 0, NULL, concat(
+                   toString(countIf(current_engine)), ' of ', {plural('count()', 'VA', 'VAs')}, ' on V8 or later · ',
+                   toString((SELECT countIf(n >= (SELECT target_features_min FROM n360.settings)) FROM
+                             (SELECT account, countIf(used) AS n FROM n360.v_feature_use WHERE {ACCT} GROUP BY account))),
+                   ' customers use 3+ target features',
+                   if(busiest = '', '', concat(' · busiest VA still to upgrade: ', busiest)),
+                   if(least = '', '', concat(' · least-used feature: ', least)))) AS sentence
+        FROM n360.v_va_config_latest WHERE {ACCT}""",
+        describe('VAs on engine V8 or later, customers using 3 or more target features (proposed), the VA with the most '
+                 'conversations still below V8, and the target feature fewest customers use. ' + PHASE2_NOTE,
+                 'n360.v_va_config_latest, n360.v_feature_use, n360.v_va_change', 'Customer',
+                 'the newest configuration read; the last 30 days'))
+    p.append(tile(3, 'VAs on V8 or later', f"""
+        SELECT snapshot_date AS night, toUInt64(countIf(engine_major >= (SELECT engine_current_major FROM n360.settings))) AS value
+        FROM n360.va_config_snapshot WHERE {ACCT} GROUP BY night""", 0, 3,
+        describe('VAs whose weekly configuration read shows V8 or later; change against the read 30 days earlier. '
+                 + PHASE2_NOTE, 'n360.va_config_snapshot', 'Customer', 'weekly reads, the last 30 days'),
+        metric='vas on v8'))
+    p.append(single_tile(4, 'Customers using 3+ target features', f"""
+        SELECT if(countIf(n_read > 0) = 0, NULL, countIf(n_used >= (SELECT target_features_min FROM n360.settings))) AS `of the 5 target features`
+        FROM (SELECT account, countIf(used) AS n_used, countIf(used IS NOT NULL) AS n_read FROM n360.v_feature_use
+              WHERE {ACCT} GROUP BY account)""", 6, 3,
+        describe('Customers that used at least 3 of the 5 target features in the last 30 days (proposed list). '
+                 + PHASE2_NOTE, 'n360.v_feature_use', 'Customer', 'the 30 days to the data-through day'),
+        metric='customers on 3+ features'))
+    p.append(single_tile(5, 'Legacy intents on VAs below V8', f"""
+        SELECT if(count() = 0, NULL, sumIf(legacy_intents, NOT current_engine)) AS `to move to playbooks`
+        FROM n360.v_va_config_latest WHERE {ACCT}""", 12, 3,
+        describe('Legacy intents still configured on VAs older than V8: the upgrade backlog. ' + PHASE2_NOTE,
+                 'n360.v_va_config_latest', 'Customer', 'the newest read per VA')))
+    p.append(single_tile(6, 'VAs containing under 50%', f"""
+        SELECT countIf(containment_30 < (SELECT containment_low_pct FROM n360.settings)) AS `of VAs with handoff data`
+        FROM n360.v_va_change WHERE {ACCT}""", 18, 3,
+        describe('VAs whose containment (1 - handoffs / engaged, per VA) over the last 30 days is under 50% (proposed, '
+                 'n360.settings containment_low_pct). VAs without handoff data are not counted.', 'n360.v_va_change',
+                 'Customer', 'the 30 days to the data-through day'), links=[panel_link('containment', 'Containment')]))
+    p.append(panel(7, 'Engine by customer', 'barchart', f"""
+        SELECT a.display_name AS Customer, countIf(c.current_engine) AS `V8 or later`, countIf(NOT c.current_engine) AS Older
+        FROM n360.v_va_config_latest AS c INNER JOIN n360.account AS a ON a.account = c.account
+        WHERE c.{ACCT} GROUP BY Customer ORDER BY countIf(c.current_engine) / count() DESC, Customer""", 0, 8, 14, 10,
+        describe('Each customer\'s VAs by engine, as a share (V8 or later green, older amber: the v1.1 page\'s colours), '
+                 'sorted by V8 share. ' + PHASE2_NOTE, 'n360.v_va_config_latest', 'Customer', 'the newest read per VA'),
+        field=field_config([override('V8 or later', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['green']}),
+                                     ('custom.axisPlacement', 'hidden')),
+                            override('Older', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['amber']}),
+                                     ('custom.axisPlacement', 'hidden'))],
+                           decimals=0, min=0, max=1, custom={'fillOpacity': 90, 'lineWidth': 0}),
+        options={'xField': 'Customer', 'orientation': 'horizontal', 'stacking': 'percent', 'showValue': 'never',
+                 'barWidth': 0.8, 'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'none'}}, may_be_empty='no configuration read loaded'))
+    p.append(panel(8, 'Customers using each target feature', 'barchart', f"""
+        SELECT feature AS Feature, countIf(used) AS Customers FROM n360.v_feature_use WHERE {ACCT}
+        GROUP BY feature HAVING countIf(used IS NOT NULL) > 0 ORDER BY Customers DESC""", 14, 8, 10, 10,
+        describe('How many customers used each target feature in the last 30 days (proposed list; Testing, Calibration and '
+                 'Recipes are not exported yet). ' + PHASE2_NOTE, 'n360.v_feature_use', 'Customer',
+                 'the 30 days to the data-through day'),
+        field=field_config(decimals=0, min=0, color={'mode': 'fixed', 'fixedColor': COLOUR['series']}),
+        options={'xField': 'Feature', 'orientation': 'horizontal', 'showValue': 'always', 'barWidth': 0.7,
+                 'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'}},
+        may_be_empty='no feature data loaded'))
+    feats = ['V8 playbooks', 'Authoring tool', 'Analytics assistant', 'MCP servers', 'Supervisory rules']
+    cols = ',\n               '.join(f"anyIf(if(f.used IS NULL, NULL, if(f.used, 'Used', 'Not used')), f.feature = '{x}') AS `{x}`"
+                                    for x in feats)
+    p.append(panel(9, 'Coverage and adoption by customer', 'table', f"""
+        SELECT a.display_name AS Customer,
+               (SELECT if(count() = 0, NULL, concat(toString(countIf(current_engine)), ' of ', toString(count())))
+                FROM n360.v_va_config_latest AS g WHERE g.account = a.account) AS `VAs on V8+`,
+               {cols}, a.account AS account
+        FROM n360.account AS a INNER JOIN n360.v_feature_use AS f ON f.account = a.account
+        WHERE a.{ACCT} GROUP BY a.display_name, a.account ORDER BY Customer""", 0, 18, 24, 9,
+        describe('Per customer: VAs on V8 or later, and each target feature used (green) or not (light grey) in the last '
+                 '30 days; "Not reported yet" where the source has no rows for the customer. ' + PHASE2_NOTE,
+                 'n360.v_feature_use, n360.v_va_config_latest', 'Customer', 'the 30 days to the data-through day'),
+        field=field_config([hidden('account'), override('VAs on V8+', ('mappings', [empty_grey()])),
+                            *[coloured(x, {'Used': ('Used', 'green'), 'Not used': ('Not used', 'grey_light')}, 'color-background')
+                              for x in feats],
+                            width('Customer', 190), with_links('Customer', drill(UID['customer'], 'account', 'account', 'Open customer'))]),
+        options={'cellHeight': 'sm'}))
+    p[-1]['targets'][0]['rawSql'] = p[-1]['targets'][0]['rawSql'].replace(
+        """(SELECT if(count() = 0, NULL, concat(toString(countIf(current_engine)), ' of ', toString(count())))
+                FROM n360.v_va_config_latest AS g WHERE g.account = a.account)""", "any(g.v8)").replace(
+        "INNER JOIN n360.v_feature_use AS f ON f.account = a.account", """INNER JOIN n360.v_feature_use AS f ON f.account = a.account
+        LEFT JOIN (SELECT account, toNullable(concat(toString(countIf(current_engine)), ' of ', toString(count()))) AS v8
+                   FROM n360.v_va_config_latest GROUP BY account) AS g ON g.account = a.account""")
+    p.append(panel(10, 'Upgrade queue: VAs below V8, busiest first', 'table', f"""
+        SELECT c.va AS VA, a.display_name AS Customer, g.engine_version AS Engine, g.legacy_intents AS `Legacy intents`,
+               g.v8_playbooks AS `V8 playbooks`, c.convs_30 AS `Conversations, 30 days`,
                concat('/d/n360-va?var-account=', c.account, '&var-va=', toString(c.bot_id)) AS drill
-        FROM n360.v_va_config_latest AS c INNER JOIN n360.va AS v ON v.bot_id = c.bot_id
-        INNER JOIN n360.account AS ac ON ac.account = c.account
-        WHERE c.{ACCT} ORDER BY c.current_engine, Customer, VA""", 0, 3, 24, 9,
-        describe('Each VA\'s newest configuration read. Green = engine V8 or later (spec 9). ' + PHASE2_NOTE,
-                 'n360.v_va_config_latest', 'Customer', 'the newest read per VA'),
-        field=field_config([hidden('drill'), coloured('V8 or later', {'1': ('Yes', 'green'), '0': ('No', 'grey')}, 'color-background'),
-                            width('V8 or later', 100), width('VA', 180), width('Customer', 160), width('Engine', 80),
-                            width('Read on', 110), with_links('VA', path_link('drill', 'Open VA'))]),
-        may_be_empty='no configuration read loaded'))
-    p.append(panel(6, 'V8 playbooks and legacy intents per VA', 'barchart', f"""
-        SELECT {VA_LABEL} AS VA, c.v8_playbooks AS `V8 playbooks`, c.legacy_intents AS `Legacy intents`
-        FROM n360.v_va_config_latest AS c INNER JOIN n360.va AS v ON v.bot_id = c.bot_id
-        WHERE c.{ACCT} ORDER BY VA""", 0, 12, 12, 10,
-        describe('Per VA, how much is built on V8 playbooks against legacy intents, from the newest read. ' + PHASE2_NOTE,
-                 'n360.v_va_config_latest', 'Customer', 'the newest read per VA'),
-        field=field_config(decimals=0),
-        options={'xField': 'VA', 'orientation': 'horizontal', 'groupWidth': 0.7, 'barWidth': 0.9, 'showValue': 'never',
-                 'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True}},
-        may_be_empty='no configuration read loaded'))
-    p.append(panel(7, 'Playbook executions, 31 days', 'table', f"""
-        SELECT pb.playbook AS Playbook, {VA_LABEL} AS VA, ac.display_name AS Customer, sum(pb.executions) AS `Executions, 31 days`,
-               if(sum(pb.executions) = 0, 'Built, not run', 'Running') AS Status
+        FROM n360.v_va_change AS c INNER JOIN n360.v_va_config_latest AS g ON g.bot_id = c.bot_id
+        INNER JOIN n360.account AS a ON a.account = c.account
+        WHERE c.{ACCT} AND NOT g.current_engine ORDER BY `Conversations, 30 days` DESC""", 0, 27, 12, 8,
+        describe('VAs still on an engine older than V8, ranked by conversations in the last 30 days: the first row is the '
+                 'one to upgrade next (most traffic moves). ' + PHASE2_NOTE, 'n360.v_va_change, n360.v_va_config_latest',
+                 'Customer', 'the newest read; the 30 days to the data-through day'),
+        field=field_config([hidden('drill'), count_col('Conversations, 30 days'), width('VA', 200),
+                            with_links('VA', path_link('drill', 'Open VA'))], noValue='Every VA is on V8 or later'),
+        options={'cellHeight': 'sm'}, may_be_empty='every VA on V8'))
+    p.append(panel(11, 'Containment by channel', 'table', f"""
+        SELECT c.channel AS Channel, c.va AS VA, a.display_name AS Customer, c.containment_30 AS `Last 30 days`,
+               c.containment_prev_30 AS `30 before`,
+               multiIf(c.containment_change_pts IS NULL, NULL, c.containment_change_pts >= 1, concat('▲ ', toString(c.containment_change_pts)),
+                       c.containment_change_pts <= -1, concat('▼ ', toString(abs(c.containment_change_pts))), '● steady') AS Change,
+               concat('/d/n360-va?var-account=', c.account, '&var-va=', toString(c.bot_id)) AS drill
+        FROM n360.v_va_change AS c INNER JOIN n360.account AS a ON a.account = c.account
+        WHERE c.{ACCT} AND c.containment_30 IS NOT NULL ORDER BY Channel, `Last 30 days`""", 12, 27, 12, 8,
+        describe('Containment per VA, grouped by channel (never one number across channels), last 30 days against the 30 '
+                 'before; the change is in points (▼ down, ▲ up). VAs without handoff data are on the Containment '
+                 'dashboard.', 'n360.v_va_change', 'Customer; VAs with handoff data', 'the 60 days to the data-through day'),
+        field=field_config([hidden('drill'), *[override(c, ('unit', 'percent'), ('decimals', 0)) for c in ('Last 30 days', '30 before')],
+                            override('Change', ('mappings', [{'type': 'regex', 'options': {'pattern': '^▼.*', 'result': {
+                                'color': COLOUR['down'], 'index': 0}}}]), ('custom.cellOptions', {'type': 'color-text'})),
+                            width('Channel', 70), width('VA', 180), width('Customer', 140), width('Last 30 days', 95),
+                            width('30 before', 85), with_links('VA', path_link('drill', 'Open VA'))]),
+        options={'cellHeight': 'sm'}))
+    p.append(panel(12, 'Idle playbooks: built, not run in 31 days', 'table', f"""
+        SELECT pb.playbook AS Playbook, {VA_LABEL} AS VA, ac.display_name AS Customer,
+               concat('/d/n360-va?var-account=', pb.account, '&var-va=', toString(pb.bot_id)) AS drill
         FROM n360.playbook_day AS pb INNER JOIN n360.va AS v ON v.bot_id = pb.bot_id
         INNER JOIN n360.account AS ac ON ac.account = pb.account
         WHERE pb.{ACCT} AND pb.day > {DATA_THROUGH_SQL} - 31
-        GROUP BY pb.playbook, v.va_name, v.channels, ac.display_name ORDER BY `Executions, 31 days`, Customer""", 12, 12, 12, 10,
-        describe('Executions per playbook over the 31 days to the data-through day. "Built, not run" = the playbook '
-                 'exists but ran 0 times. ' + PHASE2_NOTE, 'n360.playbook_day', 'Customer',
+        GROUP BY pb.playbook, pb.account, pb.bot_id, v.va_name, v.channels, ac.display_name HAVING sum(pb.executions) = 0
+        ORDER BY Customer""", 0, 35, 12, 7,
+        describe('Playbooks that exist (they have daily rows) but ran 0 times in the 31 days to the data-through day '
+                 '(v1.1 "Authored, not live"). ' + PHASE2_NOTE, 'n360.playbook_day', 'Customer',
                  'the 31 days to the data-through day'),
-        field=field_config([count_col('Executions, 31 days'), width('Executions, 31 days', 140), width('Status', 120),
-                            coloured('Status', {'Built, not run': ('Built, not run', 'amber'), 'Running': ('Running', 'none')})]),
-        may_be_empty='no playbook data loaded'))
-    p.append(panel(8, 'Authoring sessions and assistant questions, customer users', 'timeseries', f"""
+        field=field_config([hidden('drill'), with_links('VA', path_link('drill', 'Open VA'))], noValue='No idle playbook'),
+        options={'cellHeight': 'sm'}, may_be_empty='no idle playbook'))
+    p.append(panel(13, 'Configuration changes since the last read', 'table', f"""
+        SELECT {VA_LABEL} AS VA, ac.display_name AS Customer, {date_sql('ch.snapshot_date')} AS `Read on`,
+               arrayStringConcat(ch.changes, '; ') AS Changes
+        FROM n360.v_va_config_change AS ch INNER JOIN n360.va AS v ON v.bot_id = ch.bot_id
+        INNER JOIN n360.account AS ac ON ac.account = ch.account
+        WHERE ch.{ACCT}""", 12, 35, 12, 7,
+        describe('What changed per VA between its two newest weekly reads. ' + PHASE2_NOTE, 'n360.v_va_config_change',
+                 'Customer', 'the two newest reads per VA'),
+        field=field_config([width('VA', 170), width('Customer', 140), width('Read on', 105)],
+                           noValue='No changes since the last read'),
+        options={'cellHeight': 'sm'}, may_be_empty='no change since the last read'))
+    p.append(panel(14, 'Authoring sessions and assistant questions, customer users', 'timeseries', f"""
         SELECT toDateTime(toMonday(c.day)) AS time, sum(c.authoring_sessions) AS `Authoring sessions`,
                sum(e.questions) AS `Analytics-assistant questions`
         FROM n360.cortex_day AS c INNER JOIN n360.explorer_day AS e
              ON e.account = c.account AND e.day = c.day AND e.user_type = c.user_type
         WHERE c.{ACCT} AND c.user_type = 'customer' AND $__dateFilter(c.day)
           AND toMonday(c.day) >= toDate($__fromTime) AND toMonday(c.day) + 6 <= {DATA_THROUGH_SQL}
-        GROUP BY time ORDER BY time""", 0, 22, 12, 8,
-        describe('Per week, sessions in the authoring tool and questions to the analytics assistant by customer users '
-                 'only (staff left out). Complete weeks. ' + PHASE2_NOTE, 'n360.cortex_day, n360.explorer_day',
+        GROUP BY time ORDER BY time""", 0, 42, 24, 8,
+        describe('Per complete week, sessions in the authoring tool and questions to the analytics assistant by customer '
+                 'users only (staff left out). ' + PHASE2_NOTE, 'n360.cortex_day, n360.explorer_day',
                  'Customer; customer users', 'dashboard time range, complete weeks'),
-        fmt='timeseries', field=field_config(decimals=0, min=0, custom={'drawStyle': 'line', 'lineWidth': 2, 'spanNulls': False}),
+        fmt='timeseries', field=field_config(decimals=0, min=0, custom={'drawStyle': 'line', 'lineWidth': 2, 'spanNulls': False},
+                                             **series_colours()),
         may_be_empty='no usage data loaded'))
-    p.append(panel(9, 'Configuration changes since the last read', 'table', f"""
-        SELECT {VA_LABEL} AS VA, ac.display_name AS Customer, {date_sql('ch.previous_date')} AS `From`,
-               {date_sql('ch.snapshot_date')} AS `To`, arrayStringConcat(ch.changes, '; ') AS Changes
-        FROM n360.v_va_config_change AS ch INNER JOIN n360.va AS v ON v.bot_id = ch.bot_id
-        INNER JOIN n360.account AS ac ON ac.account = ch.account
-        WHERE ch.{ACCT}""", 12, 22, 12, 8,
-        describe('What changed per VA between its two newest weekly reads. ' + PHASE2_NOTE, 'n360.v_va_config_change',
-                 'Customer', 'the two newest reads per VA'),
-        field=field_config([width('VA', 150), width('Customer', 140), width('From', 100), width('To', 100)],
-                           noValue='No changes since the last read'), may_be_empty='no change since the last read'))
-    return dashboard('n360-adoption', 'N360 · Adoption and coverage', p, [var_account()], [back_link()])
+    return dashboard(UID['adoption'], 'N360 · Adoption', p, [var_account()], [back_link()])
 
 
 def requests():
-    """10. Requests (spec 10, Phase 2): support tickets by area, top asks, by customer, not tagged yet."""
-    p = header(1, 0, w=4)
-    p.append(panel(3, 'Tickets', 'stat', f"""
-        SELECT count() AS Opened, countIf(status = 'open') AS `Still open`, countIf(product_area IS NULL) AS `Not tagged yet`
-        FROM n360.ps_ticket WHERE {ACCT} AND $__dateFilter(opened)""", 8, 0, 10, 3,
-        describe('Support tickets opened in the time range. Tags (product area, ask) are set by hand, never '
-                 'automatically. ' + PHASE2_NOTE, 'n360.ps_ticket', 'Customer', 'dashboard time range (opened)'),
-        options=STATS))
-    p.append(panel(4, 'Top asks', 'stat', """
-        SELECT count() AS asks FROM n360.v_top_asks""", 18, 0, 6, 3,
-        describe('Asks wanted by several customers (2 or more, proposed).', 'n360.v_top_asks', 'none', 'all tickets'),
-        options=STAT_LAST))
-    p.append(panel(5, 'Tickets by product area', 'barchart', f"""
+    """Requests (v2): what are customers asking us to build or fix? Product, CS (Phase 2 data)."""
+    t90 = f"opened > {DATA_THROUGH_SQL} - 90"
+    p = page_header(1, f"""
+        WITH (SELECT argMax(concat(ask, ' (', toString(customers), ' customers)'), tuple(customers, tickets)) FROM n360.v_top_asks) AS top
+        SELECT if(count() = 0, NULL, concat({plural('countIf(' + t90 + ')', 'ticket', 'tickets')}, ' in 90 days · ',
+                      toString(countIf(status = 'open')), ' open · ',
+                      {plural('uniqExactIf(account, ' + t90 + ')', 'customer', 'customers')}, ' raising them',
+                      if(top = '', '', concat(' · most asked: ', top)))) AS sentence
+        FROM n360.ps_ticket WHERE {ACCT}""",
+        describe('Support tickets opened in the 90 days to the data-through day, those still open, how many customers '
+                 'raised them, and the ask wanted by the most customers. ' + PHASE2_NOTE,
+                 'n360.ps_ticket, n360.v_top_asks', 'Customer', 'the 90 days to the data-through day'))
+    p.append(single_tile(3, 'Tickets', f"""
+        SELECT if((SELECT count() FROM n360.ps_ticket) = 0, NULL, countIf({t90})) AS `opened in 90 days`
+        FROM n360.ps_ticket WHERE {ACCT}""", 0, 3, describe('Tickets opened in the 90 days to the data-through day. '
+                                                             + PHASE2_NOTE, 'n360.ps_ticket', 'Customer', 'the last 90 days')))
+    p.append(single_tile(4, 'Open', f"""
+        SELECT if((SELECT count() FROM n360.ps_ticket) = 0, NULL, countIf(status = 'open')) AS `priority not exported yet`
+        FROM n360.ps_ticket WHERE {ACCT}""", 6, 3, describe('Tickets still open, whenever opened. The v2 tile marks P1; '
+                                                             'priority is not in the export yet. ' + PHASE2_NOTE,
+                                                             'n360.ps_ticket', 'Customer', 'all tickets')))
+    p.append(single_tile(5, 'Customers raising them', f"""
+        SELECT if((SELECT count() FROM n360.ps_ticket) = 0, NULL, uniqExactIf(account, {t90})) AS `in 90 days`
+        FROM n360.ps_ticket WHERE {ACCT}""", 12, 3, describe('Customers with a ticket opened in the last 90 days. '
+                                                              + PHASE2_NOTE, 'n360.ps_ticket', 'Customer', 'the last 90 days')))
+    p.append(single_tile(6, 'Asks from several customers', """
+        SELECT if((SELECT count() FROM n360.ps_ticket) = 0, NULL, count()) AS `2 or more customers (proposed)`
+        FROM n360.v_top_asks""", 18, 3,
+        describe('Asks tagged on tickets from 2 or more customers (n360.settings asks_several_customers; the v2 spec '
+                 'says 3 or more: open decision). ' + PHASE2_NOTE, 'n360.v_top_asks', 'none (every customer)', 'all tickets')))
+    p.append(panel(7, 'Asks, by number of customers', 'barchart', """
+        SELECT concat(ask, if(open_n > 0, concat('  (', toString(open_n), ' open)'), '')) AS Ask, customers AS Customers
+        FROM (SELECT t.ask AS ask, t.customers AS customers, t.tickets AS tickets,
+                     (SELECT countIf(status = 'open') FROM n360.ps_ticket AS k WHERE k.ask = t.ask) AS open_n
+              FROM n360.v_top_asks AS t)
+        ORDER BY Customers DESC, tickets DESC""", 0, 8, 12, 9,
+        describe('Each ask wanted by 2 or more customers, ranked by how many customers want it; open tickets are noted '
+                 'after the ask. ' + PHASE2_NOTE, 'n360.v_top_asks, n360.ps_ticket', 'none (every customer)', 'all tickets'),
+        field=field_config(decimals=0, min=0, color={'mode': 'fixed', 'fixedColor': COLOUR['series']}),
+        options={'xField': 'Ask', 'orientation': 'horizontal', 'showValue': 'always', 'barWidth': 0.7,
+                 'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'}},
+        may_be_empty='no shared ask'))
+    p[-1]['targets'][0]['rawSql'] = """
+        SELECT concat(t.ask, if(o.n > 0, concat('  (', toString(o.n), ' open)'), '')) AS Ask, t.customers AS Customers
+        FROM n360.v_top_asks AS t
+        LEFT JOIN (SELECT ask, countIf(status = 'open') AS n FROM n360.ps_ticket WHERE ask IS NOT NULL GROUP BY ask) AS o
+               ON o.ask = t.ask
+        ORDER BY Customers DESC, t.tickets DESC""".strip()
+    p.append(panel(8, 'Tickets by product area', 'barchart', f"""
         SELECT ifNull(product_area, 'Not tagged yet') AS Area, count() AS Tickets
-        FROM n360.ps_ticket WHERE {ACCT} AND $__dateFilter(opened) GROUP BY Area ORDER BY Tickets DESC""", 0, 3, 12, 8,
-        describe('Tickets opened in the time range by product area. "Not tagged yet" is a real bucket, not a guess. '
+        FROM n360.ps_ticket WHERE {ACCT} AND $__dateFilter(opened) GROUP BY Area ORDER BY Tickets DESC""", 12, 8, 12, 9,
+        describe('Tickets opened in the time range by product area. "Not tagged yet" is a real bucket, never a guess. '
                  + PHASE2_NOTE, 'n360.ps_ticket', 'Customer', 'dashboard time range (opened)'),
-        field=field_config(decimals=0, color={'mode': 'fixed', 'fixedColor': COLOUR['neutral']}),
-        options={'xField': 'Area', 'orientation': 'horizontal', 'showValue': 'auto',
+        field=field_config(decimals=0, min=0, color={'mode': 'fixed', 'fixedColor': COLOUR['series']}),
+        options={'xField': 'Area', 'orientation': 'horizontal', 'showValue': 'always', 'barWidth': 0.7,
                  'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'}},
         may_be_empty='no tickets in the range'))
-    p.append(panel(6, 'Top asks: several customers wanting the same thing', 'table', """
-        SELECT t.ask AS Ask, t.customers AS Customers, t.tickets AS Tickets,
-               arrayStringConcat(t.account_list, ', ') AS Which, t.last_asked AS `Last asked`
-        FROM n360.v_top_asks AS t ORDER BY Customers DESC, Tickets DESC""", 12, 3, 12, 8,
-        describe('Asks tagged on tickets from 2 or more customers (proposed). ' + PHASE2_NOTE, 'n360.v_top_asks',
-                 'none', 'all tickets'),
-        field=field_config([width('Ask', 220), width('Customers', 90), width('Tickets', 70)],
-                           noValue='No ask shared by several customers'), may_be_empty='no shared ask'))
-    p.append(panel(7, 'Tickets by customer', 'barchart', f"""
-        SELECT ac.display_name AS Customer, count() AS Tickets
-        FROM n360.ps_ticket AS t INNER JOIN n360.account AS ac ON ac.account = t.account
-        WHERE t.{ACCT} AND $__dateFilter(t.opened) GROUP BY Customer ORDER BY Tickets DESC""", 0, 11, 12, 8,
-        describe('Tickets opened in the time range per customer. ' + PHASE2_NOTE, 'n360.ps_ticket', 'Customer',
-                 'dashboard time range (opened)'),
-        field=field_config(decimals=0, color={'mode': 'fixed', 'fixedColor': COLOUR['neutral']}),
-        options={'xField': 'Customer', 'orientation': 'horizontal', 'showValue': 'auto',
-                 'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'}},
-        may_be_empty='no tickets in the range'))
-    p.append(panel(8, 'Not tagged yet', 'table', f"""
+    p.append(panel(9, 'Tickets opened per week, last 26 weeks', 'timeseries', f"""
+        SELECT toDateTime(toMonday(opened)) AS time, count() AS Opened
+        FROM n360.ps_ticket WHERE {ACCT} AND opened > {DATA_THROUGH_SQL} - 182 GROUP BY time ORDER BY time""", 0, 17, 24, 7,
+        describe('Tickets opened per week. The v2 page also shows tickets closed per week; the export has no closed date '
+                 'yet. ' + PHASE2_NOTE, 'n360.ps_ticket', 'Customer', 'the 26 weeks to the data-through day'),
+        fmt='timeseries', field=field_config(decimals=0, min=0, color={'mode': 'fixed', 'fixedColor': COLOUR['series']},
+                                             custom={'drawStyle': 'bars', 'fillOpacity': 85, 'lineWidth': 1, 'barAlignment': 1}),
+        options={'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'}},
+        may_be_empty='no tickets in 26 weeks'))
+    p[-1]['timeFrom'] = '200d'
+    p.append(panel(10, 'Every ticket', 'table', f"""
         SELECT t.ticket_id AS Ticket, ac.display_name AS Customer, {date_sql('t.opened')} AS Opened, t.title AS Title,
-               t.status AS Status
+               t.product_area AS Area, t.ask AS Ask, t.status AS Status, t.account AS account
         FROM n360.ps_ticket AS t INNER JOIN n360.account AS ac ON ac.account = t.account
-        WHERE t.{ACCT} AND t.product_area IS NULL ORDER BY t.opened""", 12, 11, 12, 8,
-        describe('Tickets with no product area yet. They are tagged by hand, never automatically. ' + PHASE2_NOTE,
-                 'n360.ps_ticket', 'Customer; product area empty', 'all tickets'),
-        field=field_config([width('Ticket', 90), width('Customer', 150), width('Opened', 100), width('Status', 70)],
-                           noValue='Every ticket is tagged'), may_be_empty='every ticket tagged'))
-    return dashboard('n360-requests', 'N360 · Requests', p, [var_account()], [back_link()])
+        WHERE t.{ACCT} ORDER BY t.status = 'open' DESC, t.opened DESC""", 0, 24, 24, 12,
+        describe('Every ticket, open first then newest. Area and ask are tagged by hand ("Not tagged yet" until then). '
+                 'Filter a column from its header; export with the panel menu (Inspect > Data). ' + PHASE2_NOTE,
+                 'n360.ps_ticket', 'Customer', 'all tickets'),
+        field=field_config([hidden('account'),
+                            *[override(c, ('mappings', [{'type': 'special', 'options': {'match': 'null', 'result':
+                                {'text': 'Not tagged yet', 'color': COLOUR['grey'], 'index': 0}}}]),
+                                       ('custom.cellOptions', {'type': 'color-text'}),
+                                       ('color', {'mode': 'fixed', 'fixedColor': COLOUR['none']})) for c in ('Area', 'Ask')],
+                            width('Ticket', 90), width('Customer', 160), width('Opened', 110), width('Status', 80),
+                            with_links('Customer', drill(UID['customer'], 'account', 'account', 'Open customer'))],
+                           custom={'filterable': True}, noValue='No tickets'),
+        options={'cellHeight': 'sm'}, may_be_empty='no tickets'))
+    return dashboard(UID['requests'], 'N360 · Requests', p, [var_account()], [back_link()])
 
 
-DASHBOARDS = [overview, contracts, customer, contract_line, va, forecast, anomalies, containment, pipeline,
+def plural(n, one, many):
+    """SQL: "1 line" / "3 lines"."""
+    return f"concat(toString({n}), if({n} = 1, ' {one}', ' {many}'))"
+
+
+GREY_STATUSES = [k for k, (_, c) in STATUS.items() if c == 'grey']
+NOT_READABLE = 'No reading yet'           # the grey statuses together, in charts of parts of a whole
+
+
+def status_columns(count_expr='countIf({cond})', group_grey=True):
+    """SQL select list: one column per status shown (urgency order), the grey ones together when group_grey."""
+    cols, seen = [], False
+    for k, (t, c) in STATUS.items():
+        if group_grey and c == 'grey':
+            if seen:
+                continue
+            seen = True
+            cond = f"{STATUS_SHOWN} IN ({', '.join(repr(g) for g in GREY_STATUSES)})"
+            cols.append(f"{count_expr.format(cond=cond)} AS `{NOT_READABLE}`")
+        else:
+            cols.append(f"{count_expr.format(cond=f'{STATUS_SHOWN} = {k!r}')} AS `{t}`")
+    return ',\n               '.join(cols)
+
+
+def status_overrides(group_grey=True, link=None):
+    """Colour (and optionally a Contracts link) for every status column from status_columns()."""
+    out = []
+    for k, (t, c) in STATUS.items():
+        if group_grey and c == 'grey':
+            continue
+        props = [('color', {'mode': 'fixed', 'fixedColor': COLOUR[c]})]
+        if link:
+            props.append(('links', [{'title': f'Contracts: {t}', 'url': f"/d/{UID['contracts']}?var-status={k}"}]))
+        out.append(override(t, *props))
+    if group_grey:
+        props = [('color', {'mode': 'fixed', 'fixedColor': COLOUR['grey']})]
+        if link:
+            props.append(('links', [{'title': f'Contracts: {NOT_READABLE}', 'url': f"/d/{UID['contracts']}?"
+                                     + '&'.join(f'var-status={g}' for g in GREY_STATUSES)}]))
+        out.append(override(NOT_READABLE, *props))
+    return out
+
+
+def conversations_chart(pid, x, y, w, h, acct='1', title='All conversations', va_filter=None):
+    """Conversations per day, week or month (the Period picker). Periods not over yet, or holding days that may still
+    settle, are drawn faded as "Still counting" (v2 grammar: partial periods faded and labelled)."""
+    va = f" AND toString(d.bot_id) IN (${{{va_filter}:singlequote}})" if va_filter else ''
+    return panel(pid, title, 'timeseries', f"""
+        WITH (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') AS dt,
+             (SELECT anomaly_provisional_days FROM n360.settings) AS settling
+        SELECT toDateTime(b) AS time,
+               if(partial, NULL, if(countIf(d.conversations IS NULL) > 0, NULL, sum(d.conversations))) AS Conversations,
+               if(partial, if(countIf(d.conversations IS NULL) > 0, NULL, sum(d.conversations)), NULL) AS `Still counting`
+        FROM (SELECT *, multiIf(${{period:singlequote}} = 'day', day, ${{period:singlequote}} = 'month', toStartOfMonth(day), toMonday(day)) AS b,
+                     multiIf(${{period:singlequote}} = 'day', day, ${{period:singlequote}} = 'month', toLastDayOfMonth(day), toMonday(day) + 6) AS b_end
+              FROM n360.va_day) AS d
+        WHERE {acct}{va} AND $__dateFilter(d.day)
+        GROUP BY b, b_end > dt OR b_end > dt - settling AS partial ORDER BY time""", x, y, w, h,
+        describe('Conversations started per day, week (Monday to Sunday) or month, every VA together. The newest period '
+                 'is drawn faded and labelled "Still counting" while it is not over or holds days that may still '
+                 'settle (the newest 3). A period with any day not read is a gap, never a lower bar. Conversations '
+                 'are the platform count, not a contract measure.',
+                 'n360.va_day (the platform daily conversation aggregate and the conversation records reader)',
+                 'Customer' if acct != '1' else 'none (every customer)', 'dashboard time range, by the Period picker'),
+        fmt='timeseries',
+        field=field_config([override('Conversations', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series']})),
+                            override('Still counting', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series_light']}))],
+                           unit='short', decimals=0, min=0,
+                           custom={'drawStyle': 'bars', 'fillOpacity': 85, 'lineWidth': 1, 'spanNulls': False,
+                                   'stacking': {'mode': 'normal', 'group': 'A'}, 'barAlignment': 1}),
+        options={'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'none'}})
+
+
+def var_period():
+    return custom_var('period', 'Period', [('Week', 'week'), ('Day', 'day'), ('Month', 'month')])
+
+
+def var_vas():
+    """Several VAs of the chosen customer (All by default): the conversations chart's filter."""
+    return query_var('va', 'VA', f"""SELECT toString(v.bot_id), {VA_LABEL}
+        FROM n360.va AS v WHERE v.account IN (${{account:singlequote}}) ORDER BY 2""")
+
+
+def status_regex_colours():
+    """Stat value mappings: a text starting with a status word takes that status's colour."""
+    return [{'type': 'regex', 'options': {'pattern': f'^{t}.*', 'result': {'color': COLOUR[c], 'index': i}}}
+            for i, (k, (t, c)) in enumerate(STATUS.items())]
+
+
+def text_tile(pid, title, sql, x, y, w, h, desc, mappings=None, no_value=NOT_READ, colour_mode='none', may_be_empty=None):
+    return panel(pid, title, 'stat', sql, x, y, w, h, desc,
+                 field=plain(field_config(mappings=mappings or [], noValue=no_value)),
+                 options={'reduceOptions': {'calcs': ['lastNotNull'], 'fields': '/.*/'}, 'textMode': 'value',
+                          'colorMode': colour_mode, 'graphMode': 'none', 'justifyMode': 'auto', 'text': {'valueSize': 24}},
+                 may_be_empty=may_be_empty)
+
+
+def health():
+    """Customer health (v2, new): how is each customer doing, and what changed in 30 days? Customer success, by CSM."""
+    in_csm = "account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))"
+    p = page_header(1, f"""
+        WITH (SELECT argMax(concat(va, ' conversations ', if(convs_change_pct < 0, 'down ', 'up '),
+                                   toString(abs(toInt32(round(convs_change_pct)))), '%'), abs(convs_change_pct))
+              FROM n360.v_va_change WHERE {in_csm} AND convs_change_pct IS NOT NULL AND convs_prev_30 >= 300) AS biggest
+        SELECT concat({plural('(SELECT count() FROM n360.account WHERE ' + in_csm + ')', 'customer', 'customers')}, ' · ',
+                      toString((SELECT countIf(status = 'below pace') FROM n360.v_contract_status WHERE {in_csm})), ' lines below pace · ',
+                      toString((SELECT countIf(convs_down) FROM n360.v_va_change WHERE {in_csm})), ' VAs with conversations down 10%+',
+                      if(biggest = '', '', concat(' · biggest change: ', biggest))) AS sentence""",
+        describe('For the chosen CSMs: customers, lines below pace, VAs whose conversations fell 10% or more (last 30 '
+                 'days against the 30 before; proposed, n360.settings), and the biggest change in conversations of a VA '
+                 'with at least 300 conversations in the previous 30 days.', 'n360.v_contract_status, n360.v_va_change',
+                 'CSM', 'the 60 days to the data-through day'))
+    p.append(tile(3, 'Lines below pace', status_night_count("status = 'below pace'", in_csm), 0, 3,
+                  describe('Contract lines and pools more than 10 points behind their term (renewal risks included).',
+                           'n360.v_status_night', 'CSM', 'the last 30 stored nights'),
+                  links=[{'title': 'Contracts: below pace', 'url': f"/d/{UID['contracts']}?var-status=below pace&var-status=renewal risk"}],
+                  metric='lines below pace'))
+    p.append(single_tile(4, 'VAs with conversations down 10%+', f"""
+        SELECT countIf(convs_down) AS `last 30 days against the 30 before` FROM n360.v_va_change WHERE {in_csm}""", 6, 3,
+        describe('VAs whose conversations in the last 30 days are 10% or more below the 30 days before (proposed, '
+                 'n360.settings health_convs_down_pct). A window with an unread day is not compared.',
+                 'n360.v_va_change', 'CSM', 'the 60 days to the data-through day')))
+    p.append(single_tile(5, 'VAs with containment down 3+ points', f"""
+        SELECT countIf(containment_down) AS `last 30 days against the 30 before` FROM n360.v_va_change WHERE {in_csm}""", 12, 3,
+        describe('VAs whose containment (1 - handoffs / engaged, per VA) fell 3 points or more (proposed, n360.settings '
+                 'health_containment_down_pts). VAs without handoff data are not compared.', 'n360.v_va_change', 'CSM',
+                 'the 60 days to the data-through day')))
+    p.append(single_tile(6, 'Open tickets', f"""
+        SELECT if((SELECT count() FROM n360.ps_ticket) = 0, NULL, countIf(status = 'open')) AS `priority not exported yet`
+        FROM n360.ps_ticket WHERE {in_csm}""", 18, 3,
+        describe('Support tickets still open for these customers. The v2 tile counts P1 tickets; priority is not in the '
+                 'export yet, so every open ticket is counted. ' + PHASE2_NOTE, 'n360.ps_ticket', 'CSM', 'all tickets'),
+        links=[panel_link('requests', 'Requests')]))
+    p.append(panel(7, 'Customers', 'table', f"""
+        WITH st AS (SELECT account, argMin({STATUS_SHOWN}, tuple(status_rank, -ifNull(pct_billed, 0))) AS worst,
+                           arrayStringConcat(arrayFilter(x -> x != '', [
+                               if(countIf(status = 'over billed') > 0, concat(toString(countIf(status = 'over billed')), ' over'), ''),
+                               if(countIf(status = 'will exceed') > 0, concat(toString(countIf(status = 'will exceed')), ' will exceed'), ''),
+                               if(countIf(renewal_risk) > 0, concat(toString(countIf(renewal_risk)), ' at risk'), ''),
+                               if(countIf(status = 'below pace' AND NOT renewal_risk) > 0,
+                                  concat(toString(countIf(status = 'below pace' AND NOT renewal_risk)), ' below'), ''),
+                               if(countIf(status IN ('on pace', 'ahead')) > 0, concat(toString(countIf(status IN ('on pace', 'ahead'))), ' on pace'), ''),
+                               if(countIf(status IN ({', '.join(repr(g) for g in GREY_STATUSES)}, 'too early')) > 0,
+                                  concat(toString(countIf(status IN ({', '.join(repr(g) for g in GREY_STATUSES)}, 'too early'))), ' no reading'), '')]),
+                               ' · ') AS lines
+                    FROM n360.v_contract_status GROUP BY account),
+             vc AS (SELECT account, if(countIf(convs_30 IS NULL) > 0, NULL, sum(convs_30)) AS c30,
+                           if(countIf(convs_prev_30 IS NULL) > 0, NULL, sum(convs_prev_30)) AS cp30,
+                           argMax(concat(va, ': conversations ', if(convs_change_pct < 0, 'down ', 'up '),
+                                         toString(abs(toInt32(round(convs_change_pct)))), '%'), abs(ifNull(convs_change_pct, 0))) AS big_conv,
+                           max(abs(ifNull(convs_change_pct, 0))) AS big_conv_size,
+                           argMax(concat(va, ': containment ', if(containment_change_pts < 0, 'down ', 'up '),
+                                         toString(abs(containment_change_pts)), ' points'), abs(ifNull(containment_change_pts, 0))) AS big_cont,
+                           max(abs(ifNull(containment_change_pts, 0))) AS big_cont_size
+                    FROM n360.v_va_change GROUP BY account),
+             fu AS (SELECT account, if(countIf(used IS NOT NULL) = 0, NULL, concat(toString(countIf(used)), ' of ', toString(count()))) AS f
+                    FROM n360.v_feature_use GROUP BY account),
+             tk AS (SELECT account, countIf(status = 'open') AS open_t FROM n360.ps_ticket GROUP BY account)
+        SELECT a.display_name AS Customer, a.csm_rocketlane AS CSM, if(st.account = '', 'unbilled', st.worst) AS Status,
+               if(st.account = '', 'No contract line', st.lines) AS Lines,
+               vc.c30 AS `Conversations, 30 days`, round(100 * (vc.c30 - vc.cp30) / vc.cp30, 1) AS `vs previous 30`,
+               -- the bigger of the two changes, a conversations change weighted 1, a containment point weighted 3
+               if(vc.big_conv_size >= 3 * vc.big_cont_size, vc.big_conv, vc.big_cont) AS `Biggest change`,
+               fu.f AS `Target features`, if((SELECT count() FROM n360.ps_ticket) = 0, NULL, ifNull(tk.open_t, 0)) AS `Open tickets`,
+               a.account AS account
+        FROM n360.account AS a
+        LEFT JOIN st ON st.account = a.account LEFT JOIN vc ON vc.account = a.account
+        LEFT JOIN fu ON fu.account = a.account LEFT JOIN tk ON tk.account = a.account
+        WHERE a.{CSM}
+        ORDER BY ifNull(st.worst, '') = '', indexOf(['{"', '".join(STATUS)}'], st.worst), Customer""", 0, 8, 24, 15,
+        describe('One row per customer: its most urgent contract status and its lines by status, conversations over the '
+                 'last 30 days against the 30 before (a window with an unread day is "Not reported yet"), the biggest '
+                 'change among its VAs in a sentence (a containment point counted as 3% of conversations), target '
+                 'features used, and open tickets. Sorted by status urgency. Click a customer to open it.',
+                 'n360.v_contract_status, n360.v_va_change, n360.v_feature_use, n360.ps_ticket', 'CSM',
+                 'the 60 days to the data-through day'),
+        field=field_config([hidden('account'), coloured('Status', {**STATUS, 'unbilled': ('Unbilled', 'none')}, 'color-background'),
+                            count_col('Conversations, 30 days'), override('vs previous 30', ('unit', 'percent'), ('decimals', 0)),
+                            *[override(c, ('mappings', [empty_grey()])) for c in ('Conversations, 30 days', 'vs previous 30',
+                                                                                 'Target features', 'Open tickets')],
+                            width('Customer', 170), width('CSM', 170), width('Status', 130), width('Lines', 230),
+                            width('Conversations, 30 days', 120), width('vs previous 30', 100), width('Target features', 110),
+                            width('Open tickets', 100),
+                            with_links('Customer', drill(UID['customer'], 'account', 'account', 'Open customer'))]),
+        options={'cellHeight': 'sm'}))
+    p.append(panel(8, 'Conversations per week, last 26 weeks', 'timeseries', f"""
+        SELECT toDateTime(toMonday(d.day)) AS time, a.display_name AS customer,
+               if(countIf(d.conversations IS NULL) > 0, NULL, sum(d.conversations)) AS conversations
+        FROM n360.va_day AS d INNER JOIN n360.account AS a ON a.account = d.account
+        WHERE d.{in_csm} AND d.day > {DATA_THROUGH_SQL} - 182
+          AND toMonday(d.day) + 6 <= {DATA_THROUGH_SQL}
+        GROUP BY time, customer ORDER BY time""", 0, 23, 24, 9,
+        describe('Each customer\'s conversations per complete week (Monday to Sunday), one line per customer, in shades '
+                 'of one colour (customers are not statuses). A week with an unread day is a gap. Hover for values.',
+                 'n360.va_day', 'CSM', 'the 26 complete weeks to the data-through day'),
+        fmt='timeseries',
+        field=field_config(unit='short', decimals=0, min=0, displayName='${__field.labels.customer}',
+                           custom={'lineWidth': 2, 'spanNulls': False, 'scaleDistribution': {'type': 'log', 'log': 10}},
+                           **series_colours()),
+        options={'legend': {'displayMode': 'table', 'placement': 'right', 'showLegend': True, 'calcs': ['lastNotNull']},
+                 'tooltip': {'mode': 'multi', 'sort': 'desc'}}))
+    p[-1]['timeFrom'] = '200d'
+    p.append(panel(9, 'VAs: last 30 days against the 30 before', 'table', f"""
+        SELECT c.va AS VA, a.display_name AS Customer, c.convs_30 AS `Conversations, 30 days`,
+               c.convs_change_pct AS `vs previous 30`, c.containment_30 AS Containment,
+               c.containment_change_pts AS `Change (points)`,
+               arrayStringConcat(arrayFilter(x -> x != '', [if(c.convs_down, 'Conversations down', ''),
+                                                            if(c.containment_down, 'Containment down', '')]), ' · ') AS Flag,
+               concat('/d/n360-va?var-account=', c.account, '&var-va=', toString(c.bot_id)) AS drill, c.account AS account
+        FROM n360.v_va_change AS c INNER JOIN n360.account AS a ON a.account = c.account
+        WHERE a.{CSM}
+        ORDER BY c.convs_down OR c.containment_down DESC, abs(ifNull(c.convs_change_pct, 0)) DESC""", 0, 32, 24, 12,
+        describe('Every VA of the chosen CSMs\' customers, flagged ones first. Containment is per VA, never across '
+                 'channels; "Not reported yet" where handoffs are not read. Flags: conversations down 10%+, '
+                 'containment down 3+ points (proposed). Click a VA or a customer to open it.',
+                 'n360.v_va_change (n360.va_day)', 'CSM', 'the 60 days to the data-through day'),
+        field=field_config([hidden('drill'), hidden('account'), count_col('Conversations, 30 days'),
+                            override('vs previous 30', ('unit', 'percent'), ('decimals', 0)),
+                            override('Containment', ('unit', 'percent'), ('decimals', 0)), override('Change (points)', ('decimals', 1)),
+                            coloured('Flag', {'Conversations down': ('Conversations down', 'down'),
+                                              'Containment down': ('Containment down', 'down'),
+                                              'Conversations down · Containment down': ('Conversations and containment down', 'down'),
+                                              '': ('', 'none')}),
+                            *[override(c, ('mappings', [empty_grey()])) for c in
+                              ('Conversations, 30 days', 'vs previous 30', 'Containment', 'Change (points)')],
+                            width('VA', 220), width('Customer', 170), width('Flag', 240),
+                            with_links('VA', path_link('drill', 'Open VA')),
+                            with_links('Customer', drill(UID['customer'], 'account', 'account', 'Open customer'))]),
+        options={'cellHeight': 'sm'}))
+    return dashboard(UID['health'], 'N360 · Customer health', p, [var_csm()], [back_link()])
+
+
+DASHBOARDS = [overview, contracts, customer, health, contract_line, va, forecast, anomalies, containment, pipeline,
               adoption, requests]
 
 
