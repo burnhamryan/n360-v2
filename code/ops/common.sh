@@ -22,7 +22,7 @@ WORK=${N360_WORK:-/var/lib/n360/work}
 PYTHON=${N360_PYTHON:-python3}     # runs load.py (needs clickhouse-connect); the server uses python3.12
 
 # History tables: built up night by night (or by people), so a nightly export cannot rebuild them.
-HISTORY_TABLES="runs line_totals_history forecast_history source_freshness anomaly_log forecast_challenger risk_register risk_pulse risk_history sf_runs risk_outcome risk_model_runs risk_scores risk_contributions risk_features"
+HISTORY_TABLES="runs line_totals_history forecast_history source_freshness anomaly_log forecast_challenger risk_register risk_pulse risk_history sf_runs risk_outcome risk_model_runs risk_model_adopted risk_scores risk_contributions risk_features"
 
 sql() {   # sql "QUERY" [data-file]: run a query as the loader user; with a file, POST it as the INSERT body
   if [ -n "${2:-}" ]; then

@@ -346,7 +346,8 @@ SELECT
     30  AS risk_ticket_age_days,     -- oldest open ticket older than this: watch
     3   AS risk_open_tickets,        -- this many open tickets or more: watch
     50  AS risk_building_drop_pct,   -- customer authoring + assistant use down this %: watch
-    30  AS risk_pulse_valid_days;    -- a CSM's rating counts for this many days, then shows as expired
+    30  AS risk_pulse_valid_days,    -- a CSM's rating counts for this many days, then shows as expired
+    0.9 AS risk_downsell_ratio;      -- PROPOSED: a renewal won at under this share of the customer's previous won amount is a downsell
 
 
 CREATE OR REPLACE VIEW n360.v_line_status AS
@@ -1404,9 +1405,12 @@ CREATE TABLE IF NOT EXISTS n360.risk_features         -- the feature store: each
     account      LowCardinality(String),
     feature      LowCardinality(String),
     value        Nullable(Float64),                     -- NULL = not reported (the source had nothing)
-    computed_at  DateTime('UTC') DEFAULT now()
+    computed_at  DateTime('UTC') DEFAULT now(),
+    source       LowCardinality(String) DEFAULT 'rebuilt'  -- 'nightly' = stored that night (the true record; a rebuild never
+                                                           -- replaces it) | 'rebuilt' = computed later from today's data
 )
 ENGINE = MergeTree PARTITION BY toYYYYMM(as_of) ORDER BY (account, as_of, feature);
+ALTER TABLE n360.risk_features ADD COLUMN IF NOT EXISTS source LowCardinality(String) DEFAULT 'rebuilt';
 
 CREATE TABLE IF NOT EXISTS n360.risk_outcome          -- outcomes recorded by hand (risk_model.py outcome)
 (
@@ -1425,13 +1429,22 @@ CREATE TABLE IF NOT EXISTS n360.risk_model_runs       -- every trained model, wi
     trained_at  DateTime('UTC') DEFAULT now(),
     version     String,                                 -- risk_model.json version
     kind        LowCardinality(String),                 -- 'prior' (too few outcomes) | 'trained'
-    n           UInt32,
-    events      UInt32,
+    n           UInt32,                                 -- snapshots
+    events      UInt32,                                 -- distinct renewals lost (never snapshots)
     note        String,
-    model       String,                                 -- JSON: intercept, coef, fill
+    model       String,                                 -- JSON: intercept, coef, mean, stage
     backtest    String                                  -- JSON: metrics per method, reliability, lead times
 )
 ENGINE = MergeTree ORDER BY trained_at;
+
+CREATE TABLE IF NOT EXISTS n360.risk_model_adopted    -- which run is in use: the newest row (risk_model.py adopt). Training
+(                                                     -- never puts a model into use by itself.
+    run_id  UUID,                                     -- all zeros = back to the built-in expert prior
+    at      DateTime64(3, 'UTC') DEFAULT now64(3),
+    by      LowCardinality(String),
+    note    String
+)
+ENGINE = MergeTree ORDER BY at;
 
 CREATE TABLE IF NOT EXISTS n360.risk_scores
 (
@@ -1442,9 +1455,9 @@ CREATE TABLE IF NOT EXISTS n360.risk_scores
     as_of            Date,
     account          LowCardinality(String),
     health           Nullable(Float64),
-    band             LowCardinality(String),            -- healthy | watch | at risk | not reported
-    probability      Float64,                           -- churn or downsell at the next renewal (within the horizon)
-    eligible         Bool,                              -- next renewal within the horizon (or unknown)
+    band             LowCardinality(String),            -- healthy | watch | at risk | not enough data | not reported | churned
+    probability      Nullable(Float64),                 -- churn or downsell at the next renewal; NULL = churned, or nothing reported
+    eligible         Bool,                              -- next renewal within the horizon (an unknown date is not)
     coverage         Float64,                           -- share of the model's weight with data
     hard_reds        Array(String),
     days_to_renewal  Nullable(Float64),
@@ -1452,6 +1465,7 @@ CREATE TABLE IF NOT EXISTS n360.risk_scores
     revenue_at_risk  Nullable(Float64)                  -- probability x renewal amount, when eligible
 )
 ENGINE = MergeTree ORDER BY (as_of, account, scored_at);
+ALTER TABLE n360.risk_scores MODIFY COLUMN probability Nullable(Float64);
 
 CREATE TABLE IF NOT EXISTS n360.risk_contributions    -- why: each feature's value, risk, health points lost, log-odds push
 (
@@ -1469,19 +1483,33 @@ ENGINE = MergeTree ORDER BY (as_of, account, feature, run_id);
 
 CREATE OR REPLACE VIEW n360.v_risk_outcomes AS
 -- Every known outcome: recorded by hand, closed in the risk register, or a renewal closed in Salesforce.
+-- Salesforce is the source that covers EVERY customer, flagged or not: lost = churned; won at under
+-- settings.risk_downsell_ratio of the customer's previous won amount = downsold; else renewed. The register only knows
+-- customers somebody raised a risk for, so it is a second witness, never the only one to rely on for downsells.
+-- The same event may appear from two sources; the model takes one outcome per renewal (code/risk/backtest.py).
 SELECT account, date, outcome, source FROM (
     SELECT account, date, toString(outcome) AS outcome, 'recorded' AS source FROM n360.risk_outcome
     UNION ALL
     SELECT account, toDate(updated_at), multiIf(outcome = 'churned', 'churned', outcome = 'downsold', 'downsold', 'renewed'), 'register'
     FROM n360.v_risk_register WHERE status = 'closed' AND outcome IN ('churned', 'downsold', 'saved')
     UNION ALL
-    SELECT s.account, o.close_date, if(o.is_won, 'renewed', 'churned'), 'salesforce'
-    FROM n360.sf_opportunity AS o INNER JOIN n360.v_sf_account AS s ON s.sf_account_id = o.sf_account_id
-    WHERE o.is_renewal AND o.is_closed AND s.account != '' AND o.close_date IS NOT NULL);
+    SELECT s.account, o.close_date,
+           multiIf(NOT o.is_won, 'churned',
+                   o.amount > 0 AND o.prev_amount > 0 AND o.amount < (SELECT risk_downsell_ratio FROM n360.settings) * o.prev_amount, 'downsold',
+                   'renewed'), 'salesforce'
+    FROM (SELECT sf_account_id, close_date, is_won, is_renewal, amount,
+                 -- the customer's previous won opportunity with an amount (a lost one never sets the bar)
+                 anyLast(if(is_won AND amount > 0, amount, NULL))
+                     OVER (PARTITION BY sf_account_id ORDER BY close_date, opp_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_amount
+          FROM n360.sf_opportunity WHERE is_closed AND close_date IS NOT NULL) AS o
+    INNER JOIN n360.v_sf_account AS s ON s.sf_account_id = o.sf_account_id
+    WHERE o.is_renewal AND s.account != '');
 
 CREATE OR REPLACE VIEW n360.v_risk_model AS
--- The model in use: the newest trained run (the expert prior until one exists).
-SELECT * FROM n360.risk_model_runs ORDER BY trained_at DESC LIMIT 1;
+-- The model in use: the run adopted last (risk_model.py adopt). No row = the built-in expert prior.
+SELECT r.* FROM n360.risk_model_runs AS r
+WHERE r.run_id = (SELECT argMax(run_id, at) FROM n360.risk_model_adopted)
+ORDER BY r.trained_at DESC LIMIT 1;
 
 CREATE OR REPLACE VIEW n360.v_risk_score AS
 -- The newest score per customer: the newest scoring run of the newest date.

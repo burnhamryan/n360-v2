@@ -243,7 +243,7 @@ def main():
                                           "FROM n360.v_risk_score")}
         check('risk model: one current score per customer, probabilities between 0 and 1',
               len(sc) == int(q('SELECT count() AS n FROM n360.account')[0]['n'])
-              and all(0 <= float(r['probability']) <= 1 for r in sc.values()), len(sc))
+              and all(r['probability'] is None or 0 <= float(r['probability']) <= 1 for r in sc.values()), len(sc))
         w = sc.get('Willow Energy', {})
         check('risk model: Willow Energy at risk, held there by hard reds (renewal omitted, open churn risk)',
               w.get('band') == 'at risk' and 'Renewal lost or omitted' in w.get('reds', '') and 'churn risk' in w.get('reds', ''), w)
@@ -253,8 +253,14 @@ def main():
         pts = q("SELECT s.account AS a, any(s.health) AS h, sum(c.points) AS p, arrayStringConcat(any(s.hard_reds), '') AS r "
                 "FROM n360.v_risk_score AS s INNER JOIN n360.v_risk_drivers AS c ON c.account = s.account "
                 "WHERE s.health IS NOT NULL GROUP BY s.account")
-        bad = [r for r in pts if r['r'] == '' and abs(float(r['p']) - (100 - float(r['h']))) > 0.5]
-        check('risk model: points lost per feature add up to 100 - health (customers with no hard red)', not bad, bad)
+        bad = [r for r in pts if abs(float(r['p']) - (100 - float(r['h']))) > 0.5]
+        check('risk model: points lost add up to 100 - health for every customer, hard red or not', not bad, bad)
+        mk = q("SELECT any(kind) AS kind, count() AS n FROM n360.v_risk_model")[0]
+        check('risk model: the model in use is the run that was adopted (the expert prior: too few outcomes to learn from)',
+              int(mk['n']) == 1 and mk['kind'] == 'prior', mk)
+        src = {r['source']: int(r['n']) for r in q('SELECT source, uniqExact(as_of) AS n FROM n360.risk_features GROUP BY source')}
+        check('risk model: the feature store says which dates were stored that night and which were rebuilt later',
+              src.get('rebuilt', 0) >= 20, src)
         hist = q('SELECT uniqExact(as_of) AS n FROM n360.risk_scores')[0]['n']
         check('risk model: a score history over the stored weeks', int(hist) >= 20, hist)
         outs = {(r['account'], r['outcome']) for r in q('SELECT account, outcome FROM n360.v_risk_outcomes')}

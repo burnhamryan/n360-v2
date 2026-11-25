@@ -5,6 +5,11 @@ recorded after 1 September. That makes a backtest on N360's own history honest. 
 false` in risk_model.json (current state only: the Salesforce forecast category and open tickets, which keep no
 history). They are filled only for the newest date, and the model never trains on them.
 
+Known limits of "as it stood": contract lines are read as they are today (a renewal adds a new line and the old one
+stays, so past terms are still there, but an edited date or volume rewrites the past); Salesforce activity is taken
+by its activity date, so a call logged late shows up in the past; the "current" engine version is today's setting.
+Rows stored by the nightly run do not have these limits, which is why a rebuild never replaces them.
+
 Each feature is one small SQL query returning (account, value) for the date; build() joins them per customer. A
 customer a source knows nothing about gets None ("not reported"), never 0.
 """
@@ -51,16 +56,17 @@ RENEWAL = """
     FROM n360.contract_line WHERE end_date >= {D} AND start_date <= {D} GROUP BY account"""
 
 # ───────────────────────── usage and quality ─────────────────────────
+# Whole weeks (28 and 84 days), so both sides of a comparison hold the same weekdays.
 USAGE = """
     SELECT account,
-           if(countIf(day > {D} - 60 AND day <= {D} AND conversations IS NULL) > 0 OR sumIf(conversations, day > {D} - 60 AND day <= {D} - 30) = 0,
-              NULL, 100 * (sumIf(conversations, day > {D} - 30 AND day <= {D}) - sumIf(conversations, day > {D} - 60 AND day <= {D} - 30))
-                    / sumIf(conversations, day > {D} - 60 AND day <= {D} - 30)) AS conv_change_30_pct,
-           if(countIf(day > {D} - 180 AND day <= {D} AND conversations IS NULL) > 0 OR sumIf(conversations, day > {D} - 180 AND day <= {D} - 90) = 0
-              OR uniqExactIf(day, day > {D} - 180 AND day <= {D} - 90) < 85,
-              NULL, 100 * (sumIf(conversations, day > {D} - 90 AND day <= {D}) - sumIf(conversations, day > {D} - 180 AND day <= {D} - 90))
-                    / sumIf(conversations, day > {D} - 180 AND day <= {D} - 90)) AS conv_change_90_pct
-    FROM n360.va_day WHERE day > {D} - 180 AND day <= {D} GROUP BY account"""
+           if(countIf(day > {D} - 56 AND day <= {D} AND conversations IS NULL) > 0 OR sumIf(conversations, day > {D} - 56 AND day <= {D} - 28) = 0,
+              NULL, 100 * (sumIf(conversations, day > {D} - 28 AND day <= {D}) - sumIf(conversations, day > {D} - 56 AND day <= {D} - 28))
+                    / sumIf(conversations, day > {D} - 56 AND day <= {D} - 28)) AS conv_change_30_pct,
+           if(countIf(day > {D} - 168 AND day <= {D} AND conversations IS NULL) > 0 OR sumIf(conversations, day > {D} - 168 AND day <= {D} - 84) = 0
+              OR uniqExactIf(day, day > {D} - 168 AND day <= {D} - 84) < 80,
+              NULL, 100 * (sumIf(conversations, day > {D} - 84 AND day <= {D}) - sumIf(conversations, day > {D} - 168 AND day <= {D} - 84))
+                    / sumIf(conversations, day > {D} - 168 AND day <= {D} - 84)) AS conv_change_90_pct
+    FROM n360.va_day WHERE day > {D} - 168 AND day <= {D} GROUP BY account"""
 
 VOLATILITY = """
     SELECT account, if(count() < 8 OR avg(w) = 0, NULL, stddevPop(w) / avg(w)) AS conv_volatility FROM (
@@ -68,9 +74,13 @@ VOLATILITY = """
         WHERE toMonday(day) > {D} - 84 AND toMonday(day) + 6 <= {D} GROUP BY account, wk)
     GROUP BY account"""
 
+# The worst single VA, on settled days only: a customer with many VAs is not riskier for having more of them, and
+# the newest days still settle (v_va_day_anomaly.provisional), which a past date rebuilt later would never see.
 FLAGS = """
-    SELECT account, countIf(kind = 'went silent') AS silent_va_days_30, countIf(kind = 'drop') AS drop_days_30
-    FROM n360.v_va_day_anomaly WHERE day > {D} - 30 AND day <= {D} GROUP BY account"""
+    SELECT account, toFloat64(max(silent)) AS silent_va_days_30, toFloat64(max(drops)) AS drop_days_30 FROM (
+        SELECT account, bot_id, countIf(kind = 'went silent') AS silent, countIf(kind = 'drop') AS drops
+        FROM n360.v_va_day_anomaly WHERE day > {D} - 30 AND day <= {D} AND NOT provisional GROUP BY account, bot_id)
+    GROUP BY account"""
 
 CONTAINMENT = """
     SELECT account, argMax(c30, e30) AS containment_pct, argMax(c30 - cp30, e30) AS containment_change_pts FROM (
@@ -125,12 +135,14 @@ CONFIG_AGE = """
     GROUP BY account"""
 
 # ───────────────────────── relationship (Salesforce) ─────────────────────────
+# No activity at all on or before the date = not reported (Salesforce may simply not be used for this customer yet);
+# activity but never a contact or an executive meeting = 365, the worst case, because that absence was observed.
 CONTACT = """
     SELECT s.account AS account,
-           if(countIf(a.is_contact AND a.activity_date <= {D}) = 0, 365,
-              least(365, dateDiff('day', maxIf(a.activity_date, a.is_contact AND a.activity_date <= {D}), {D}))) AS days_since_contact,
-           if(countIf(a.is_executive AND a.activity_date <= {D}) = 0, 365,
-              least(365, dateDiff('day', maxIf(a.activity_date, a.is_executive AND a.activity_date <= {D}), {D}))) AS days_since_exec
+           multiIf(countIf(a.activity_date <= {D}) = 0, NULL, countIf(a.is_contact AND a.activity_date <= {D}) = 0, 365,
+                   least(365, dateDiff('day', maxIf(a.activity_date, a.is_contact AND a.activity_date <= {D}), {D}))) AS days_since_contact,
+           multiIf(countIf(a.activity_date <= {D}) = 0, NULL, countIf(a.is_executive AND a.activity_date <= {D}) = 0, 365,
+                   least(365, dateDiff('day', maxIf(a.activity_date, a.is_executive AND a.activity_date <= {D}), {D}))) AS days_since_exec
     FROM n360.v_sf_account AS s LEFT JOIN n360.sf_activity AS a ON a.sf_account_id = s.sf_account_id
     WHERE s.account != '' GROUP BY s.account"""
 

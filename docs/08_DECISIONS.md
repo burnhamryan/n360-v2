@@ -34,7 +34,7 @@
 |---|---|
 | Pace colours (values in `n360.settings`) | Green ≤ term + 10 pts; amber > term + 10 or crossing ≤ 60 d; red > 100% or crossing ≤ 30 d; grey not measurable / not implemented / not read |
 | Anomaly thresholds | Same weekday 8 weeks; z ≤ −4 / ≥ 4; min median 20; provisional 3 days |
-| Risk model (`code/risk/risk_model.json`) | 20 point-in-time features in 7 weighted dimensions; health bands 75/50; hard reds; probability = logistic regression ridge-shrunk toward an expert prior (5% to 75%), trained at 20+ churns or downsells; 180-day horizon; training never automatic (docs/21) |
+| Risk model (`code/risk/risk_model.json`) | 20 point-in-time features in 7 weighted dimensions; health bands 75/50; hard reds; probability = an expert prior (the average customer in a renewal window at 15%, full risk at 80%) that learns in stages from real renewals: level and one slope from 10 lost, per dimension from 50, per feature from 100; one outcome per renewal, judged from 180 days out; a trained run is used only once adopted (docs/21) |
 | Risk dashboard rules (`v_risk_signal`, values in `n360.settings`) | Explainable rules, worst signal wins, no weighted score yet; thresholds and reason codes in docs/17 (sections 3, 4, 6) |
 | Salesforce mapping (`code/salesforce/salesforce.json`) | Renewal = Opportunity Type "Renewal"; safe forecast categories Commit / Closed, risk "Omitted"; contact = past events and closed call/email tasks; open questions in docs/18 |
 | Contract statuses (`v_contract_status`, values in `n360.settings`) | Below / ahead of pace ±10 points of term; too early < 30 days in; renewal risk < 50% used with ≤ 120 days left (docs/16, D2) |

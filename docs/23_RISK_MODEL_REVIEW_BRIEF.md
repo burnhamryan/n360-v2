@@ -1,5 +1,9 @@
 # 23 · Review brief: the N360 customer risk model
 
+> **26 Nov 2026:** this brief describes the first version. The review it asked for was done and acted on: one outcome
+> per renewal, staged learning, a prior that never reads missing data as healthy, an explicit adopt step. docs/21 is
+> current; the layer descriptions below are kept as the reviewer saw them.
+
 **For an independent reviewer.** The goal is to find what is wrong, weak or unproven in the risk model before it is
 used on real customers. Every result so far is on synthetic data.
 
@@ -28,7 +32,7 @@ behind the signals: `docs/17_RISK_RESEARCH.md`.
 | `code/risk/risk_model.json` | Every setting: weights, anchors, hard reds, bands, prior rates, ridge, horizon |
 | `code/risk/risk_model.py` | The command line, with the database or `--no-db` |
 | `sample_data/generate_risk_panel.py` | The known-truth synthetic history used in tests |
-| `code/risk/test_risk_model.py` | 25 checks; no database |
+| `code/risk/test_risk_model.py` | 52 checks; no database |
 
 ## Run it (Python 3.10+, standard library only)
 
