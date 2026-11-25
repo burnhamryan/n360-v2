@@ -13,8 +13,15 @@ set -euo pipefail
 . "$(dirname "$0")/common.sh"
 : "${N360_DROP:?set N360_DROP (s3://bucket/exports or a folder)}"
 mkdir -p "$WORK"
-exec 9>"$WORK/.nightly.lock"
-flock -n 9 || { log "another nightly run is in progress; nothing to do"; exit 0; }
+if command -v flock >/dev/null; then                       # Linux
+  exec 9>"$WORK/.nightly.lock"
+  flock -n 9 || { log "another nightly run is in progress; nothing to do"; exit 0; }
+else                                                       # macOS has no flock: a lock directory instead
+  if ! mkdir "$WORK/.nightly.lock.d" 2>/dev/null; then
+    log "another nightly run is in progress (or a stale lock: rmdir $WORK/.nightly.lock.d); nothing to do"; exit 0
+  fi
+  trap 'rmdir "$WORK/.nightly.lock.d" 2>/dev/null' EXIT
+fi
 
 reload=${1:-}
 known=$(sql "SELECT toString(run_id) FROM n360.runs" 2>/dev/null || true)          # empty on a new server
