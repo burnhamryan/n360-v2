@@ -43,6 +43,8 @@ anomaly detection and forecasting built in.
 | Alert rules as code (B18) | `code/grafana/build_alerts.py` → `provisioning/alerting/`; `test_alerts.py` | 7 rules load and fire in Grafana on synthetic failures; recipients are placeholders |
 | Anomaly review log (B19) | `code/review_anomaly.py`, `anomaly_log` | Built; Anomalies feed and weekly flag quality |
 | Anomaly detection v2 (B20) | `v_anomaly_v2` | Built; planted cases caught, no false positives |
+| AWS, self-hosted (open source) | `infra/aws/terraform`, `infra/aws/host`, `code/docker-compose.prod.yml`, `code/ops/` | Built; tested on synthetic data and against moto; **not yet run in a real AWS account**. Runbook: `docs/12_AWS.md` |
+| Ops: nightly load, backup, restore, tunnel | `code/ops/*.sh` | Tested end to end (ClickHouse + S3); in CI |
 | Challenger forecast (B21) | `code/forecast/challenger.py`, `docs/10_CHALLENGER_BACKTEST.md` | Backtest only; the forecast of record is unchanged |
 | CI | `.github/workflows/ci.yml`, `code/ci.sh` | Steps pass locally (chdb and server 25.8); not yet run on GitHub |
 | Chat with the data | `docs/09_CHAT.md`, `chat/`, `code/grafana/mcp_service_account.sh` | Tested on synthetic through Grafana; real data is an open question |
