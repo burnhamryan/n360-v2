@@ -51,9 +51,16 @@ PACE = ENT + """
     FROM use WHERE b > 0 AND st <= {D} AND en >= {D}
     GROUP BY account"""
 
+# Risk is judged per ACCOUNT, so an account has ONE renewal date: the end date of its largest running contract line
+# (by billed volume; a pool counts with its pool's volume; the later date on a tie). A small add-on line that ends
+# earlier is not the account's renewal. (Lines are compared by billed volume whatever their unit: PROPOSED.)
 RENEWAL = """
-    SELECT account, min(dateDiff('day', {D}, end_date)) AS days_to_renewal, count() AS billed_lines
-    FROM n360.contract_line WHERE end_date >= {D} AND start_date <= {D} GROUP BY account"""
+    SELECT l.account AS account,
+           dateDiff('day', {D}, argMax(l.end_date, (ifNull(if(l.pool_id IS NULL, l.billed, toNullable(p.billed)), 0), l.end_date))) AS days_to_renewal,
+           count() AS billed_lines
+    FROM n360.contract_line AS l
+    LEFT JOIN n360.pool AS p ON p.account = l.account AND p.pool_id = ifNull(l.pool_id, 255)
+    WHERE l.end_date >= {D} AND l.start_date <= {D} GROUP BY l.account"""
 
 # ───────────────────────── usage and quality ─────────────────────────
 # Whole weeks (28 and 84 days), so both sides of a comparison hold the same weekdays.
@@ -74,12 +81,15 @@ VOLATILITY = """
         WHERE toMonday(day) > {D} - 84 AND toMonday(day) + 6 <= {D} GROUP BY account, wk)
     GROUP BY account"""
 
-# The worst single VA, on settled days only: a customer with many VAs is not riskier for having more of them, and
-# the newest days still settle (v_va_day_anomaly.provisional), which a past date rebuilt later would never see.
+# The worst single VA: a customer with many VAs is not riskier for having more of them. The window is the 30 days
+# that END where the settled days end (settings.anomaly_provisional_days before the date): the newest days still
+# settle. The same 30 days are counted whether the row is stored that night or rebuilt later; counting "the last 30
+# days that are settled now" gave a nightly row 27 days and a rebuilt one 30.
 FLAGS = """
+    WITH (SELECT anomaly_provisional_days FROM n360.settings) AS lag
     SELECT account, toFloat64(max(silent)) AS silent_va_days_30, toFloat64(max(drops)) AS drop_days_30 FROM (
         SELECT account, bot_id, countIf(kind = 'went silent') AS silent, countIf(kind = 'drop') AS drops
-        FROM n360.v_va_day_anomaly WHERE day > {D} - 30 AND day <= {D} AND NOT provisional GROUP BY account, bot_id)
+        FROM n360.v_va_day_anomaly WHERE day > {D} - 30 - lag AND day <= {D} - lag GROUP BY account, bot_id)
     GROUP BY account"""
 
 CONTAINMENT = """
@@ -157,7 +167,10 @@ RENEWAL_FORECAST = """
                    has(lost, argMinIf(ifNull(o.forecast_category, ''), o.close_date, NOT o.is_closed AND o.close_date >= {D} - 30)), 1.0,
                    has(safe, argMinIf(ifNull(o.forecast_category, ''), o.close_date, NOT o.is_closed AND o.close_date >= {D} - 30)), 0.0,
                    0.5) AS renewal_forecast_risk,
-           sumIf(ifNull(o.amount, 0), NOT o.is_closed AND o.close_date >= {D}) AS renewal_amount
+           sumIf(ifNull(o.amount, 0), NOT o.is_closed AND o.close_date >= {D}) AS renewal_amount,
+           -- the next open renewal's close date: the renewal date only for a customer with no dated contract line
+           if(countIf(NOT o.is_closed AND o.close_date >= {D}) = 0, NULL,
+              dateDiff('day', {D}, minIf(o.close_date, NOT o.is_closed AND o.close_date >= {D}))) AS sf_days_to_renewal
     FROM n360.v_sf_account AS s INNER JOIN n360.sf_opportunity AS o ON o.sf_account_id = s.sf_account_id
     WHERE s.account != '' AND o.is_renewal GROUP BY s.account"""
 
@@ -193,11 +206,13 @@ QUERIES = [(PACE, ['pace_gap_pts', 'forecast_end_pct'], False), (RENEWAL, ['days
            (FEATURES_USED, ['features_used'], False), (BUILD, ['build_change_pct'], False),
            (CONFIG_AGE, ['weeks_config_unchanged'], False), (CONTACT, ['days_since_contact', 'days_since_exec'], False),
            (PULSE, ['csm_pulse'], False), (REGISTER, ['open_churn_risks'], False),
-           (RENEWAL_FORECAST, ['renewal_forecast_risk', 'renewal_amount'], True), (TICKETS, ['open_tickets', 'oldest_open_ticket_days'], True),
+           (RENEWAL_FORECAST, ['renewal_forecast_risk', 'renewal_amount', 'sf_days_to_renewal'], True), (TICKETS, ['open_tickets', 'oldest_open_ticket_days'], True),
            (DATA_GAPS, ['data_gaps'], True)]
 
-# zero, not "not reported", when the source is loaded but has no row for a customer (nothing flagged, no ticket...)
-ZERO_WHEN_LOADED = {'silent_va_days_30': 'va_day', 'drop_days_30': 'va_day', 'open_churn_risks': None,
+# zero, not "not reported", when the source is loaded but has no row for a customer (nothing flagged, no ticket...).
+# The risk register counts as loaded from the day of its first entry: before anybody used it, "no open churn risk"
+# was not observed, so it is not reported (never an all-clear).
+ZERO_WHEN_LOADED = {'silent_va_days_30': 'va_day', 'drop_days_30': 'va_day', 'open_churn_risks': 'risk_register',
                     'open_tickets': 'ps_ticket', 'oldest_open_ticket_days': 'ps_ticket'}
 
 
@@ -214,6 +229,8 @@ def build(ch, as_of, newest=None):
     accounts = [r['account'] for r in ch.rows('SELECT account FROM n360.account ORDER BY account')]
     rows = {a: {'account': a, 'as_of': as_of} for a in accounts}
     loaded = {t: int(ch.rows(f'SELECT count() AS n FROM n360.{t}')[0]['n']) > 0 for t in ('va_day', 'ps_ticket')}
+    cut = dt.date.today().isoformat() if is_newest else as_of
+    loaded['risk_register'] = int(ch.rows(f"SELECT count() AS n FROM n360.risk_register WHERE toDate(at) <= toDate('{cut}')")[0]['n']) > 0
     for sql, cols, current_only in QUERIES:
         for c in cols:
             for r in rows.values():
@@ -228,11 +245,15 @@ def build(ch, as_of, newest=None):
     for c, table in ZERO_WHEN_LOADED.items():
         if c in ('open_tickets', 'oldest_open_ticket_days') and not is_newest:
             continue
-        if table is None or loaded.get(table):
+        if loaded.get(table):
             for r in rows.values():
                 if r[c] is None and (c != 'silent_va_days_30' and c != 'drop_days_30' or r.get('conv_change_30_pct') is not None
                                      or r.get('containment_pct') is not None):
                     r[c] = 0.0
+    for r in rows.values():
+        sf = r.pop('sf_days_to_renewal', None)
+        if r.get('days_to_renewal') is None and sf is not None:
+            r['days_to_renewal'] = sf                       # no dated contract line: the open Salesforce renewal's date
     return list(rows.values())
 
 

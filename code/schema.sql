@@ -347,7 +347,7 @@ SELECT
     3   AS risk_open_tickets,        -- this many open tickets or more: watch
     50  AS risk_building_drop_pct,   -- customer authoring + assistant use down this %: watch
     30  AS risk_pulse_valid_days,    -- a CSM's rating counts for this many days, then shows as expired
-    0.9 AS risk_downsell_ratio;      -- PROPOSED: a renewal won at under this share of the customer's previous won amount is a downsell
+    0.9 AS risk_downsell_ratio;      -- PROPOSED: a renewal won at under this share of the customer's previous won renewal is a downsell
 
 
 CREATE OR REPLACE VIEW n360.v_line_status AS
@@ -1100,9 +1100,11 @@ CREATE TABLE IF NOT EXISTS n360.risk_register
     outcome     LowCardinality(String),                    -- when closed: saved | churned | downsold | no action | invalid
     note        String,
     by          LowCardinality(String),
-    at          DateTime64(3, 'UTC') DEFAULT now64(3)
+    at          DateTime64(3, 'UTC') DEFAULT now64(3),
+    outcome_date Nullable(Date)                            -- the day the outcome happened, when that is not the day it was closed (close --date)
 )
 ENGINE = MergeTree ORDER BY (risk_id, at);
+ALTER TABLE n360.risk_register ADD COLUMN IF NOT EXISTS outcome_date Nullable(Date);
 
 CREATE TABLE IF NOT EXISTS n360.risk_pulse
 (
@@ -1129,10 +1131,14 @@ CREATE OR REPLACE VIEW n360.v_risk_register AS
 -- names inside: ClickHouse would read a reused name as the aggregate.)
 SELECT risk_id, x_account AS account, x_reason AS reason, x_impact AS impact, x_owner AS owner, x_due AS due,
        x_status AS status, x_outcome AS outcome, x_note AS note, x_opened AS opened_at, x_updated AS updated_at,
-       dateDiff('day', toDate(x_opened), today()) AS age_days, x_status = 'open' AND x_due < today() AS overdue
+       dateDiff('day', toDate(x_opened), today()) AS age_days, x_status = 'open' AND x_due < today() AS overdue,
+       -- when a closed risk's outcome happened: the date given at closing, else the day it was FIRST closed. Never the
+       -- last edit: a note added months later must not move a churn to a different renewal.
+       if(x_status = 'closed', coalesce(x_outcome_date, toDate(x_closed)), NULL) AS outcome_date
 FROM (SELECT risk_id, argMax(account, at) AS x_account, argMax(reason, at) AS x_reason, argMax(impact, at) AS x_impact,
              argMax(owner, at) AS x_owner, argMax(due, at) AS x_due, argMax(status, at) AS x_status,
-             argMax(outcome, at) AS x_outcome, argMax(note, at) AS x_note, min(at) AS x_opened, max(at) AS x_updated
+             argMax(outcome, at) AS x_outcome, argMax(note, at) AS x_note, min(at) AS x_opened, max(at) AS x_updated,
+             minIf(at, status = 'closed') AS x_closed, argMaxIf(outcome_date, at, outcome_date IS NOT NULL) AS x_outcome_date
       FROM n360.risk_register GROUP BY risk_id);
 
 CREATE OR REPLACE VIEW n360.v_risk_pulse AS
@@ -1482,28 +1488,33 @@ CREATE TABLE IF NOT EXISTS n360.risk_contributions    -- why: each feature's val
 ENGINE = MergeTree ORDER BY (as_of, account, feature, run_id);
 
 CREATE OR REPLACE VIEW n360.v_risk_outcomes AS
--- Every known outcome: recorded by hand, closed in the risk register, or a renewal closed in Salesforce.
+-- Every known outcome of a renewal: recorded by hand, closed in the risk register, or a renewal closed in Salesforce.
 -- Salesforce is the source that covers EVERY customer, flagged or not: lost = churned; won at under
--- settings.risk_downsell_ratio of the customer's previous won amount = downsold; else renewed. The register only knows
--- customers somebody raised a risk for, so it is a second witness, never the only one to rely on for downsells.
+-- settings.risk_downsell_ratio of the customer's previous won RENEWAL = downsold; else renewed. The bar is the previous
+-- renewal, not any won deal: a small upsell before it would make a cut renewal look like growth, and a multi-year
+-- first deal would make a normal annual renewal look like a cut. A first renewal has no bar and is never a downsell
+-- here (PROPOSED; record it by hand or in the register).
+-- The register only knows customers somebody raised a risk for, so it is a second witness. Its date is the day the
+-- outcome happened (v_risk_register.outcome_date), not the last edit. A risk closed as "saved" is not a renewal
+-- outcome (it is usually closed mid-term): it is left out, and the renewal is judged by what happens at its date.
 -- The same event may appear from two sources; the model takes one outcome per renewal (code/risk/backtest.py).
 SELECT account, date, outcome, source FROM (
     SELECT account, date, toString(outcome) AS outcome, 'recorded' AS source FROM n360.risk_outcome
     UNION ALL
-    SELECT account, toDate(updated_at), multiIf(outcome = 'churned', 'churned', outcome = 'downsold', 'downsold', 'renewed'), 'register'
-    FROM n360.v_risk_register WHERE status = 'closed' AND outcome IN ('churned', 'downsold', 'saved')
+    SELECT account, assumeNotNull(outcome_date), outcome, 'register'
+    FROM n360.v_risk_register WHERE status = 'closed' AND outcome IN ('churned', 'downsold') AND outcome_date IS NOT NULL
     UNION ALL
     SELECT s.account, o.close_date,
            multiIf(NOT o.is_won, 'churned',
                    o.amount > 0 AND o.prev_amount > 0 AND o.amount < (SELECT risk_downsell_ratio FROM n360.settings) * o.prev_amount, 'downsold',
                    'renewed'), 'salesforce'
-    FROM (SELECT sf_account_id, close_date, is_won, is_renewal, amount,
-                 -- the customer's previous won opportunity with an amount (a lost one never sets the bar)
+    FROM (SELECT sf_account_id, close_date, is_won, amount,
+                 -- the customer's previous won RENEWAL with an amount (a lost one never sets the bar)
                  anyLast(if(is_won AND amount > 0, amount, NULL))
                      OVER (PARTITION BY sf_account_id ORDER BY close_date, opp_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_amount
-          FROM n360.sf_opportunity WHERE is_closed AND close_date IS NOT NULL) AS o
+          FROM n360.sf_opportunity WHERE is_renewal AND is_closed AND close_date IS NOT NULL) AS o
     INNER JOIN n360.v_sf_account AS s ON s.sf_account_id = o.sf_account_id
-    WHERE o.is_renewal AND s.account != '');
+    WHERE s.account != '');
 
 CREATE OR REPLACE VIEW n360.v_risk_model AS
 -- The model in use: the run adopted last (risk_model.py adopt). No row = the built-in expert prior.

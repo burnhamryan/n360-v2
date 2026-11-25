@@ -2420,7 +2420,7 @@ def risk_model_dashboard():
             'not enough data': ('Not enough data', 'grey'), 'not reported': ('Not reported', 'grey'),
             'churned': ('Churned', 'grey')}
     band_order = "['at risk', 'watch', 'healthy', 'not enough data', 'not reported', 'churned']"
-    horizon = cfg['horizon_days']
+    horizon = cfg['eligible_days_to_renewal']
     in_csm = "account IN (SELECT account FROM n360.account WHERE csm_rocketlane IN (${csm:singlequote}))"
     one = "account IN (${customer:singlequote})"
     trained_auc = """JSONExtract(backtest, 'methods', 'trained model (probability)', 'auc', 'Nullable(Float64)')"""

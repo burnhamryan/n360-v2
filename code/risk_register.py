@@ -47,10 +47,10 @@ def current(ch, rid):
 
 def write(ch, rid, r, by):
     due = None if r['due'] in (None, '', '\\N') else r['due']
-    ch.cmd("INSERT INTO n360.risk_register (risk_id, account, reason, impact, owner, due, status, outcome, note, by) VALUES "
+    ch.cmd("INSERT INTO n360.risk_register (risk_id, account, reason, impact, owner, due, status, outcome, note, by, outcome_date) VALUES "
            f"({esc(rid)}, {esc(r['account'])}, {esc(r['reason'])}, {esc(r['impact'])}, {esc(r['owner'])}, "
            f"{'NULL' if due is None else 'toDate(' + esc(due) + ')'}, {esc(r['status'])}, {esc(r['outcome'])}, "
-           f"{esc(r['note'])}, {esc(by)})")
+           f"{esc(r['note'])}, {esc(by)}, {'NULL' if not r.get('outcome_date') else 'toDate(' + esc(r['outcome_date']) + ')'})")
 
 
 def main():
@@ -79,6 +79,8 @@ def main():
     p = sub.add_parser('close', help='close a risk with its outcome')
     p.add_argument('--id', required=True)
     p.add_argument('--outcome', required=True, choices=OUTCOMES)
+    p.add_argument('--date', type=dt.date.fromisoformat,
+                   help='the day the outcome happened (YYYY-MM-DD), when that is not today: the risk model dates the churn or downsell by it')
     p.add_argument('--note')
     p = sub.add_parser('pulse', help="record the CSM's rating of a customer")
     p.add_argument('--customer', required=True)
@@ -104,6 +106,9 @@ def main():
             r['due'] = a.due.isoformat()
         if a.cmd == 'close':
             r['status'], r['outcome'] = 'closed', a.outcome
+            if a.date and a.date > dt.date.today():
+                sys.exit('--date is in the future: an outcome is recorded once it has happened.')
+            r['outcome_date'] = a.date and a.date.isoformat()
         write(ch, a.id, r, a.by)
         print(f"{'Closed' if a.cmd == 'close' else 'Updated'} {a.id}" + (f': {a.outcome}' if a.cmd == 'close' else ''))
     elif a.cmd == 'pulse':

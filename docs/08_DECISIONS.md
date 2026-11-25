@@ -25,6 +25,7 @@
 | Anomaly thresholds (v1 and v2) are Ryan's to configure, in `n360.settings` | 24 Nov 2026 |
 | Production: self-hosted on AWS (one EC2 server, Docker, open source: ClickHouse, Grafana OSS, Caddy); Grafana sign-in with Google | 25 Nov 2026 |
 | Loads run from Ryan's laptop through a Session Manager tunnel for now; server-side loads later (`server_loads`) | 25 Nov 2026 |
+| Risk is scored per account, not per contract line or VA: one health score, one chance at renewal and one renewal date per customer (`docs/21_RISK_MODEL.md`) | 25 Nov 2026 |
 
 | Dashboards rebuilt to the v2 redesign: sentence + freshness stamp on every page, the v1.1 contract statuses and colours (one palette, no red), new Customer health page, uids unchanged (`docs/16_DASHBOARD_GAPS.md`) | 25 Nov 2026 |
 
@@ -34,7 +35,7 @@
 |---|---|
 | Pace colours (values in `n360.settings`) | Green ≤ term + 10 pts; amber > term + 10 or crossing ≤ 60 d; red > 100% or crossing ≤ 30 d; grey not measurable / not implemented / not read |
 | Anomaly thresholds | Same weekday 8 weeks; z ≤ −4 / ≥ 4; min median 20; provisional 3 days |
-| Risk model (`code/risk/risk_model.json`) | 20 point-in-time features in 7 weighted dimensions; health bands 75/50; hard reds; probability = an expert prior (the average customer in a renewal window at 15%, full risk at 80%) that learns in stages from real renewals: level and one slope from 10 lost, per dimension from 50, per feature from 100; one outcome per renewal, judged from 180 days out; a trained run is used only once adopted (docs/21) |
+| Risk model (`code/risk/risk_model.json`) | 20 point-in-time features in 7 weighted dimensions; health bands 75/50; hard reds; probability = an expert prior (the average customer in a renewal window at 15%, full risk at 80%; its level is fixed, and set once by `train` on the stored record) that learns in stages from real renewals: level and one slope from 10 lost, per dimension from 50, per feature from 100; **risk is per account, with one renewal date per account (its largest running line's end date)**; one outcome per renewal, judged from 180 days out; a renewal with nothing recorded counts as kept only when a contract ran on, otherwise it is unconfirmed and not used; a downsell is a renewal won at under 90% of the previous won renewal; a trained run is used only once adopted (docs/21) |
 | Risk dashboard rules (`v_risk_signal`, values in `n360.settings`) | Explainable rules, worst signal wins, no weighted score yet; thresholds and reason codes in docs/17 (sections 3, 4, 6) |
 | Salesforce mapping (`code/salesforce/salesforce.json`) | Renewal = Opportunity Type "Renewal"; safe forecast categories Commit / Closed, risk "Omitted"; contact = past events and closed call/email tasks; open questions in docs/18 |
 | Contract statuses (`v_contract_status`, values in `n360.settings`) | Below / ahead of pace ±10 points of term; too early < 30 days in; renewal risk < 50% used with ≤ 120 days left (docs/16, D2) |

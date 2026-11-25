@@ -46,8 +46,8 @@ def write_ndjson(path, rows):
 
 
 def score_rows(rows, model, cfg, outcomes=()):
-    """Scores and contributions for feature rows, with a model (or the expert prior when model is None: its level is
-    set on the customers of these rows that are in their renewal window). A customer known to have churned keeps a
+    """Scores and contributions for feature rows, with a model (or, when model is None, the expert prior at the level
+    the settings give: a customer's chance never depends on who else is renewing). A customer known to have churned keeps a
     row for label.churned_keep_days with the band 'churned' and no probability, then drops out."""
     gone = bt.churn_dates(outcomes)
     keep = dt.timedelta(cfg['label']['churned_keep_days'])
@@ -56,7 +56,7 @@ def score_rows(rows, model, cfg, outcomes=()):
         return r['account'] in gone and bt._d(r['as_of']) >= gone[r['account']]
     rows = [r for r in rows if not (churned(r) and bt._d(r['as_of']) - gone[r['account']] > keep)]
     if model is None:
-        model = m.prior(cfg, [r for r in rows if bt.eligible(r, cfg) and not churned(r)])
+        model = m.prior(cfg)
     scores, contribs = [], []
     for r in rows:
         sc = m.scorecard(r, cfg)
@@ -87,13 +87,13 @@ def report_md(res, cfg, title='Risk model backtest'):
     out = [f'# {title}', '', f"Model settings version `{cfg['version']}`; renewals judged from {cfg['eligible_days_to_renewal']} "
            f"days out; events: {', '.join(cfg['label_events'])}.", '']
     if 'methods' not in res:
-        return '\n'.join(out + [res.get('note', 'No result.'), ''])
+        return '\n'.join(out + [res.get('note', 'No result.'), ''] + ([labels_text(res['labels']), ''] if 'labels' in res else []))
     f = lambda v, p=3: '-' if v is None else f'{v:.{p}f}'  # noqa: E731
     top = f"{cfg['backtest']['top_share']:.0%}"
     out += [f"Scored out of time: {res['renewals']} renewals, {res['events']} of them lost (base rate {res['base_rate']:.1%}), "
             f"from {res['snapshots_scored']} snapshots ({res['period'][0]} to {res['period'][1]}). Each renewal is judged "
             f"{', '.join(str(x) for x in res['lead_days'])} days ahead ({res['judged']} judgements). Intervals are 95%, from "
-            'resampling whole customers.', '',
+            'resampling whole customers.', '', labels_text(res['labels']), '',
             f'| Method | AUC | 95% interval | Precision, top {top} | Recall, top {top} | Brier | Losses expected / seen |',
             '|---|---|---|---|---|---|---|']
     for name, x in res['methods'].items():
@@ -105,6 +105,11 @@ def report_md(res, cfg, title='Risk model backtest'):
     d = res['trained_minus_prior_auc']
     out += ['', f"Trained model minus expert prior, AUC: {f(d[0])} to {f(d[1])} (95% interval). The trained model is worth "
             'adopting only when this interval sits above zero and its Brier score is lower.']
+    if bt.BLIND in res['methods']:
+        a, b = res['methods']['scorecard (100 - health)'], res['methods'][bt.BLIND]
+        out += ['', f"**Without the CSM's own view** (rating and register blanked) the scorecard ranks at AUC {f(b['auc'])}, against "
+                f"{f(a['auc'])} with it. A CSM often rates a customer red AFTER it has said it is leaving. If the figure "
+                "with the CSM's view is much the higher of the two, part of that is hindsight, not warning."]
     x = res['methods']['rules (at-risk band)']
     out += ['', f"**The rules alone** (a hard red or health under {cfg['bands']['watch']}) flag {f(x['flagged_share'], 3)} of judgements, "
             f"with precision {f(x['precision'])} and recall {f(x['recall'])} (AUC {f(x['auc'])})."]
@@ -194,20 +199,37 @@ def ch_model(ch):
     return r[0]['run_id'], mdl
 
 
-def newest_window(rows, cfg, outcomes):
-    """The customers in their renewal window on the newest stored date: what the prior's level is set on."""
-    if not rows:
-        return []
-    newest = max(r['as_of'] for r in rows)
-    gone = bt.churn_dates(outcomes)
-    return [r for r in rows if r['as_of'] == newest and bt.eligible(r, cfg)
-            and not (r['account'] in gone and bt._d(newest) >= gone[r['account']])]
+def labels_text(c):
+    """How past renewals were labelled, in words (bt.label_counts)."""
+    t = (f"Past renewals: {c['lost']} lost, {c['recorded']} kept on record, {c['contract continues']} kept with no record "
+         f"(a contract ran on after the date), {c['unconfirmed']} unconfirmed.")
+    if c['unconfirmed']:
+        t += (' Unconfirmed renewals have no outcome recorded and no contract seen afterwards: they are NOT used. Record '
+              'them (Salesforce, the register, or risk_model.py outcome) so the model can learn from them.')
+    return t
+
+
+def check_prior(rows, cfg, outs):
+    """What the prior's level was set on, and whether prior_mean_risk still describes the customers."""
+    w = bt.window_history(rows, outs, cfg)
+    r = m.mean_risk(w, cfg)
+    if r is None:
+        return 'No customer has been in a renewal window yet: the prior keeps the level the settings give.'
+    need = cfg['probability'].get('prior_level_min_snapshots', 0)
+    t = f'Customers in their renewal window: {len(w)} snapshots, average scorecard risk {r:.2f} (prior_mean_risk is {cfg["probability"]["prior_mean_risk"]}).'
+    if len(w) < need:
+        t += f' Under {need} snapshots: the prior keeps the level the settings give.'
+    else:
+        t += (f" The prior's level is set on them, once, so their average chance is prior_mean_rate "
+              f"({cfg['probability']['prior_mean_rate']:.0%}); it stays as it is until you train and adopt again.")
+    return t
 
 
 def verdict(mdl, res):
     """Whether a trained model has earned its place: the governance bar in docs/21, section 7."""
     if mdl['kind'] != 'trained':
-        return 'This is the expert prior with its level set on the current customers: nothing was learned from outcomes.'
+        return ('This is the expert prior: nothing was learned from outcomes. Adopting it fixes its level '
+                '(see the line on customers in their renewal window below).')
     if 'methods' not in res:
         return 'DO NOT ADOPT YET: there is no backtest to judge it by.'
     d, M = res.get('trained_minus_prior_auc') or [None, None], res['methods']
@@ -302,7 +324,7 @@ def main():
         observed = dt.date.fromisoformat(newest)
         res = bt.run(rows, outs, cfg, observed)
         if a.cmd == 'train':
-            mdl = bt.fit(bt.labelled(rows, outs, cfg, observed), cfg, newest_window(rows, cfg, outs))
+            mdl = bt.fit(bt.labelled(rows, outs, cfg, observed), cfg, bt.window_history(rows, outs, cfg))
             run = str(uuid.uuid4())
             body = {k: mdl[k] for k in ('intercept', 'coef', 'mean', 'stage')}
             ch.cmd(f"""INSERT INTO n360.risk_model_runs (run_id, version, kind, n, events, note, model, backtest) VALUES
@@ -310,6 +332,7 @@ def main():
                         {esc(mdl.get('note', ''))}, {esc(json.dumps(body))}, {esc(json.dumps(res, default=str))})""")
             print(f"model {run}: {mdl['kind']} ({mdl.get('note', '')})")
             print(verdict(mdl, res))
+            print(check_prior(rows, cfg, outs))
             if a.adopt:
                 ch.cmd(f"INSERT INTO n360.risk_model_adopted (run_id, by, note) VALUES ('{run}', 'train --adopt', '')")
                 print(f'adopted: run {run} is now in use')
@@ -337,7 +360,7 @@ def main():
             print(f'No features for {a.customer!r} on {newest}.')
             return 1
         _, mdl = ch_model(ch)
-        mdl = mdl or m.prior(cfg, newest_window(ch_features_load(ch, cfg, newest), cfg, ch_outcomes(ch)))
+        mdl = mdl or m.prior(cfg)
         print(explain_text(rows[0], mdl, cfg))
         return 0
     if a.cmd == 'outcome':
@@ -380,10 +403,12 @@ def files_mode(a, cfg):
     if a.cmd == 'train':
         rows, outs = read_ndjson(a.features), read_ndjson(a.outcomes)
         observed = max(dt.date.fromisoformat(r['as_of'][:10]) for r in rows)
-        mdl = bt.fit(bt.labelled(rows, outs, cfg, observed), cfg, newest_window(rows, cfg, outs))
+        mdl = bt.fit(bt.labelled(rows, outs, cfg, observed), cfg, bt.window_history(rows, outs, cfg))
         if a.model_out:
             json.dump(mdl, open(a.model_out, 'w'), indent=1)
         print(f"model: {mdl['kind']} ({mdl.get('note', '')})")
+        print(labels_text(bt.label_counts(rows, outs, cfg, observed)))
+        print(check_prior(rows, cfg, outs))
         if a.report:
             open(a.report, 'w').write(report_md(bt.run(rows, outs, cfg, observed), cfg))
         return 0

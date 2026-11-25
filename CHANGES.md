@@ -1,3 +1,41 @@
+# CHANGES · 25 Nov 2026 · Risk model fixes after two reviews
+
+Fixes to the reworked risk model (`code/risk/`), each with a test. Synthetic data only.
+
+**Numbers that were wrong**
+- **The chance at renewal no longer depends on who else is renewing.** The prior's level was re-set every night on
+  the customers then in their renewal window. On a 27-customer history, one customer with unchanged readings moved
+  between 12% and 44%. The level is now fixed: the settings give it until a run is adopted, and `train` sets it once
+  on the whole stored record (at least 200 snapshots), so it stays with the adopted run.
+- **An early opt-out is a loss.** A churn logged more than 120 days before the term ended was labelled "kept". The
+  outcome window now opens when the customer enters the renewal window (180 days out).
+- **"Nothing recorded" is no longer "renewed".** A renewal counts as kept only on record, or when a contract ran on
+  after the date. Otherwise it is unconfirmed: counted, reported by `train` and the backtest, never used.
+
+**Risk is per account (decided)**
+- An account has one renewal date: its largest running line's end date. A small add-on ending first is not the
+  renewal. Renewal dates within 30 days of each other are one renewal.
+
+**Outcomes**
+- A downsell is judged against the customer's previous won **renewal**, not any won deal.
+- A register outcome is dated by the day it happened (`risk_register.py close --date`, else the day it was closed).
+  A risk closed as "saved" is not a renewal outcome.
+
+**Smaller**
+- Silent and drop days are counted over the same 30 settled days whether stored that night or rebuilt.
+- "Open churn risks" is not reported before the register was first used.
+- The explanation's pushes add up exactly for a trained model too.
+- A feature given weight 0 no longer breaks training; a step that cannot improve the fit is not taken.
+- The backtest also judges the scorecard without the CSM's own view, and says how past renewals were labelled.
+- `horizon_days` is gone from `risk_model.json`; the dashboard reads `eligible_days_to_renewal` (same value).
+
+**Tests that claimed too much.** Three checks held on one random seed only (the original code fails them on other
+seeds). The claim that a no-signal feature is pulled down is withdrawn: with some 80 renewals lost it is not,
+reliably. docs/21 section 4 says what the synthetic test does and does not show.
+
+**After pulling:** `load.py --schema-only`, then `features --from <first night> --every 7 --overwrite`,
+`train`, `adopt --run <id>`, `score --as-of all` (docs/21 section 5). Tested: 63 model checks; `code/ci.sh chdb`.
+
 # CHANGES · 25 Nov 2026 · ClickHouse memory caps
 
 ClickHouse was killed on a Mac (`Exited (137)`) when the Risk model dashboard ran its queries: in Docker Desktop it
