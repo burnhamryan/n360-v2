@@ -1,3 +1,40 @@
+# CHANGES · 25 Nov 2026 · AWS, self-hosted
+
+**N360 can now run on AWS as one private server with the same open-source stack that CI tests**, created by
+Terraform, with Grafana behind HTTPS and Google sign-in, and loads from your laptop through a private tunnel.
+Runbook: `docs/12_AWS.md`. **Not yet run in a real AWS account.**
+
+Also in this branch: **alerts off by default** (all 7 rules provisioned paused, `docs/11_ALERTS.md`). That commit
+landed after PR #2 was merged, so `main` still had the rules active.
+
+| Piece | What |
+|---|---|
+| `infra/aws/terraform` | VPC (or an existing subnet), EC2 Amazon Linux 2023, separate encrypted data volume, Elastic IP when public, S3 (exports, backups), IAM (server role; an operator policy for you), AWS Backup daily snapshots, settings in Parameter Store |
+| `infra/aws/host` | First boot and updates (`bootstrap.sh`, `update.sh`), the stack (`stack.sh`), systemd: stack, daily backup, hourly server loads (off until `server_loads = true`) |
+| `code/docker-compose.prod.yml` | Restart and log limits, Grafana Google sign-in (OSS `auth.google`, allowed domain, PKCE, Viewer by default), Caddy for HTTPS (Let's Encrypt) |
+| `code/ops` | `nightly.sh` (new exports from S3 or a folder), `backup.sh` / `restore.sh` (history tables), `tunnel.sh`, `remote_env.sh`, `grafana_admin.sh`, `test_ops.sh` |
+| `code/load.py` | `--schema-only` (new server, before a restore) |
+| CI | Two new jobs: ops (end to end against ClickHouse + S3 via moto) and infra (Terraform fmt/validate, shellcheck, compose config) |
+
+**Bugs found and fixed while testing:**
+- Row checksums used `cityHash64(*)`, which is NULL for any row with a NULL column, so the B21 CI check
+  "forecast of record unchanged" compared NULL with NULL and could not fail. Fixed everywhere.
+- Inline security-group rules would have left 80/443 open after switching to tunnel-only; rules are now separate resources.
+- Amazon Linux 2023's `python3` is 3.9, too old for clickhouse-connect; the server uses Python 3.12.
+- A required `N360_DOMAIN` in the Caddy service broke tunnel-only mode; `stack.sh` exited silently without an
+  `N360_DOMAIN` line; Caddy rejected an empty email; AWS rejects apostrophes in security-group descriptions.
+
+| Check | Result |
+|---|---|
+| Ops end to end (14 nights, backup, restore onto a new server, reload, new night, older re-export) | Pass (ClickHouse 25.8 + moto S3) |
+| HTTPS via Caddy; Google sign-in redirect (client ID, redirect URI, hosted domain, PKCE); password form hidden | Pass (local, dummy Google client) |
+| Tunnel-only mode (no domain): Caddy removed, 443 closed | Pass |
+| Amazon Linux 2023: packages, Compose 2.40.3 checksum, Python 3.12 + clickhouse-connect | Pass (container) |
+| Terraform 1.17.2 / aws 6.74.0: validate; apply against moto (31 resources); public to tunnel-only removes the IP and both rules | Pass |
+| Not tested | A real AWS account (first boot, EBS attach, Let's Encrypt, Session Manager, AWS Backup); a real Google sign-in |
+
+---
+
 # CHANGES · 24 Nov 2026 · B15–B21 (history, accuracy, freshness, alerts, review log, anomaly v2, challenger)
 
 **The backlog is done: every item B1–B23 is built and tested on synthetic data.** What is left is company-side

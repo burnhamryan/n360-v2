@@ -23,6 +23,8 @@
 | Pooled-entitlement panel shows for every customer ("No pooled entitlement") | 24 Nov 2026 |
 | Alerts not needed yet: all rules provisioned paused, configurable in `build_alerts.py` (`docs/11_ALERTS.md`) | 24 Nov 2026 |
 | Anomaly thresholds (v1 and v2) are Ryan's to configure, in `n360.settings` | 24 Nov 2026 |
+| Production: self-hosted on AWS (one EC2 server, Docker, open source: ClickHouse, Grafana OSS, Caddy); Grafana sign-in with Google | 25 Nov 2026 |
+| Loads run from Ryan's laptop through a Session Manager tunnel for now; server-side loads later (`server_loads`) | 25 Nov 2026 |
 
 ## Proposed (build as settings; Ryan approves)
 
@@ -37,7 +39,7 @@
 
 | Question | Effect on your work |
 |---|---|
-| Where ClickHouse and Grafana live after the proof of concept (cloud, region) | Keep config portable |
+| Which AWS account and region (customer data residency) | AWS self-hosting decided; region still to approve (`12_AWS.md`, "Before you start") |
 | Whether EU / SG data may sit in a US-region store | May need region as a partition or a second database later |
 | Who sees which customers in Grafana | Plan folder-level permissions; don't hard-code |
 | Alert channel and recipients | Placeholders in contact points |
