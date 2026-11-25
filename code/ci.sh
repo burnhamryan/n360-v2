@@ -71,9 +71,9 @@ R=(python3 "$ROOT/code/review_anomaly.py" "${CONN[@]}" --by ci)
 python3 "$ROOT/code/test_views.py" "${PANEL_CONN[@]}"
 
 # Challenger forecast backtest (B21): writes n360.forecast_challenger; the forecast of record must not change
-before=$(sql "SELECT groupBitXor(cityHash64(*)) FROM n360.forecast")
+before=$(sql "SELECT groupBitXor(cityHash64(formatRow('TSV', *))) FROM n360.forecast")
 python3 "$ROOT/code/forecast/challenger.py" "${CONN[@]}" --report "$WORK/challenger.md" | tail -1
-after=$(sql "SELECT groupBitXor(cityHash64(*)) FROM n360.forecast")
+after=$(sql "SELECT groupBitXor(cityHash64(formatRow('TSV', *))) FROM n360.forecast")
 [ "$before" = "$after" ] || { echo "FAIL: the challenger changed n360.forecast"; exit 1; }
 [ "$(sql "SELECT count() > 0 FROM n360.v_challenger_backtest")" = 1 ] || { echo "FAIL: no challenger backtest rows"; exit 1; }
 echo "OK   challenger backtest written; forecast of record unchanged"
