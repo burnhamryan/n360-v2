@@ -13,10 +13,11 @@ downsells with P = sigmoid(-3.2 + 1.0 h), else renews. A good model ranks snapsh
 which the model never reads: it is there so a test can compare the model with the best possible ranking).
 
 The awkward parts of real records are planted on purpose (--easy leaves them out):
-  - a churn is logged at the opt-out, 30 to 90 days BEFORE the term ends; the customer goes on producing rows
+  - a churn is logged at the opt-out, 30 to 90 days BEFORE the term ends (one in five: 120 to 170 days before);
+    the customer goes on producing rows
   - a churned customer keeps producing rows for half a year, with no contract and collapsing usage
   - about a third of churns are recorded twice (Salesforce, then the register a few days later)
-  - about one renewal in twelve that went fine is never recorded at all
+  - about one renewal in twelve that went fine is never recorded at all (the contract simply runs on)
 """
 import argparse, datetime as dt, json, math, os, random
 
@@ -89,7 +90,8 @@ def main():
                 outcome = 'churned' if u < pc else 'downsold' if u < pc + (1 - pc) * pd else 'renewed'
                 when = d + dt.timedelta(days=1)
                 if outcome == 'churned' and not a.easy:
-                    when = d - dt.timedelta(days=R.randrange(30, 91))          # logged at the opt-out
+                    # logged at the opt-out: usually 30 to 90 days ahead, one in five 120 to 170 days ahead
+                    when = d - dt.timedelta(days=R.randrange(120, 171) if R.random() < 0.2 else R.randrange(30, 91))
                 if outcome != 'renewed' or a.easy or R.random() > 0.08:        # some good renewals are never recorded
                     outs.append({'account': acct, 'date': when.isoformat(), 'outcome': outcome, 'source': 'synthetic'})
                 if outcome == 'churned':

@@ -1,12 +1,11 @@
 {
   "_about": "The N360 customer risk model (docs/21_RISK_MODEL.md). Every feature, weight, anchor, hard red and model setting is here; code never holds a threshold. All values are PROPOSED until Ryan approves and the backtest supports them.",
-  "version": "2026-11-26.1",
-  "horizon_days": 180,
+  "version": "2026-11-27.1",
   "label_events": [
     "churned",
     "downsold"
   ],
-  "_label_about": "The unit is the renewal. A snapshot belongs to the customer's next renewal when it is 0 to eligible_days_to_renewal days away (unknown renewal date: not judged). The renewal's outcome is the churn, downsell or renewal recorded from outcome_days_before the renewal date (most customers have a 30 to 90 day opt-out, so a loss is logged early) to outcome_days_after it. Nothing recorded by then counts as renewed. Snapshots taken once the outcome was recorded, and every snapshot after a churn, are never used. A churned customer stays in the scores for churned_keep_days with the band 'churned'.",
+  "_label_about": "The unit is the renewal of an ACCOUNT (its largest contract line's end date; code/risk/features.py). A snapshot belongs to the customer's next renewal when it is 0 to eligible_days_to_renewal days away (unknown renewal date: not judged); dates within same_renewal_days of each other are one renewal. The renewal's outcome is the churn, downsell or renewal recorded from the day the customer entered the renewal window (so an early opt-out is not missed; never later than outcome_days_before) to outcome_days_after past the date. A renewal with nothing recorded counts as kept ONLY when a contract was still running after the date; otherwise it is unconfirmed and not used. Snapshots taken once the outcome was recorded, and every snapshot after a churn, are never used. A churned customer stays in the scores for churned_keep_days with the band 'churned'.",
   "eligible_days_to_renewal": 180,
   "dimensions": {
     "commercial": {
@@ -277,10 +276,11 @@
     "_about": "Under min_coverage (share of the model's weight with data) and with no hard red, the band is 'not enough data': too little is known to call the customer healthy."
   },
   "probability": {
-    "_about": "Chance of churn or downsell at the next renewal. It starts as an expert prior: the average customer in a renewal window gets prior_mean_rate (set this from the real renewal record: renewals lost / renewals due), a customer at full risk everywhere gets prior_max_rate, and features move the log-odds in proportion to their scorecard weights. prior_mean_risk is the average scorecard risk assumed until there are customers to measure it on. It then learns in stages, counted in DISTINCT renewals lost (and as many kept): from stages.calibrate the level and one slope (the prior's level counts as prior_strength_renewals renewals of evidence, so the first few outcomes move it gently); from stages.dimension one weight per dimension; from stages.feature one weight per feature. ridge_lambda is relative: a weight's prior spread is its prior value / sqrt(ridge_lambda), so 4 means the data must argue to move a weight by half. Weights never go below zero.",
+    "_about": "Chance of churn or downsell at the next renewal. It starts as an expert prior: a customer at the average scorecard risk (prior_mean_risk) gets prior_mean_rate (set this from the real renewal record: renewals lost / renewals due), a customer at full risk everywhere gets prior_max_rate, and features move the log-odds in proportion to their scorecard weights. The prior's level is fixed: the same readings give the same chance on any day. Until a run is adopted it is the level these settings give; 'train' sets it once on every stored snapshot of customers in their renewal window (at least prior_level_min_snapshots of them), so that their average chance is prior_mean_rate, and the level stays with that run. It then learns in stages, counted in DISTINCT renewals lost (and as many kept): from stages.calibrate the level and one slope (the prior's level counts as prior_strength_renewals renewals of evidence, so the first few outcomes move it gently); from stages.dimension one weight per dimension; from stages.feature one weight per feature. ridge_lambda is relative: a weight's prior spread is its prior value / sqrt(ridge_lambda), so 4 means the data must argue to move a weight by half. Weights never go below zero.",
     "prior_mean_rate": 0.15,
     "prior_max_rate": 0.8,
     "prior_mean_risk": 0.2,
+    "prior_level_min_snapshots": 200,
     "stages": {
       "calibrate": 10,
       "dimension": 50,
@@ -291,7 +291,7 @@
     "max_iter": 50
   },
   "backtest": {
-    "_about": "Walk-forward: retrain every train_every_days once min_train_days of history exist; training uses one snapshot per renewal every train_sample_days, weighted so each renewal counts once. Each renewal is judged at lead_days before it (the nearest snapshot within lead_tolerance_days). top_share = the share flagged when measuring precision. Intervals: `bootstrap` resamples of whole customers. alert_probability = the chance at which the model counts as having warned; hold_days = how long before a loss the warning must still be up.",
+    "_about": "Walk-forward: retrain every train_every_days once min_train_days of history exist; training uses one snapshot per renewal every train_sample_days, weighted so each renewal counts once. Each renewal is judged at lead_days before it (the nearest snapshot within lead_tolerance_days). top_share = the share flagged when measuring precision. Intervals: `bootstrap` resamples of whole customers. alert_probability = the chance at which the model counts as having warned; hold_days = how long before a loss the warning must still be up. without_dimensions: the scorecard is also judged with these dimensions blanked (the CSM's own rating and register often follow the customer saying it is leaving, so they can flatter a backtest).",
     "train_every_days": 28,
     "min_train_days": 180,
     "train_sample_days": 28,
@@ -304,11 +304,15 @@
     "lead_tolerance_days": 14,
     "bootstrap": 300,
     "alert_probability": 0.3,
-    "hold_days": 30
+    "hold_days": 30,
+    "without_dimensions": [
+      "voice"
+    ]
   },
   "label": {
-    "outcome_days_before": 120,
+    "outcome_days_before": 180,
     "outcome_days_after": 60,
+    "same_renewal_days": 30,
     "churned_keep_days": 365
   }
 }

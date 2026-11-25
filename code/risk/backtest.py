@@ -1,28 +1,35 @@
 """Labels and the out-of-time backtest for the N360 risk model. Pure functions, standard library only.
 
-The unit is the RENEWAL, not the snapshot. A snapshot (a customer on a date) belongs to the customer's next renewal
-when that renewal is 0 to eligible_days_to_renewal days away; a snapshot with no known renewal date belongs to none
-and is never labelled. The renewal's outcome is the churn, downsell or renewal recorded around its date
-(label.outcome_days_before / _after: a loss is usually logged at the opt-out, weeks before the term ends). Then:
+The unit is the RENEWAL of an ACCOUNT, not the snapshot and not the contract line. A snapshot (a customer on a
+date) belongs to the customer's next renewal when that renewal is 0 to eligible_days_to_renewal days away; a snapshot
+with no known renewal date belongs to none and is never labelled. Renewal dates a few days apart (label.
+same_renewal_days: an edited end date, a Salesforce date beside a contract date) are one renewal.
 
-  label 1   the renewal was lost (churned or downsold)
-  label 0   it was renewed, or nothing was recorded and outcome_days_after have passed since the renewal date
-  no label  outcome_days_after have not yet passed since the renewal date. This holds for losses too: a loss is
-            logged weeks before a kept renewal is, so learning from each as soon as it is recorded would fill the
-            training set with losses first and overstate the rate
-  dropped   snapshots taken on or after the day the outcome was recorded (the answer was already known), and every
-            snapshot of a customer after it churned
+The renewal's outcome is the churn, downsell or renewal recorded around its date: from the day the customer entered
+the renewal window (a loss is logged at the opt-out, which may be months before the term ends: an early notice must
+not be missed) to outcome_days_after past it. Then:
+
+  label 1    the renewal was lost (churned or downsold)
+  label 0    it was renewed, and something says so: a renewal recorded, or a contract still running after the date
+  no label   - nothing recorded and no contract seen running afterwards: UNCONFIRMED. Counted and reported, never
+               assumed to be kept (with no outcome source connected, every renewal would silently count as kept)
+             - outcome_days_after have not yet passed since the renewal date. This holds for losses too: a loss is
+               logged weeks before a kept renewal is, so learning from each as soon as it is recorded would fill the
+               training set with losses first and overstate the rate
+  dropped    snapshots taken on or after the day the outcome was recorded (the answer was already known), and every
+             snapshot of a customer after it churned
 
 Backtest: walk forward in time. At each retraining date T, train on snapshots whose renewal outcome was known by T,
 then score the snapshots of the next period. No snapshot is scored by a model that saw its own outcome. Each renewal
 is judged at fixed lead times (backtest.lead_days before the renewal), so a renewal counts a few times, not twenty;
-intervals come from resampling whole customers. Compared: the scorecard, the expert prior, the model as it would
-have been trained at the time, and the rules (hard reds or the "at risk" band).
+intervals come from resampling whole customers. Compared: the scorecard, the scorecard without the CSM's own view
+(a red rating often FOLLOWS the customer saying it is leaving, so it can look like foresight it was not), the expert
+prior, the model as it would have been trained at the time, and the rules (hard reds or the "at risk" band).
 """
 import datetime as dt
 import random
 
-from model import (auc, brier, flag_stats, mask_pit, predict, prior, probability, reliability, scorecard, top_share, train)
+from model import (auc, brier, flag_stats, mask_pit, prior, probability, reliability, scorecard, top_share, train)
 
 
 def _d(s):
@@ -58,40 +65,87 @@ def eligible(row, cfg):
     return renewal_date(row, cfg) is not None
 
 
+def canonical_renewals(rows, cfg):
+    """{(account, renewal date as a snapshot reports it): the renewal it belongs to}. Dates of one account within
+    label.same_renewal_days of each other are one renewal, named by the date most snapshots report (latest on a tie)."""
+    seen = {}
+    for r in rows:
+        rd = renewal_date(r, cfg)
+        if rd is not None:
+            c = seen.setdefault(r['account'], {})
+            c[rd] = c.get(rd, 0) + 1
+    near = dt.timedelta(cfg['label'].get('same_renewal_days', 0))
+    out = {}
+    for acct, counts in seen.items():
+        cluster = []
+        for rd in sorted(counts) + [None]:
+            if rd is None or (cluster and rd - cluster[-1] > near):
+                name = max(cluster, key=lambda x: (counts[x], x))
+                out.update({(acct, x): name for x in cluster})
+                cluster = []
+            if rd is not None:
+                cluster.append(rd)
+    return out
+
+
 def outcome_of(account, renewal, oba, cfg):
     """The outcome recorded for this renewal: the earliest loss in its window if there is one (the same churn often
-    appears twice, in Salesforce and in the register), else the earliest renewal, else None."""
+    appears twice, in Salesforce and in the register), else the earliest renewal, else None. The window opens when
+    the customer enters the renewal window (never later than outcome_days_before), so a loss logged at an early
+    opt-out is this renewal's loss, not nothing."""
     lab = cfg['label']
-    lo, hi = renewal - dt.timedelta(lab['outcome_days_before']), renewal + dt.timedelta(lab['outcome_days_after'])
+    lo = renewal - dt.timedelta(max(lab['outcome_days_before'], cfg['eligible_days_to_renewal']))
+    hi = renewal + dt.timedelta(lab['outcome_days_after'])
     near = sorted((o for o in oba.get(account, []) if lo <= _d(o['date']) <= hi), key=lambda o: _d(o['date']))
     lost = [o for o in near if o['outcome'] in cfg['label_events']]
     return (lost or near or [None])[0]
 
 
-def labelled(rows, outcomes, cfg, observed_until):
-    """One dict per labelled snapshot: row, y, group (the renewal), lead (days to the renewal), known (the day the
-    label became known), event_date (the day a loss was recorded, else None)."""
+def _label(rows, outcomes, cfg, observed_until):
     oba, gone = by_account(outcomes), churn_dates(outcomes)
     events, after = set(cfg['label_events']), dt.timedelta(cfg['label']['outcome_days_after'])
-    out = []
+    canon = canonical_renewals(rows, cfg)
+    running = {}                                            # account -> the days it had a contract running
+    for r in rows:
+        if r.get('days_to_renewal') is not None and r['days_to_renewal'] >= 0:
+            running.setdefault(r['account'], []).append(_d(r['as_of']))
+    out, how = [], {}                                       # how: renewal -> 'lost' | 'recorded' | 'contract continues' | 'unconfirmed'
     for r in rows:
         d, rd = _d(r['as_of']), renewal_date(r, cfg)
         if rd is None or (r['account'] in gone and d >= gone[r['account']]):
             continue
+        rd = canon[(r['account'], rd)]
+        if rd + after > observed_until:
+            continue                                        # not known yet, lost or kept (see the module text)
+        group = (r['account'], rd.isoformat())
         o = outcome_of(r['account'], rd, oba, cfg)
         if o is not None:
+            y = int(o['outcome'] in events)
+            how[group] = 'lost' if y else 'recorded'
             if d >= _d(o['date']):
                 continue                                    # taken after the outcome was recorded
-            y = int(o['outcome'] in events)
+        elif any(rd < x <= rd + after for x in running.get(r['account'], ())):
+            y, how[group] = 0, 'contract continues'         # nothing recorded, but a contract ran on after the date
         else:
-            y = 0                                           # nothing recorded: counted as renewed once the grace has passed
-        # Every label becomes usable on the same day relative to its renewal. A loss is logged weeks before a kept
-        # renewal is, so using each as soon as it is recorded would fill the training set with losses first.
-        known = rd + after
-        if known > observed_until:
+            how[group] = 'unconfirmed'                      # nothing says it was kept: no label
             continue
-        out.append({'row': r, 'y': y, 'group': (r['account'], rd.isoformat()), 'lead': (rd - d).days, 'known': known,
+        out.append({'row': r, 'y': y, 'group': group, 'lead': (rd - d).days, 'known': rd + after,
                     'event_date': _d(o['date']) if o is not None and y else None})
+    return out, how
+
+
+def labelled(rows, outcomes, cfg, observed_until):
+    """One dict per labelled snapshot: row, y, group (the renewal), lead (days to the renewal), known (the day the
+    label became known), event_date (the day a loss was recorded, else None)."""
+    return _label(rows, outcomes, cfg, observed_until)[0]
+
+
+def label_counts(rows, outcomes, cfg, observed_until):
+    """How each past renewal got its label: {'lost', 'recorded' (kept, on record), 'contract continues' (kept: no
+    record, but a contract ran on), 'unconfirmed' (no record, no contract seen: not used)} -> number of renewals."""
+    out = {'lost': 0, 'recorded': 0, 'contract continues': 0, 'unconfirmed': 0}
+    for v in _label(rows, outcomes, cfg, observed_until)[1].values():
+        out[v] += 1
     return out
 
 
@@ -106,10 +160,23 @@ def thin(lab, days):
     return out
 
 
-def fit(lab, cfg, prior_rows=None, stage=None):
-    """Train on labelled snapshots (thinned, weighted per renewal)."""
+def fit(lab, cfg, history=None, stage=None):
+    """Train on labelled snapshots (thinned, weighted per renewal). `history` sets the prior's level (model.prior)."""
     tr = thin(lab, cfg['backtest']['train_sample_days'])
-    return train([x['row'] for x in tr], [x['y'] for x in tr], [x['group'] for x in tr], cfg, prior_rows, stage)
+    return train([x['row'] for x in tr], [x['y'] for x in tr], [x['group'] for x in tr], cfg, history, stage)
+
+
+def window_history(rows, outcomes, cfg, before=None):
+    """The snapshots of customers in their renewal window (not yet churned), over the whole record or up to `before`:
+    what the prior's level is set on, once."""
+    gone = churn_dates(outcomes)
+    return [r for r in rows if eligible(r, cfg) and (before is None or _d(r['as_of']) < before)
+            and not (r['account'] in gone and _d(r['as_of']) >= gone[r['account']])]
+
+
+def without(row, cfg, dims):
+    """The row with every feature of these dimensions blanked (and so their hard reds too)."""
+    return {k: (None if k in cfg['features'] and cfg['features'][k]['dimension'] in dims else v) for k, v in row.items()}
 
 
 def run(rows, outcomes, cfg, observed_until=None):
@@ -120,7 +187,8 @@ def run(rows, outcomes, cfg, observed_until=None):
     observed_until = _d(observed_until) if observed_until else max(_d(r['as_of']) for r in rows)
     bt = cfg['backtest']
     lab = labelled(rows, outcomes, cfg, observed_until)
-    window = [(r, _d(r['as_of'])) for r in rows if eligible(r, cfg)]
+    window = window_history(rows, outcomes, cfg)
+    blind = bt.get('without_dimensions', [])
     first = _d(rows[0]['as_of'])
     t = first + dt.timedelta(bt['min_train_days'])
     step = dt.timedelta(bt['train_every_days'])
@@ -128,10 +196,11 @@ def run(rows, outcomes, cfg, observed_until=None):
     while t <= observed_until:
         te = [x for x in lab if t <= _d(x['row']['as_of']) < t + step]
         if te:
-            # the level of the prior: set on the customers in their renewal window in the period just before T
-            recent = [mask_pit(r, cfg) for r, d in window if t - step <= d < t]
-            pr = prior(cfg, recent)
-            m = fit([x for x in lab if x['known'] <= t], cfg, recent)
+            # the prior as 'train' would have stored it at T: its level set on every in-window snapshot up to then
+            # (the whole record so far, so it barely moves from one retraining to the next)
+            seen = [r for r in window if _d(r['as_of']) < t]
+            pr = prior(cfg, seen)
+            m = fit([x for x in lab if x['known'] <= t], cfg, seen)
             models.append({'trained_at': t.isoformat(), 'kind': m['kind'], 'stage': m['stage'], 'events': m.get('events', 0),
                            'renewals': m.get('renewals', 0), 'n': m.get('n', 0)})
             for x in te:
@@ -139,20 +208,25 @@ def run(rows, outcomes, cfg, observed_until=None):
                 sc = scorecard(pit, cfg)
                 if sc['health'] is None:
                     continue
-                preds.append(dict(x, health=sc['health'], prior=probability(pr, pit, cfg), model=probability(m, pit, cfg),
+                nb = scorecard(without(pit, cfg, blind), cfg)['health'] if blind else None
+                preds.append(dict(x, health=sc['health'], health_blind=sc['health'] if nb is None else nb,
+                                  prior=probability(pr, pit, cfg), model=probability(m, pit, cfg),
                                   rule=int(sc['band'] == 'at risk'), stage=m['stage']))
         t += step
     if not preds:
         return {'note': 'not enough history: no period has both a training set and labelled snapshots to score',
-                'snapshots': len(rows), 'labelled': len(lab)}
+                'snapshots': len(rows), 'labelled': len(lab), 'labels': label_counts(rows, outcomes, cfg, observed_until)}
     ev = at_leads(preds, bt['lead_days'], bt['lead_tolerance_days'])
     ys = [p['y'] for p in ev]
     S = {'scorecard (100 - health)': lambda p: 100 - p['health'], 'expert prior (probability)': lambda p: p['prior'],
          'trained model (probability)': lambda p: p['model'], 'rules (at-risk band)': lambda p: p['rule']}
+    if blind:
+        S[BLIND] = lambda p: 100 - p['health_blind']
     groups = {p['group'] for p in preds}
     res = {'snapshots_scored': len(preds), 'renewals': len(groups), 'events': len({p['group'] for p in preds if p['y']}),
            'judged': len(ev), 'lead_days': bt['lead_days'], 'period': [str(preds[0]['row']['as_of']), str(preds[-1]['row']['as_of'])],
-           'retrainings': models, 'methods': {}}
+           'retrainings': models, 'methods': {}, 'labels': label_counts(rows, outcomes, cfg, observed_until),
+           'without_dimensions': blind}
     res['base_rate'] = res['events'] / res['renewals']
     ci = intervals(ev, S, bt['bootstrap'])
     for name, f in S.items():
@@ -180,6 +254,9 @@ def run(rows, outcomes, cfg, observed_until=None):
     res['reliability_prior'] = reliability([p['prior'] for p in ev], ys, 5)
     res['lead_time_days'] = lead_times(preds, cfg)
     return res
+
+
+BLIND = 'scorecard without the CSM view (100 - health)'
 
 
 def at_leads(preds, leads, tol):

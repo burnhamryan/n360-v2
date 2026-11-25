@@ -263,9 +263,33 @@ def main():
               src.get('rebuilt', 0) >= 20, src)
         hist = q('SELECT uniqExact(as_of) AS n FROM n360.risk_scores')[0]['n']
         check('risk model: a score history over the stored weeks', int(hist) >= 20, hist)
-        outs = {(r['account'], r['outcome']) for r in q('SELECT account, outcome FROM n360.v_risk_outcomes')}
-        check('risk model: outcomes from Salesforce renewals (Lakeside lost, Atlas won) and the register (Atlas saved)',
-              ('Lakeside Insurance', 'churned') in outs and ('Atlas Streaming', 'renewed') in outs, outs)
+        outs = {(r['account'], r['outcome'], r['source'], r['d']) for r in
+                q('SELECT account, outcome, source, toString(date) AS d FROM n360.v_risk_outcomes')}
+        got = {(a_, o, src) for a_, o, src, _ in outs}
+        check('risk model: outcomes from Salesforce renewals (Lakeside lost, Atlas won)',
+              ('Lakeside Insurance', 'churned', 'salesforce') in got and ('Atlas Streaming', 'renewed', 'salesforce') in got, outs)
+        check('risk model: a downsell is judged against the previous won RENEWAL (Kestrel 180,000 then 120,000: downsold, '
+              'whatever the small add-on between them; Orchid\'s first renewal after a three-year deal: renewed)',
+              ('Kestrel Travel', 'downsold', 'salesforce', '2026-02-28') in outs and ('Orchid Health', 'renewed', 'salesforce') in got
+              and ('Orchid Health', 'downsold', 'salesforce') not in got, sorted(x for x in outs if x[0] in ('Kestrel Travel', 'Orchid Health')))
+        check('risk model: a churn closed in the register carries the day it happened, not the day it was typed in; '
+              'a risk closed as saved is not a renewal outcome',
+              ('Lakeside Insurance', 'churned', 'register', '2026-09-15') in outs and not any(x[2] == 'register' and x[0] == 'Atlas Streaming' for x in outs),
+              sorted(x for x in outs if x[2] == 'register'))
+        import os
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'risk'))
+        import features as fe
+        # one renewal per account: the largest running line's end date, not the first line to end
+        lines = ("(SELECT 'X' AS account, toDate('2026-12-15') AS end_date, toDate('2026-01-01') AS start_date, "
+                 "toNullable(toUInt64(5000)) AS billed, CAST(NULL AS Nullable(UInt8)) AS pool_id "
+                 "UNION ALL SELECT 'X', toDate('2027-06-30'), toDate('2026-07-01'), toNullable(toUInt64(400000)), CAST(NULL AS Nullable(UInt8)))")
+        ren = q(fe._q(fe.RENEWAL, '2026-11-19').replace('n360.contract_line', lines))
+        check('risk model: an account has one renewal date, its largest running line\'s (a small add-on ending first is not the renewal)',
+              len(ren) == 1 and int(ren[0]['days_to_renewal']) == 223 and int(ren[0]['billed_lines']) == 2, ren)
+        fl = q("SELECT account, value FROM n360.risk_features WHERE feature = 'open_churn_risks' AND as_of = "
+               "(SELECT min(as_of) FROM n360.risk_features)")
+        check('risk model: before the risk register was first used, "open churn risks" is not reported, never zero',
+              fl and all(r['value'] is None for r in fl), fl[:3])
 
     print('VIEW TESTS PASSED' if not failed else f'{failed} VIEW TESTS FAILED')
     return 1 if failed else 0

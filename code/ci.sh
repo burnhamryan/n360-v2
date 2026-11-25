@@ -95,6 +95,9 @@ K=(python3 "$ROOT/code/risk_register.py" "${CONN[@]}" --by ci)
 "${K[@]}" update --id R-kestrel --due 2026-12-20 --note "[SYNTHETIC] procurement review"
 "${K[@]}" add --id R-atlas --customer "Atlas Streaming" --reason "Budget / price" --impact downsell --owner csm4
 "${K[@]}" close --id R-atlas --outcome saved --note "[SYNTHETIC] renewed at full volume"
+# a churn closed in the register late: the outcome carries the day it happened (--date), not the day it was typed in
+"${K[@]}" add --id R-lakeside --customer "Lakeside Insurance" --reason "Budget / price" --impact churn --owner csm8
+"${K[@]}" close --id R-lakeside --outcome churned --date 2026-09-15 --note "[SYNTHETIC] gave notice in September"
 "${K[@]}" pulse --customer "Harbor Telecom" --level amber --note "[SYNTHETIC] budget review in Q1"
 "${K[@]}" pulse --customer "Northwind Outfitters" --level green
 # risk model (docs/21): unit and synthetic-history tests on files, then the N360 path: weekly features back to May,

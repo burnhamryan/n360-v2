@@ -13,6 +13,11 @@ Every account, opportunity, activity and amount is invented. Planted cases (risk
   Kestrel Travel      last contact 41 days ago
   Summit Games        no executive meeting in the last year
   Cedar Logistics     no activity at all; Globex Prospects: a Salesforce account with no N360 account
+Past opportunities (risk model outcomes, 27 Nov 2026; a downsell is judged against the previous won RENEWAL):
+  Kestrel Travel      renewed at 180,000, a small add-on won at 20,000, then renewed at 120,000: a downsell
+                      (against the add-on it would look like growth)
+  Orchid Health       a three-year first deal at 315,000, then a first renewal at 105,000: renewed, not a downsell
+  Atlas Streaming     renewed at 900,000 the year before too: renewed
 """
 import argparse, datetime as dt, json, random, uuid
 
@@ -41,6 +46,14 @@ WORLD = [
     ('Cedar Logistics', 'Owner Nine', None, None, None),
     ('Globex Prospects', 'Owner One', None, 20, None),
 ]
+
+
+# closed, won opportunities of earlier years: (close date, type, amount)
+PAST = {
+    'Kestrel Travel': [('2025-02-28', 'Renewal', 180000), ('2025-08-15', 'Expansion', 20000), ('2026-02-28', 'Renewal', 120000)],
+    'Orchid Health': [('2024-02-28', 'New Business', 315000), ('2026-02-27', 'Renewal', 105000)],
+    'Atlas Streaming': [('2025-10-28', 'Renewal', 900000)],
+}
 
 
 def attrs(sobject, rid):
@@ -73,6 +86,13 @@ def main():
             rec['Contract'].append({'attributes': attrs('Contract', cid), 'Id': cid, 'AccountId': acc,
                                     'ContractNumber': f'{R.randint(10000, 99999):08d}', 'Status': 'Activated',
                                     'StartDate': start, 'EndDate': close, 'ContractTerm': 12})
+        for i, (close, kind, amount) in enumerate(PAST.get(name, [])):
+            oid = sid('006', name, f'past{i}')
+            rec['Opportunity'].append({'attributes': attrs('Opportunity', oid), 'Id': oid, 'AccountId': acc,
+                                       'Name': f'[SYNTHETIC] {name} {kind.lower()} {close[:4]}', 'Type': kind,
+                                       'StageName': 'Closed Won', 'ForecastCategoryName': 'Closed', 'CloseDate': close,
+                                       'Amount': amount, 'IsClosed': True, 'IsWon': True, 'NextStep': None,
+                                       'Owner': {'Name': owner}, 'LastActivityDate': None})
         if name == 'Pinecrest Retail':      # an expansion: not a renewal, never a risk
             oid = sid('006', name, 'expansion')
             rec['Opportunity'].append({'attributes': attrs('Opportunity', oid), 'Id': oid, 'AccountId': acc,

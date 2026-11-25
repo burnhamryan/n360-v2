@@ -32,7 +32,7 @@ behind the signals: `docs/17_RISK_RESEARCH.md`.
 | `code/risk/risk_model.json` | Every setting: weights, anchors, hard reds, bands, prior rates, ridge, horizon |
 | `code/risk/risk_model.py` | The command line, with the database or `--no-db` |
 | `sample_data/generate_risk_panel.py` | The known-truth synthetic history used in tests |
-| `code/risk/test_risk_model.py` | 52 checks; no database |
+| `code/risk/test_risk_model.py` | 63 checks; no database |
 
 ## Run it (Python 3.10+, standard library only)
 

@@ -154,22 +154,30 @@ def design(row, cfg):
             for k, f in cfg['features'].items()}
 
 
-def prior(cfg, rows=None):
-    """The expert prior. In words: a customer at the average scorecard risk has the portfolio's renewal-loss rate
-    (prior_mean_rate); a customer at full risk on everything has prior_max_rate; each feature moves the log-odds in
-    proportion to its scorecard weight. With `rows` (the customers now in their renewal window) the level is set so
-    their mean probability equals prior_mean_rate exactly; without, prior_mean_risk stands in for their average risk."""
+def prior(cfg, history=None):
+    """The expert prior. In words: a customer at the average scorecard risk (prior_mean_risk) has the portfolio's
+    renewal-loss rate (prior_mean_rate); a customer at full risk on everything has prior_max_rate; each feature moves
+    the log-odds in proportion to its scorecard weight.
+
+    Its level is FIXED: the same readings give the same chance on any day, whoever else is renewing. (It was once
+    re-set every night on the customers then in their renewal window: with a handful of customers there, one
+    customer's chance moved by tens of points as others entered or left the window.)
+
+    Without `history` the level comes from the settings alone. With `history` (the stored snapshots of customers in
+    their renewal window, over the whole record: hundreds of rows, not one night) the level is set ONCE so that their
+    average chance is prior_mean_rate, and it stays with the model run. That is what 'train' does; the run is used
+    only once adopted. Under prior_level_min_snapshots rows the settings level is kept: too few to set a level on."""
     p = cfg['probability']
     span = (logit(p['prior_max_rate']) - logit(p['prior_mean_rate'])) / (1.0 - p['prior_mean_risk'])
     w = weights(cfg)
     m = {'kind': 'prior', 'stage': 'prior', 'intercept': logit(p['prior_mean_rate']) - span * p['prior_mean_risk'],
          'coef': {k: span * w[k] for k in w}, 'mean': {k: p['prior_mean_risk'] for k in w}, 'n': 0, 'events': 0,
-         'note': 'expert prior'}
-    if rows:
-        s = [z for z in (linear(m, r, cfg) for r in rows) if z is not None]
-        if s:
-            m['intercept'] += _level(s, p['prior_mean_rate'])
-            m['note'] = f'expert prior; level set on {len(s)} customers in their renewal window'
+         'note': 'expert prior, level from the settings'}
+    if history:
+        z = [v for v in (linear(m, mask_pit(r, cfg), cfg) for r in history) if v is not None]
+        if len(z) >= p.get('prior_level_min_snapshots', 0):
+            m['intercept'] += _level(z, p['prior_mean_rate'])
+            m['note'] = f'expert prior, level set once on {len(z)} snapshots of customers in their renewal window'
     return m
 
 
@@ -183,6 +191,14 @@ def _level(scores, rate):
         else:
             hi = mid
     return (lo + hi) / 2
+
+
+def mean_risk(rows, cfg):
+    """The average scorecard risk (0-1) of these rows, point-in-time features only: what prior_mean_risk should be
+    close to when the rows are customers in their renewal window. None when no row has anything reported."""
+    w = weights(cfg)
+    v = [sum(w[k] * x[k] for k in w) for x in (design(mask_pit(r, cfg), cfg) for r in rows) if x is not None]
+    return sum(v) / len(v) if v else None
 
 
 def linear(model, row, cfg):
@@ -211,22 +227,21 @@ def probability(model, row, cfg):
 def explain(model, row, cfg):
     """Each reported feature's push on the log-odds against the average customer. A feature that is not reported has
     no push of its own: its weight is carried by the reported features of its dimension, and their pushes include it.
-    The pushes add up to the customer's log-odds minus the average customer's."""
+    The pushes add up exactly to the customer's log-odds minus the average customer's, for any model."""
     r = risks(row, cfg)
     have = [k for k in r if r[k] is not None]
     if not have:
         return {}
-    pattern = {k: (0.0 if k in have else None) for k in r}
-
-    def score(vals):
-        rr = dict(pattern); rr.update(vals)
-        dim_risk, _, total, _ = rollup(rr, cfg)
-        x = {k: (rr[k] if rr[k] is not None else dim_risk[f['dimension']] if dim_risk[f['dimension']] is not None else total)
-             for k, f in cfg['features'].items()}
-        return sum(b * x[k] for k, b in model['coef'].items())
-    base = score({})
     mean = model.get('mean', {})
-    return {k: round((score({k: 1.0}) - base) * (r[k] - mean.get(k, 0.0)), 4) for k in have}
+    out = {}
+    for k in have:
+        # how much of each model input this feature carries: its own, plus its share of every input it stands in for
+        rr = {j: (None if r[j] is None else 1.0 if j == k else 0.0) for j in r}
+        dim_risk, _, total, _ = rollup(rr, cfg)
+        carried = {j: (rr[j] if rr[j] is not None else dim_risk[f['dimension']] if dim_risk[f['dimension']] is not None else total)
+                   for j, f in cfg['features'].items()}
+        out[k] = round(sum(b * carried[j] * (r[k] - mean.get(j, 0.0)) for j, b in model['coef'].items()), 4)
+    return out
 
 
 def solve(a, b):
@@ -257,7 +272,7 @@ def fit(Z, y, wts, offset, target, lam, max_iter, lam0=0.0):
     a risk never lowers the chance of churn (one that tries is held at zero and the rest refitted).
     Returns (coefficients, converged, passes)."""
     d = len(Z[0])
-    free = list(range(d))
+    free = [j for j in range(d) if j == 0 or target[j] > 0]    # a weight whose prior is zero stays zero
     beta = [0.0] * d
     passes = 0
     converged = True
@@ -302,6 +317,8 @@ def fit(Z, y, wts, offset, target, lam, max_iter, lam0=0.0):
                 if objective(nb) >= now - 1e-12:
                     break
                 step = [s / 2 for s in step]
+            else:
+                nb, step = b, [0.0] * len(step)             # no shorter step improves it: stay, this is the optimum
             b = nb
             if max(abs(s) for s in step) < 1e-7:
                 ok = True
@@ -327,7 +344,7 @@ def stage_for(events, others, cfg):
     return 'feature' if n >= st['feature'] else 'dimension' if n >= st['dimension'] else 'calibrated' if n >= st['calibrate'] else 'prior'
 
 
-def train(rows, labels, groups, cfg, prior_rows=None, stage=None):
+def train(rows, labels, groups, cfg, history=None, stage=None):
     """Learn from outcomes, as far as their number allows (probability.stages, counted in distinct renewals):
       prior       under `calibrate` renewals lost (or kept): the expert prior, untouched
       calibrated  the level and ONE slope on the scorecard's risk: the ranking is the scorecard's, the chance is the data's
@@ -338,8 +355,9 @@ def train(rows, labels, groups, cfg, prior_rows=None, stage=None):
     events are counted per renewal, never per snapshot. (Every snapshot gets the same weight, so the model answers
     "of customers who look like this and have not yet decided, how many are lost": a renewal lost early has fewer
     snapshots, as it should.)
-    Only point-in-time features are learned; current-only ones keep their prior weight, rescaled by the learned slope."""
-    pr = prior(cfg, prior_rows)
+    Only point-in-time features are learned; current-only ones keep their prior weight, rescaled by the learned slope.
+    `history`: the stored snapshots of customers in their renewal window, to set the prior's level once (see prior)."""
+    pr = prior(cfg, history)
     xs = [design(mask_pit(r, cfg), cfg) for r in rows]
     keep = [i for i, x in enumerate(xs) if x is not None]
     xs, y, g = [xs[i] for i in keep], [labels[i] for i in keep], [groups[i] for i in keep]
