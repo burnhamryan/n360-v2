@@ -189,6 +189,7 @@ The full working rules are in [docs/07_WORKING_RULES.md](docs/07_WORKING_RULES.m
 | [18 Salesforce](docs/18_SALESFORCE.md) | What is read, credentials, running the reader |
 | [19 Salesforce, live](docs/19_SALESFORCE_LIVE.md) | Connecting a live org: the nightly reader and Claude questions |
 | [20 Datadog and Langfuse](docs/20_DATADOG_LANGFUSE.md) | The plan for both in Grafana OSS |
+| [24 Adoption export](docs/24_ADOPTION_EXPORT.md) | The five files the company export must add for adoption and support data |
 
 **Project**
 
