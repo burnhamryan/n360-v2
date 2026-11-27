@@ -1,3 +1,10 @@
+# CHANGES · 26 Nov 2026 · Adoption export spec
+
+`docs/24_ADOPTION_EXPORT.md`: the five files the company export must add (`va_config_snapshot`, `playbook_day`,
+`cortex_day`, `explorer_day`, `ps_ticket`) so the Adoption and Requests dashboards and the risk model's adoption
+and support features fill in. Columns, grain, how far back, and the open questions for whoever builds it. No code
+change: N360 already loads these files when they appear.
+
 # CHANGES · 25 Nov 2026 · Readiness report and past renewal dates
 
 **`code/readiness.py`: is N360 ready to run the risk model?** A read-only report on every source the dashboards and
