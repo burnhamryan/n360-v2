@@ -1,3 +1,12 @@
+# CHANGES · 27 Nov 2026 · Welcome page
+
+**`n360-welcome`, the new home page** (Grafana opens it first): what N360 is and how every page reads, where to go by
+role, a five-minute tour, what the colours mean, and a card per dashboard (thumbnail, what it answers, who it is for,
+link) in four groups. Operations and Pipeline health are left off. Thumbnails are cut from the synthetic screenshots
+(`code/grafana/make_thumbnails.py` → `code/grafana/welcome/`, served as `/public/img/n360/`). The Overview links back to
+it. Rendered in Grafana 13.3.1 (`docs/screenshots/00-welcome.png`). After pulling: `docker compose up -d` (from `code/`)
+picks up the home page and the thumbnail folder.
+
 # CHANGES · 27 Nov 2026 · Cortex by Netomians; Netomi against the customer; next step order
 
 - **Next step order decided:** V8 / V9 → Cortex → Recipes → Testing → Calibration → Explorer (docs/08).

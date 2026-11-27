@@ -60,11 +60,12 @@ Open http://localhost:3000, sign in as `admin` with `GRAFANA_ADMIN_PASSWORD`, an
 
 ## The dashboards
 
-All 14 are in the Grafana folder **N360**. Screenshots on synthetic data are in
+All of them are in the Grafana folder **N360**; the Welcome page opens first. Screenshots on synthetic data are in
 [docs/screenshots](docs/screenshots).
 
 | Dashboard | What it answers |
 |---|---|
+| **Welcome** | The home page: what N360 is, a five-minute tour, where to go by role, what the colours mean, a card per dashboard |
 | **Overview** | What needs attention today, across every customer |
 | **Contracts** | The status of every contract line: on track, behind, running out, renewal at risk |
 | **Contract line** | One line: use against the term, forecast, the VAs behind it |

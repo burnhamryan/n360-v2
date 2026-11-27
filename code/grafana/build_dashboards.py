@@ -28,7 +28,7 @@ UID = {'overview': 'n360-overview', 'contracts': 'n360-contracts', 'customer': '
        'adoption': 'n360-adoption', 'requests': 'n360-requests',
        'containment': 'n360-containment', 'pipeline': 'n360-pipeline', 'health': 'n360-health', 'risk': 'n360-risk',
        'risk_model': 'n360-risk-model', 'adoption_customer': 'n360-adoption-customer',
-       'adoption_va': 'n360-adoption-va', 'cortex': 'n360-cortex'}   # never change (links depend on them)
+       'adoption_va': 'n360-adoption-va', 'cortex': 'n360-cortex', 'welcome': 'n360-welcome'}   # never change (links depend on them)
 FORECAST_WINDOWS = (30, 60, 90)   # Forecast "Crossing billed" stat (spec 6): display windows
 
 # Display colours: ONE palette (v2 principle 6: colour means status, nowhere else). Mid tones chosen to read on both
@@ -619,7 +619,8 @@ def overview():
         links=[{'title': 'View all: Customer health', 'url': f"/d/{UID['health']}?${{__url_time_range}}"}],
         may_be_empty='nothing needs attention'))
     p.append(conversations_chart(10, 0, 25, 24, 9))
-    return dashboard(UID['overview'], 'N360 · Overview', p, [var_period()])
+    return dashboard(UID['overview'], 'N360 · Overview', p, [var_period()],
+                     [{**back_link(('n360-welcome', 'Welcome')), 'title': 'Welcome and tour'}])
 
 
 STATS = {'reduceOptions': {'calcs': ['lastNotNull'], 'fields': '/.*/'}, 'textMode': 'value_and_name', 'colorMode': 'none',
@@ -3216,8 +3217,149 @@ def risk_model_dashboard():
                      [back_link(), back_link(('n360-risk', 'Risk'))], time={'from': 'now-210d', 'to': 'now'})
 
 
+# ───────────────────────── Welcome (27 Nov 2026): the home page ─────────────────────────
+# What N360 is, a tour, where to go by role, what the colours mean, and a card per dashboard users should see (not
+# Operations or Pipeline health: those are for whoever runs N360). Thumbnails are cut from docs/screenshots by
+# make_thumbnails.py (synthetic data) and served by Grafana from /public/img/n360/ (docker-compose.yml).
+
+IMG = '/public/img/n360'
+# (section, [(uid, title, thumbnail, what it answers, who it is for)])
+WELCOME_SECTIONS = [
+    ('Every morning: where the book stands', [
+        ('n360-overview', 'Overview', 'overview', 'What needs attention today, across every customer, in one sentence and a list.', 'Everyone. Start here'),
+        ('n360-contracts', 'Contracts', 'contracts', 'Every contract line\'s status: over billed, set to exceed, below pace, renewal risk.', 'CSMs, leaders'),
+        ('n360-health', 'Customer health', 'health', 'Whose usage or containment is moving the wrong way, and how fast.', 'CSMs, customer architects'),
+        ('n360-risk', 'Risk', 'risk', 'Twelve risk signals per customer, the risk register and the renewals ahead.', 'CSMs, customer architects, leaders')]),
+    ('One customer, in depth', [
+        ('n360-customer', 'Customer', 'customer', 'One customer: its contracts, usage, VAs and notes on one page.', 'CSMs before a call or QBR'),
+        ('n360-line', 'Contract line', 'line', 'One contract line: use against the term, the forecast, the VAs behind it.', 'CSMs, finance'),
+        ('n360-va', 'VA', 'va', 'One virtual agent: traffic against its normal, containment, configuration.', 'Customer architects'),
+        ('n360-requests', 'Requests', 'requests', 'What customers are asking for: open tickets and the asks several share.', 'Product, CSMs')]),
+    ('Adoption: what customers use', [
+        ('n360-adoption', 'Adoption', 'adoption', 'The six features for every customer, the next step for each, the playbook estate.', 'Customer architects, CSMs, product'),
+        (ADOPT_CUSTOMER[0], 'Customer adoption', 'adoption_customer', 'One customer\'s features VA by VA, the evidence, and every playbook.', 'Customer architects'),
+        (ADOPT_VA[0], 'VA adoption', 'adoption_va', 'One VA\'s features as cards, its playbooks and its move to V8.', 'Customer architects'),
+        ('n360-cortex', 'Cortex by Netomians', 'cortex', 'Who at Netomi builds in Cortex, for whom: a running 3-month leaderboard.', 'Netomi team leads')]),
+    ('Deeper: forecasts, flags and the risk model', [
+        ('n360-forecast', 'Forecast and runway', 'forecast', 'When each line runs out at its current pace, and how accurate past forecasts were.', 'CSMs, finance'),
+        ('n360-anomalies', 'Anomalies', 'anomalies', 'Drops, spikes and silent VAs, with a review log.', 'Customer architects, support'),
+        ('n360-containment', 'Containment', 'containment', 'How much each VA resolves without an agent, by channel.', 'Customer architects'),
+        ('n360-risk-model', 'Risk model', 'risk_model', 'A health score and the chance of churn or downsell at renewal, with the reasons.', 'Leaders, CS operations')]),
+]
+
+
+def chip_text(background):
+    """Dark or white text, whichever contrasts more with the chip's colour (WCAG relative luminance)."""
+    def lum(h):
+        r, g, b = (int(h.lstrip('#')[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        f = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4  # noqa: E731
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+    bg = lum(background)
+    return '#1a1a1a' if (bg + 0.05) / (lum('#1a1a1a') + 0.05) >= 1.05 / (bg + 0.05) else '#ffffff'
+
+
+def html_panel(pid, x, y, w, h, html, title='', transparent=False):
+    return {'id': pid, 'title': title, 'type': 'text', 'gridPos': {'x': x, 'y': y, 'w': w, 'h': h}, 'transparent': transparent,
+            'options': {'mode': 'html', 'content': ' '.join(html.split())}}
+
+
+def welcome_card(pid, x, y, uid, title, thumb, what, who):
+    return html_panel(pid, x, y, 6, 9, f"""
+        <a href="/d/{uid}" style="display:block;color:inherit;text-decoration:none">
+          <img src="{IMG}/{thumb}.jpg" alt="{title}: example on invented data"
+               style="width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)">
+          <div style="font-size:16px;font-weight:600;margin:10px 0 4px">{title} →</div>
+          <div style="font-size:13px;line-height:1.4">{what}</div>
+          <div style="font-size:12px;opacity:0.65;margin-top:6px">For: {who}</div>
+        </a>""")
+
+
+def welcome():
+    """Welcome: the home page (GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH). Mostly words and links; one live sentence."""
+    p = page_header(1, """
+        WITH (SELECT count() FROM n360.account) AS customers,
+             (SELECT count() FROM n360.v_contract_status) AS lines,
+             (SELECT count() FROM n360.va) AS vas,
+             (SELECT uniqExact(account) FROM n360.v_needs_attention) AS attention,
+             (SELECT countIf(level = 'risk') FROM n360.v_risk_customer) AS at_risk
+        SELECT if(customers = 0, NULL, concat('N360 is following ', toString(customers), ' customers, ', toString(lines),
+                  ' contract lines and ', toString(vas), ' VAs · ', toString(attention), ' customers need attention today · ',
+                  toString(at_risk), ' at risk')) AS sentence""",
+        describe('What N360 covers today and how many customers need a look. Open the Overview for which ones and why.',
+                 'n360.account, n360.v_contract_status, n360.va, n360.v_needs_attention, n360.v_risk_customer', 'none',
+                 'the latest load'))
+    p[0]['links'] = [{'title': 'Open the Overview', 'url': '/d/n360-overview'}]
+    p.append(html_panel(3, 0, 3, 14, 9, f"""
+        <div style="font-size:22px;font-weight:600;margin-bottom:8px">Welcome to N360</div>
+        <p style="font-size:14px;line-height:1.55;margin:0 0 10px">N360 shows, for every enterprise customer, how much of each
+        signed contract is being used and how fast, when it will run out, whether anything unusual is happening, which
+        features they have adopted, and which customers are at risk.</p>
+        <p style="font-size:14px;line-height:1.55;margin:0 0 10px">It refreshes every night from the usage pipeline, plus
+        Salesforce and what CSMs record. The stamp at the top right of every page says how fresh the numbers are: amber means
+        they are more than two days old.</p>
+        <p style="font-size:13px;line-height:1.5;opacity:0.8;margin:0">Every page reads the same way: <b>a sentence</b>
+        that answers its question, <b>four headline numbers</b> with what changed, <b>one chart</b>, then <b>the lists</b>.
+        Hover the ⓘ on any panel for what it shows and where it comes from. Click a customer, line, VA or playbook to drill
+        in; <b>Back</b> links at the top take you up again. The pictures below are examples on invented data.</p>""",
+        title='What N360 is'))
+    roles = [('CSM', [('Overview', 'n360-overview'), ('Customer', 'n360-customer'), ('Risk', 'n360-risk'), ('Contracts', 'n360-contracts')],
+              'Before a QBR: Customer, then Customer adoption.'),
+             ('Customer architect', [('Customer health', 'n360-health'), ('VA', 'n360-va'), ('Adoption', 'n360-adoption'),
+                                     ('Containment', 'n360-containment')], 'For an upgrade plan: Adoption\'s next step queue.'),
+             ('Leader', [('Overview', 'n360-overview'), ('Risk', 'n360-risk'), ('Risk model', 'n360-risk-model'),
+                         ('Cortex by Netomians', 'n360-cortex')], 'For the week: the Overview sentence and Risk.')]
+    rows = ''.join(
+        f"""<div style="margin:0 0 12px"><div style="font-weight:600;font-size:14px;margin-bottom:3px">{r}</div>
+            <div style="font-size:13px">{' · '.join(f'<a href="/d/{u}">{t}</a>' for t, u in links)}</div>
+            <div style="font-size:12px;opacity:0.65;margin-top:2px">{tip}</div></div>""" for r, links, tip in roles)
+    p.append(html_panel(4, 14, 3, 10, 9, rows, title='Find your way'))
+    steps = [('Overview', 'n360-overview', 'Read the sentence, then the list of what needs attention.'),
+             ('A customer', 'n360-customer', 'Click a name anywhere: its contracts, usage and VAs.'),
+             ('A contract line', 'n360-line', 'From the customer, click a line: use against the term and the forecast.'),
+             ('Customer health', 'n360-health', 'Who is moving the wrong way, and the reason in words.'),
+             ('Risk', 'n360-risk', 'Twelve signals per customer; who is acting on each risk.'),
+             ('Adoption', 'n360-adoption', 'Six features per customer and the next step to move each one.')]
+    tour = ''.join(
+        f"""<a href="/d/{u}" style="display:block;width:16%;box-sizing:border-box;
+            color:inherit;text-decoration:none;padding:10px 12px;border-radius:4px;border:1px solid rgba(128,128,128,0.35)">
+            <div style="font-size:12px;opacity:0.65">Step {i}</div>
+            <div style="font-size:15px;font-weight:600;margin:2px 0 4px">{t} →</div>
+            <div style="font-size:12.5px;line-height:1.4">{d}</div></a>""" for i, (t, u, d) in enumerate(steps, 1))
+    p.append(html_panel(5, 0, 12, 24, 5, f'<div style="display:flex;gap:12px">{tour}</div>',
+                        title='A five-minute tour'))
+    chip = lambda word, c: (f'<span style="display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;'
+                            f'background:{COLOUR[c]};color:{chip_text(COLOUR[c])};font-size:12px;'
+                            f'font-weight:{600 if chip_text(COLOUR[c]) == "#ffffff" else 400}">{word}</span>')
+    contract = ''.join(chip(w, c) for k, (w, c) in STATUS.items() if k not in ('not read',)) + chip(NOT_READ, 'grey')
+    levels = ''.join(chip(w, c) for w, c in LEVEL.values())
+    adopt = ''.join(chip(w, c) for w, c in ADOPT.values())
+    p.append(html_panel(6, 0, 17, 24, 5, f"""
+        <div style="font-size:13px;display:flex;gap:16px">
+          <div style="width:52%;box-sizing:border-box;padding-right:16px">
+            <div style="font-weight:600;margin-bottom:4px">Contract status</div>{contract}</div>
+          <div style="width:22%;box-sizing:border-box;padding-right:16px">
+            <div style="font-weight:600;margin-bottom:4px">Risk</div>{levels}</div>
+          <div style="width:25%;box-sizing:border-box">
+            <div style="font-weight:600;margin-bottom:4px">Adoption</div>{adopt}</div>
+        </div>
+        <div style="font-size:12px;opacity:0.7;padding-top:6px">Grey always means the source had nothing to read, never
+        "fine". Red is not used: renewal risk is a strong blue. Charts that are not statuses use one neutral blue-grey.</div>""",
+        title='What the colours mean'))
+    y, pid = 22, 7
+    for section, cards in WELCOME_SECTIONS:
+        p.append(html_panel(pid, 0, y, 24, 2, f'<div style="font-size:18px;font-weight:600;padding-top:4px">{section}</div>',
+                            transparent=True))
+        pid += 1
+        y += 2
+        for i, (uid, title, thumb, what, who) in enumerate(cards):
+            p.append(welcome_card(pid, 6 * i, y, uid, title, thumb, what, who))
+            pid += 1
+        y += 9
+    return dashboard('n360-welcome', 'N360 · Welcome', p, links=[{**back_link(), 'title': 'Overview'}])
+
+
 DASHBOARDS = [overview, contracts, customer, health, risk, risk_model_dashboard, contract_line, va, forecast, anomalies, containment, pipeline,
-              adoption, requests, adoption_customer, adoption_va, cortex_netomi]
+              adoption, requests, adoption_customer, adoption_va, cortex_netomi, welcome]
 
 
 def main():

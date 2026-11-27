@@ -19,6 +19,18 @@ pages (Overview, Contracts, Customer health, Customer, Adoption, Requests) then 
 **Contract status** comes from `n360.v_contract_status`. It has the v1.1 page's 11 statuses plus renewal risk and
 replaces the red/amber/green pace on every screen. The dashboards only map a status to its colour.
 
+## 0. Welcome · `n360-welcome` (the home page, 27 Nov 2026)
+
+Everyone lands here (`GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH` in `docker-compose.yml`). One live sentence (customers,
+lines and VAs followed; customers needing attention; at risk) and the freshness stamp; what N360 is and how every page
+reads; **find your way** by role (CSM, customer architect, leader); **a five-minute tour** (Overview → a customer →
+a contract line → Customer health → Risk → Adoption); **what the colours mean** (contract statuses, risk levels,
+adoption states, from the same palette as the pages); then a card per dashboard in four groups, each with a
+thumbnail, what it answers, who it is for and a link. Operations and Pipeline health are left off: they are for whoever
+runs N360. Thumbnails are cut from `docs/screenshots` (synthetic data) by `code/grafana/make_thumbnails.py` into
+`code/grafana/welcome/`, which Grafana serves as `/public/img/n360/`; run it after re-taking the screenshots. The
+Overview links back here ("Welcome and tour").
+
 ## Drill-down map
 
 ```

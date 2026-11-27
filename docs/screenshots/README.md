@@ -21,3 +21,5 @@ synthetic nights, the fake Salesforce, the register and ratings CI records, the 
 rows). New: `21-cortex-by-netomians.png` (the leaderboard over the last 3 months: Jordan Patel, rising, has just
 overtaken Avery Kim) and `22-operations.png`. The light-theme shots (14, 15, 17) are from 25 Nov. Every person and
 customer is invented.
+
+`00-welcome.png`: the Welcome page, the home page since 27 Nov 2026.
