@@ -862,7 +862,7 @@ CREATE OR REPLACE VIEW n360.v_customer_adoption AS
 WITH (SELECT adoption_next_order FROM n360.settings) AS next_order
 SELECT a.account AS account, f.adopted AS features_adopted, f.read AS features_read, f.next_feature AS next_feature,
        a.vas AS vas, a.vas_v8 AS vas_v8, a.executions AS executions, a.conversations AS conversations, a.handoffs AS handoffs,
-       if(a.conversations > 0, round(100 * a.handoffs / greatest(ifNull(a.conversations, 0), 1), 1), NULL) AS handoff_pct,
+       if(a.conversations > 0, round(100 * a.handoffs / greatest(a.conversations, 1), 1), NULL) AS handoff_pct,   -- greatest: see v_va_change
        a.playbooks_live AS playbooks_live, a.playbooks_executed AS playbooks_executed, a.idle_playbooks AS idle_playbooks,
        a.last_execution AS last_execution, a.legacy_intents AS legacy_intents, a.window_start AS window_start, a.window_end AS window_end
 FROM (SELECT account, count() AS vas, countIf(engine_major >= (SELECT engine_current_major FROM n360.settings)) AS vas_v8,
@@ -887,7 +887,7 @@ SELECT p.account AS account, p.bot_id AS bot_id, p.va AS va, p.task_id AS task_i
        p.executions AS executions, p.idle AS idle, p.window_start AS window_start, p.window_end AS window_end,
        multiIf(p.creator_domain IS NULL, NULL, p.creator_domain = staff, 'Netomi', 'Customer') AS built_by,
        if(sum(p.executions) OVER (PARTITION BY p.bot_id) > 0,
-          round(100 * p.executions / sum(p.executions) OVER (PARTITION BY p.bot_id), 1), NULL) AS share_of_va_pct,
+          round(100 * p.executions / greatest(sum(p.executions) OVER (PARTITION BY p.bot_id), 1), 1), NULL) AS share_of_va_pct,
        row_number() OVER (PARTITION BY p.bot_id ORDER BY ifNull(p.executions, 0) DESC, p.playbook) AS rank_on_va,
        indexOf(['<200 (short)', '200-999', '1000-2999', '3000-5999', '6000-9999', '10000+'], p.length_band) AS band_order
 FROM n360.playbook_window AS p;
@@ -1168,14 +1168,15 @@ SELECT v.account AS account, v.bot_id AS bot_id, concat(v.va_name, ' (', arraySt
           sumIf(d.conversations, d.day > dt - 30)) AS convs_30,
        if(countIf(d.day <= dt - 30 AND d.conversations IS NULL) > 0 OR countIf(d.day <= dt - 30) < 30, NULL,
           sumIf(d.conversations, d.day <= dt - 30)) AS convs_prev_30,
-       -- divisor floored at 1 inside the branch: ClickHouse computes both branches, and an inf left under a NULL breaks a later toInt32
-       if(convs_prev_30 > 0, round(100 * (convs_30 - convs_prev_30) / greatest(ifNull(convs_prev_30, 0), 1), 1), NULL) AS convs_change_pct,
+       -- Guarded divisions divide by greatest(x, 1): ClickHouse still computes the hidden branch, and a 0 / 0 under the
+       -- NULL is NaN, which throws in any later toInt32 (27 Nov 2026: a VA at 0 for 60 days broke Customer health).
+       if(convs_prev_30 > 0, round(100 * (convs_30 - convs_prev_30) / greatest(convs_prev_30, 1), 1), NULL) AS convs_change_pct,
        if(sumIf(d.engaged, d.day > dt - 30 AND d.handoffs IS NOT NULL) > 0,
           round(100 * (1 - sumIf(d.handoffs, d.day > dt - 30 AND d.handoffs IS NOT NULL)
-                         / sumIf(d.engaged, d.day > dt - 30 AND d.handoffs IS NOT NULL)), 1), NULL) AS containment_30,
+                         / greatest(sumIf(d.engaged, d.day > dt - 30 AND d.handoffs IS NOT NULL), 1)), 1), NULL) AS containment_30,
        if(sumIf(d.engaged, d.day <= dt - 30 AND d.handoffs IS NOT NULL) > 0,
           round(100 * (1 - sumIf(d.handoffs, d.day <= dt - 30 AND d.handoffs IS NOT NULL)
-                         / sumIf(d.engaged, d.day <= dt - 30 AND d.handoffs IS NOT NULL)), 1), NULL) AS containment_prev_30,
+                         / greatest(sumIf(d.engaged, d.day <= dt - 30 AND d.handoffs IS NOT NULL), 1)), 1), NULL) AS containment_prev_30,
        round(containment_30 - containment_prev_30, 1) AS containment_change_pts,
        ifNull(convs_change_pct <= -down_pct, false) AS convs_down,
        ifNull(containment_change_pts <= -cont_pts, false) AS containment_down,
