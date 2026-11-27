@@ -1532,3 +1532,32 @@ CREATE OR REPLACE VIEW n360.v_risk_drivers AS
 -- The newest contributions per customer (same run as v_risk_score).
 SELECT c.* FROM n360.risk_contributions AS c
 WHERE c.run_id IN (SELECT run_id FROM n360.v_risk_score);
+
+-- ───────────────────────── operations (26 Nov 2026): written by the company pipeline's local runner ──────────────
+-- ops_runner.py (127.0.0.1:8099, the buttons on the N360 · Operations dashboard) records each job and what ran each
+-- pipeline night. Not loaded from exports, not swapped, not part of the 8 checks; declared here so a fresh server and
+-- CI have them before the runner first starts (the runner creates them the same way, IF NOT EXISTS).
+CREATE TABLE IF NOT EXISTS n360.ops_job
+(
+    job_id     String,
+    action     LowCardinality(String),                       -- pull | export | load
+    state      LowCardinality(String),                       -- running | done | failed
+    started    DateTime('UTC'),
+    finished   Nullable(DateTime('UTC')),
+    exit_code  Nullable(Int16),
+    last_line  String,
+    updated    DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(updated) ORDER BY job_id;
+
+CREATE TABLE IF NOT EXISTS n360.ops_night
+(
+    night             Date,
+    claude_result     String,                                -- 'published vN', 'stopped: …', 'no run'
+    claude_published  Nullable(UInt32),
+    code_result       String,                                -- run_nightly.py: 'complete', 'export only', the failed step, 'not run'
+    export_run_id     String,                                -- joins n360.runs (toString(run_id)) to show whether it loaded
+    export_counts     String,
+    updated           DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(updated) ORDER BY night;

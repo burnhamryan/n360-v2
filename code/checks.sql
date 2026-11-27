@@ -20,13 +20,17 @@ WHERE l.pool_id IS NULL AND l.reported_measured IS NOT NULL AND d.m != l.reporte
 
 -- check: pct_matches_page
 -- The view's % of billed equals the page's, to the hundredth. One formula, two places, no drift.
+-- Compared with the EXACT ratio, not the view's rounded one: the page rounds in Python, the view in ClickHouse, and on
+-- a ratio ending in exactly 5 (107.215) the two round opposite ways, 0.01 apart, both correct. A correctly rounded
+-- page value is never more than 0.005 from the exact ratio; real drift is. (Fixed 24 Nov 2026: 13 of 32 real nights
+-- were refused by the old `rounded - rounded > 0.01` test, a float artefact; no data was wrong.)
 SELECT l.line_key, l.reported_pct_page AS page, v.pct_billed AS view
 FROM {db}.contract_line AS l
 INNER JOIN (
     SELECT line_key, if(pool_id IS NULL AND billed > 0 AND reported_measured IS NOT NULL,
-                        round(100 * reported_measured / billed, 2), NULL) AS pct_billed
+                        100 * reported_measured / billed, NULL) AS pct_billed
     FROM {db}.contract_line) AS v ON v.line_key = l.line_key
-WHERE l.pool_id IS NULL AND l.reported_pct_page IS NOT NULL AND abs(ifNull(v.pct_billed, -1) - l.reported_pct_page) > 0.01;
+WHERE l.pool_id IS NULL AND l.reported_pct_page IS NOT NULL AND abs(ifNull(v.pct_billed, -1) - l.reported_pct_page) > 0.0051;
 
 -- check: billable_reconciles
 -- Rule lines: daily billable sums to consumption_rules.json consumed_billable.
