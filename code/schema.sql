@@ -862,7 +862,7 @@ CREATE OR REPLACE VIEW n360.v_customer_adoption AS
 WITH (SELECT adoption_next_order FROM n360.settings) AS next_order
 SELECT a.account AS account, f.adopted AS features_adopted, f.read AS features_read, f.next_feature AS next_feature,
        a.vas AS vas, a.vas_v8 AS vas_v8, a.executions AS executions, a.conversations AS conversations, a.handoffs AS handoffs,
-       if(a.conversations > 0, round(100 * a.handoffs / a.conversations, 1), NULL) AS handoff_pct,
+       if(a.conversations > 0, round(100 * a.handoffs / greatest(ifNull(a.conversations, 0), 1), 1), NULL) AS handoff_pct,
        a.playbooks_live AS playbooks_live, a.playbooks_executed AS playbooks_executed, a.idle_playbooks AS idle_playbooks,
        a.last_execution AS last_execution, a.legacy_intents AS legacy_intents, a.window_start AS window_start, a.window_end AS window_end
 FROM (SELECT account, count() AS vas, countIf(engine_major >= (SELECT engine_current_major FROM n360.settings)) AS vas_v8,
@@ -1168,7 +1168,8 @@ SELECT v.account AS account, v.bot_id AS bot_id, concat(v.va_name, ' (', arraySt
           sumIf(d.conversations, d.day > dt - 30)) AS convs_30,
        if(countIf(d.day <= dt - 30 AND d.conversations IS NULL) > 0 OR countIf(d.day <= dt - 30) < 30, NULL,
           sumIf(d.conversations, d.day <= dt - 30)) AS convs_prev_30,
-       if(convs_prev_30 > 0, round(100 * (convs_30 - convs_prev_30) / convs_prev_30, 1), NULL) AS convs_change_pct,
+       -- divisor floored at 1 inside the branch: ClickHouse computes both branches, and an inf left under a NULL breaks a later toInt32
+       if(convs_prev_30 > 0, round(100 * (convs_30 - convs_prev_30) / greatest(ifNull(convs_prev_30, 0), 1), 1), NULL) AS convs_change_pct,
        if(sumIf(d.engaged, d.day > dt - 30 AND d.handoffs IS NOT NULL) > 0,
           round(100 * (1 - sumIf(d.handoffs, d.day > dt - 30 AND d.handoffs IS NOT NULL)
                          / sumIf(d.engaged, d.day > dt - 30 AND d.handoffs IS NOT NULL)), 1), NULL) AS containment_30,
