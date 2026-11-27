@@ -1,3 +1,10 @@
+# CHANGES · 27 Nov 2026 · Join memory checked on 25.8 at real volume
+
+`join_algorithm=hash` (in `code/clickhouse/query_limits.xml` since #24) is confirmed on ClickHouse 25.8 with synthetic
+data scaled past the real size. Under 25.8's default `parallel_hash`, Risk panels hit the 2 GB per-query cap and the
+Risk page went over the server cap; with `hash`, no panel used over 130 MB and the rows were the same. The scripts
+and numbers are in `code/perf/` (README), so the check can be rerun when the data grows or ClickHouse is upgraded.
+
 # CHANGES · 27 Nov 2026 · VAs with no conversations in the last 30 days
 
 Real data had a VA with no conversations in 30 days and the synthetic data had none, so the tests could not catch
