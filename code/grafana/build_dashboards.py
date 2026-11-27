@@ -28,7 +28,7 @@ UID = {'overview': 'n360-overview', 'contracts': 'n360-contracts', 'customer': '
        'adoption': 'n360-adoption', 'requests': 'n360-requests',
        'containment': 'n360-containment', 'pipeline': 'n360-pipeline', 'health': 'n360-health', 'risk': 'n360-risk',
        'risk_model': 'n360-risk-model', 'adoption_customer': 'n360-adoption-customer',
-       'adoption_va': 'n360-adoption-va'}   # never change (links depend on them)
+       'adoption_va': 'n360-adoption-va', 'cortex': 'n360-cortex'}   # never change (links depend on them)
 FORECAST_WINDOWS = (30, 60, 90)   # Forecast "Crossing billed" stat (spec 6): display windows
 
 # Display colours: ONE palette (v2 principle 6: colour means status, nowhere else). Mid tones chosen to read on both
@@ -1739,7 +1739,7 @@ def adoption():
         FROM n360.v_customer_adoption WHERE {ACCT}""",
         describe('Customers using all six features (the v1.1 definitions), the conversations that ran at least one playbook '
                  'and the share handed off to an agent from within one, and the feature most customers should move to next '
-                 '(the first not adopted, in the proposed order n360.settings adoption_next_order). ' + ADOPT_NOTE,
+                 '(the first not adopted, in the agreed order n360.settings adoption_next_order: V8 / V9, Cortex, Recipes, then the rest). ' + ADOPT_NOTE,
                  'n360.v_customer_adoption', 'Customer', 'the 31 days to the data-through day'))
     p.append(single_tile(3, 'Playbook executions, 31 days', f"""
         SELECT if(count() = 0, NULL, sum(executions)) AS `across every V8 playbook` FROM n360.v_customer_adoption WHERE {ACCT}""", 0, 3,
@@ -1776,13 +1776,13 @@ def adoption():
         describe('Each customer against the six features of the v1.1 Adoption view. A cell is green when adopted, amber '
                  'when partly (for example tests run with validation off, or calibration lapsed), light grey when not yet, '
                  'grey when the source has nothing ("Not reported yet", never "not yet"). Hover a column heading for what '
-                 'adopted means. Adopted, of 6 is drawn as a bar. Next step: the first feature not adopted, in the proposed '
+                 'adopted means. Adopted, of 6 is drawn as a bar. Next step: the first feature not adopted, in the agreed '
                  'order (n360.settings adoption_next_order). Click a customer for its VAs and playbooks. ' + ADOPT_NOTE,
                  'n360.v_customer_feature_adoption, n360.v_customer_adoption', 'Customer', 'the newest read'),
         field=field_config([hidden('account'), *adopt_cells([(c, m) for c, _, m in FEATURES]),
                             gauge_cell('Adopted, of 6', 6), count_col('Executions, 31 days'), pct('Handed off'),
-                            override('Next step', ('description', 'The first of the six not adopted, in the proposed order '
-                                                   'V8 / V9 → Testing → Calibration → Recipes → Explorer → Cortex.')),
+                            override('Next step', ('description', 'The first of the six not adopted, in the agreed order '
+                                                   'V8 / V9 → Cortex → Recipes → Testing → Calibration → Explorer.')),
                             width('Customer', 170), width('Adopted, of 6', 120), width('Next step', 190),
                             with_links('Customer', drill(ADOPT_CUSTOMER[0], 'account', 'account', 'Open this customer\'s adoption'),
                                        drill(UID['customer'], 'account', 'account', 'Open the Customer page'))]),
@@ -1807,7 +1807,7 @@ def adoption():
                indexOf((SELECT adoption_next_order FROM n360.settings), c.next_feature) AS o
         FROM n360.v_customer_adoption AS c INNER JOIN n360.account AS a ON a.account = c.account
         WHERE c.{ACCT} GROUP BY c.next_feature ORDER BY o = 0, o""", 12, 26, 12, 9,
-        describe('Customers grouped by the next feature to move them to (the first of the six not adopted, in the proposed '
+        describe('Customers grouped by the next feature to move them to (the first of the six not adopted, in the agreed '
                  'order n360.settings adoption_next_order), with the playbook traffic behind them: the biggest group with '
                  'the most traffic is the campaign to run first. ' + ADOPT_NOTE,
                  'n360.v_customer_adoption', 'Customer', 'the newest read'),
@@ -1976,7 +1976,10 @@ def adoption():
                               for x in feats],
                             width('Customer', 140), with_links('Customer', drill(UID['customer'], 'account', 'account', 'Open customer'))]),
         options={'cellHeight': 'sm'}))
-    return dashboard(UID['adoption'], 'N360 · Adoption', p, [var_account()], [back_link()])
+    p.append(cortex_split_by_customer(21, 0, 93, 12, 10))
+    p.append(executions_by_builder(22, 12, 93, 12, 10))
+    return dashboard(UID['adoption'], 'N360 · Adoption', p, [var_account()],
+                     [back_link(), {**back_link(('n360-cortex', 'Cortex by Netomians')), 'title': 'Cortex by Netomians'}])
 
 
 def amber_cell(column):
@@ -1995,7 +1998,7 @@ def adoption_customer():
                    if(any(c.next_feature) = '', 'every feature adopted', concat('next step: ', any(c.next_feature))))) AS sentence
         FROM n360.v_customer_adoption AS c INNER JOIN n360.account AS a ON a.account = c.account WHERE c.{ACCT}""",
         describe('The customer\'s features adopted (of the six), the conversations that ran at least one playbook and the '
-                 'share handed off from within one, and the next feature to move to (proposed order). ' + ADOPT_NOTE,
+                 'share handed off from within one, and the next feature to move to (V8 / V9, Cortex, Recipes, then the rest). ' + ADOPT_NOTE,
                  'n360.v_customer_adoption', 'Customer', 'the 31 days to the data-through day'))
     p.append(single_tile(3, 'Playbook executions, 31 days', f"""
         SELECT if(count() = 0, NULL, sum(executions)) AS `across every V8 playbook` FROM n360.va_adoption WHERE {ACCT}""", 0, 3,
@@ -2127,6 +2130,8 @@ def adoption_customer():
     p[-1]['transformations'] = [{'id': 'partitionByValues', 'options': {'fields': ['VA'], 'keepFields': False, 'naming': {'asLabels': True}}}]
     p[-1]['fieldConfig']['defaults']['displayName'] = '${__field.labels.VA}'
     p.append(config_table(17, ACCT, 0, 59, 'Customer'))
+    p.append(cortex_weekly_split(18, 0, 67, 12, 9))
+    p.append(executions_by_builder(19, 12, 67, 12, 9, per='va'))
     return dashboard(ADOPT_CUSTOMER[0], 'N360 · Customer adoption', p, [var_one_account()],
                      [back_link(('n360-adoption', 'Adoption')), back_link(CUSTOMER, keep_vars=True), back_link()])
 
@@ -2271,6 +2276,171 @@ def adoption_va():
     return dashboard(ADOPT_VA[0], 'N360 · VA adoption', p, [var_one_account(), var_va()],
                      [back_link(ADOPT_CUSTOMER, keep_vars=True), back_link(('n360-va', 'VA'), keep_vars=True),
                       back_link(('n360-adoption', 'Adoption'))])
+
+
+# ───────────────────────── Netomi and the customer: who does the work (27 Nov 2026) ─────────────────────────
+
+WHO = {'Netomi': 'series', 'Customer': 'green'}       # Netomi's work in the neutral series colour, the customer's in green
+WHO_NOTE = ('Netomi = a Cortex user on Netomi\'s domain, or a playbook created from it (n360.settings adoption_staff_domain); '
+            'customer users are counted, never named.')
+NETOMIAN = "ifNull(name, '') IN (${netomian:singlequote})"
+
+
+def who_colours(**names):
+    return [override(n, ('color', {'mode': 'fixed', 'fixedColor': COLOUR[c]})) for n, c in names.items()]
+
+
+def cortex_split_by_customer(pid, x, y, w, h, where=ACCT):
+    return panel(pid, 'Cortex sessions: Netomi and the customer', 'barchart', f"""
+        SELECT a.display_name AS Customer, sumIf(c.sessions, c.who = 'Netomi') AS Netomi,
+               sumIf(c.sessions, c.who = 'Customer') AS `The customer`
+        FROM n360.v_cortex_user AS c INNER JOIN n360.account AS a ON a.account = c.account
+        WHERE c.{where} AND $__dateFilter(c.day) GROUP BY Customer ORDER BY sum(c.sessions) DESC""", x, y, w, h,
+        describe('Cortex sessions per customer, split by who ran them: Netomi (blue-grey) or the customer\'s own users '
+                 '(green). Hover for the counts. A customer whose bar is all Netomi depends on Netomi to change its '
+                 'playbooks. ' + WHO_NOTE, 'n360.v_cortex_user', 'Customer', 'dashboard time range'),
+        field=field_config(who_colours(Netomi='series', **{'The customer': 'green'}), decimals=0, min=0,
+                           custom={'fillOpacity': 90, 'lineWidth': 0, 'axisGridShow': False}),
+        options={'xField': 'Customer', 'orientation': 'horizontal', 'stacking': 'normal', 'showValue': 'auto', 'barWidth': 0.8,
+                 'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'none'}}, may_be_empty='no per-person Cortex data')
+
+
+def executions_by_builder(pid, x, y, w, h, where=ACCT, per='customer'):
+    key, label = (("a.display_name", 'Customer') if per == 'customer' else ("pb.va", 'VA'))
+    return panel(pid, 'Executions: Netomi-built and customer-built playbooks', 'barchart', f"""
+        SELECT {key} AS {label}, sumIf(pb.executions, pb.built_by = 'Netomi') AS `Built by Netomi`,
+               sumIf(pb.executions, pb.built_by = 'Customer') AS `Built by the customer`,
+               sumIf(pb.executions, pb.built_by IS NULL) AS `Builder not reported`
+        FROM n360.v_playbook AS pb INNER JOIN n360.account AS a ON a.account = pb.account
+        WHERE pb.{where} GROUP BY {label} ORDER BY sum(pb.executions) DESC""", x, y, w, h,
+        describe('Playbook executions in 31 days, split by who created the playbook (creator domain): Netomi (blue-grey) or '
+                 'the customer (green), as a share. Hover for the counts. ' + WHO_NOTE + ' ' + ADOPT_NOTE,
+                 'n360.v_playbook', label, 'the newest read'),
+        field=field_config(who_colours(**{'Built by Netomi': 'series', 'Built by the customer': 'green', 'Builder not reported': 'grey'}),
+                           decimals=0, min=0, max=1, custom={'fillOpacity': 90, 'lineWidth': 0, 'axisGridShow': False}),
+        options={'xField': label, 'orientation': 'horizontal', 'stacking': 'percent', 'showValue': 'never', 'barWidth': 0.8,
+                 'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'none'}}, may_be_empty='no playbook read')
+
+
+def cortex_weekly_split(pid, x, y, w, h, where=ACCT, filter_text='Customer'):
+    return panel(pid, 'Cortex sessions per week: Netomi and the customer', 'timeseries', f"""
+        SELECT toDateTime(toMonday(day)) AS time, sumIf(sessions, who = 'Netomi') AS Netomi,
+               sumIf(sessions, who = 'Customer') AS `The customer`
+        FROM n360.v_cortex_user WHERE {where} AND $__dateFilter(day) GROUP BY time ORDER BY time""", x, y, w, h,
+        describe('Cortex sessions per week by Netomi users and by the customer\'s own users, side by side. The customer\'s '
+                 'line rising while Netomi\'s falls is the hand-over working. Hover for the week. ' + WHO_NOTE,
+                 'n360.v_cortex_user', filter_text, 'dashboard time range, weeks from Monday'),
+        fmt='timeseries', field=field_config(who_colours(Netomi='series', **{'The customer': 'green'}), decimals=0, min=0,
+                                             custom={'drawStyle': 'bars', 'fillOpacity': 85, 'lineWidth': 0, 'barWidthFactor': 0.8}),
+        options={'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'none'}}, may_be_empty='no per-person Cortex data')
+
+
+def var_netomian():
+    return query_var('netomian', 'Netomian', "SELECT DISTINCT name FROM n360.v_cortex_user WHERE who = 'Netomi' AND name IS NOT NULL ORDER BY name")
+
+
+def cortex_netomi():
+    """Cortex by Netomians: who on the Netomi team builds in Cortex, for which customers, and how that is moving.
+    A running leaderboard over the dashboard's range (3 months by default)."""
+    w = f"who = 'Netomi' AND {NETOMIAN} AND {ACCT} AND $__dateFilter(day)"
+    p = page_header(1, f"""
+        WITH (SELECT argMax(name, s) FROM (SELECT name, sum(sessions) AS s FROM n360.v_cortex_user WHERE {w} GROUP BY name)) AS leader,
+             (SELECT max(s) FROM (SELECT name, sum(sessions) AS s FROM n360.v_cortex_user WHERE {w} GROUP BY name)) AS lead_n,
+             (SELECT sum(sessions) FROM n360.v_cortex_user WHERE {ACCT} AND $__dateFilter(day)) AS everyone
+        SELECT if(count() = 0, NULL, concat(toString(uniqExact(name)), ' Netomians ran ', {num_sql('sum(sessions)')},
+                   ' Cortex sessions for ', {plural('uniqExact(account)', 'customer', 'customers')}, ' · leader: ', leader, ' (',
+                   toString(lead_n), ') · Netomi did ', toString(round(100 * sum(sessions) / nullIf(everyone, 0))),
+                   '% of all Cortex sessions')) AS sentence
+        FROM n360.v_cortex_user WHERE {w}""",
+        describe('Over the dashboard\'s time range (3 months by default): how many Netomians used Cortex, their sessions, '
+                 'the leader, and Netomi\'s share of every Cortex session (customers\' own users are the rest). '
+                 + WHO_NOTE, 'n360.v_cortex_user', 'Netomian, Customer', 'dashboard time range'))
+    p.append(single_tile(3, 'Netomians in Cortex', f"""
+        SELECT if(count() = 0, NULL, uniqExact(name)) AS `with at least one session` FROM n360.v_cortex_user WHERE {w}""", 0, 3,
+        describe('Netomi users with at least one Cortex session in the range. ' + WHO_NOTE, 'n360.v_cortex_user',
+                 'Netomian, Customer', 'dashboard time range')))
+    p.append(single_tile(4, 'Sessions by Netomians', f"""
+        SELECT if(count() = 0, NULL, sum(sessions)) AS `in the range` FROM n360.v_cortex_user WHERE {w}""", 6, 3,
+        describe('Cortex sessions by Netomi users in the range. ' + WHO_NOTE, 'n360.v_cortex_user', 'Netomian, Customer',
+                 'dashboard time range')))
+    p.append(single_tile(5, 'Netomi\'s share of Cortex', f"""
+        SELECT if(sum(sessions) = 0, NULL, round(100 * sumIf(sessions, who = 'Netomi') / sum(sessions), 1)) AS `of every session`
+        FROM n360.v_cortex_user WHERE {ACCT} AND $__dateFilter(day)""", 12, 3,
+        describe('Netomi users\' sessions as a share of every Cortex session (Netomi and customers) in the range: lower '
+                 'means customers build for themselves. ' + WHO_NOTE, 'n360.v_cortex_user', 'Customer',
+                 'dashboard time range'), field=plain(field_config(unit='percent', decimals=1))))
+    p.append(single_tile(6, 'Production edits by Netomians', f"""
+        SELECT if(count() = 0, NULL, sum(production_edits)) AS `saved to live playbooks` FROM n360.v_cortex_user WHERE {w}""", 18, 3,
+        describe('Playbook versions Netomi users saved to a production playbook in the range: changes customers see. '
+                 + WHO_NOTE, 'n360.v_cortex_user', 'Netomian, Customer', 'dashboard time range')))
+    p.append(panel(7, 'Leaderboard', 'table', f"""
+        WITH (SELECT max(day) FROM n360.v_cortex_user) AS newest
+        SELECT row_number() OVER (ORDER BY sum(sessions) DESC, name) AS `#`, name AS Netomian, sum(sessions) AS Sessions,
+               sum(production_edits) AS `Production edits`, uniqExact(account) AS Customers, uniqExact(bot_id) AS VAs,
+               multiIf(sumIf(sessions, day > newest - 30) > sumIf(sessions, day <= newest - 30 AND day > newest - 60),
+                         concat('▲ ', toString(sumIf(sessions, day > newest - 30))),
+                       sumIf(sessions, day > newest - 30) < sumIf(sessions, day <= newest - 30 AND day > newest - 60),
+                         concat('▼ ', toString(sumIf(sessions, day > newest - 30))),
+                       concat('● ', toString(sumIf(sessions, day > newest - 30)))) AS `Last 30 days`,
+               {date_sql('max(day)')} AS `Last active`
+        FROM n360.v_cortex_user WHERE {w} GROUP BY name ORDER BY `#`""", 0, 8, 12, 12,
+        describe('Every Netomian ranked by Cortex sessions in the range (3 months by default), with production edits, '
+                 'customers and VAs worked on. Last 30 days: their sessions in the newest 30 days, ▲ more than the 30 before, '
+                 '▼ fewer. Click a name to see only them. ' + WHO_NOTE, 'n360.v_cortex_user', 'Netomian, Customer',
+                 'dashboard time range; last 30 days to the newest day read'),
+        field=field_config([gauge_cell('Sessions', None, 'lavender'), width('#', 45), width('Netomian', 150), width('Sessions', 190),
+                            override('Last 30 days', ('mappings', [
+                                {'type': 'regex', 'options': {'pattern': '^▲.*', 'result': {'color': COLOUR['green'], 'index': 0}}},
+                                {'type': 'regex', 'options': {'pattern': '^▼.*', 'result': {'color': COLOUR['down'], 'index': 1}}}]),
+                                     ('custom.cellOptions', {'type': 'color-text'})),
+                            with_links('Netomian', {'title': 'Only this Netomian', 'url': '/d/n360-cortex?var-netomian=${__value.raw}&${__url_time_range}'})]),
+        options={'cellHeight': 'md'}, may_be_empty='no per-person Cortex data'))
+    p.append(panel(8, 'Running leaderboard', 'timeseries', f"""
+        SELECT toDateTime(day) AS time, name AS Netomian,
+               sum(sum(sessions)) OVER (PARTITION BY name ORDER BY day ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS Sessions
+        FROM n360.v_cortex_user WHERE {w} GROUP BY day, name ORDER BY time""", 12, 8, 12, 12,
+        describe('Each Netomian\'s Cortex sessions added up day by day from the start of the range: the race. Where two '
+                 'lines cross, the lead changed hands. Hover for every Netomian that day, highest first. ' + WHO_NOTE,
+                 'n360.v_cortex_user', 'Netomian, Customer', 'dashboard time range'),
+        fmt='timeseries', field=field_config(decimals=0, min=0, displayName='${__field.labels.Netomian}',
+                                             color={'mode': 'palette-classic-by-name'},
+                                             custom={'drawStyle': 'line', 'lineWidth': 2, 'lineInterpolation': 'stepAfter',
+                                                     'fillOpacity': 0, 'showPoints': 'never'}),
+        options={'legend': {'displayMode': 'table', 'placement': 'right', 'showLegend': True, 'calcs': ['lastNotNull'],
+                            'sortBy': 'Last *', 'sortDesc': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'desc'}}, may_be_empty='no per-person Cortex data'))
+    p[-1]['transformations'] = [{'id': 'prepareTimeSeries', 'options': {'format': 'multi'}}]
+    p.append(panel(9, 'Sessions per week, by Netomian', 'timeseries', f"""
+        SELECT toDateTime(toMonday(day)) AS time, name AS Netomian, sum(sessions) AS Sessions
+        FROM n360.v_cortex_user WHERE {w} GROUP BY time, name ORDER BY time""", 0, 20, 12, 9,
+        describe('Cortex sessions per week, stacked by Netomian: who carried each week. Hover for the week. ' + WHO_NOTE,
+                 'n360.v_cortex_user', 'Netomian, Customer', 'dashboard time range, weeks from Monday'),
+        fmt='timeseries', field=field_config(decimals=0, min=0, displayName='${__field.labels.Netomian}',
+                                             color={'mode': 'palette-classic-by-name'},
+                                             custom={'drawStyle': 'bars', 'fillOpacity': 85, 'lineWidth': 0, 'barWidthFactor': 0.8,
+                                                     'stacking': {'mode': 'normal', 'group': 'A'}}),
+        options={'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'desc'}}, may_be_empty='no per-person Cortex data'))
+    p[-1]['transformations'] = [{'id': 'prepareTimeSeries', 'options': {'format': 'multi'}}]
+    p.append(cortex_weekly_split(10, 12, 20, 12, 9))
+    p.append(panel(11, 'Who works where', 'table', f"""
+        SELECT name AS Netomian, a.display_name AS Customer, sum(c.sessions) AS Sessions, sum(c.production_edits) AS `Production edits`,
+               {date_sql('max(c.day)')} AS `Last active`, c.account AS account
+        FROM n360.v_cortex_user AS c INNER JOIN n360.account AS a ON a.account = c.account
+        WHERE c.who = 'Netomi' AND ifNull(c.name, '') IN (${{netomian:singlequote}}) AND c.{ACCT} AND $__dateFilter(c.day)
+        GROUP BY name, a.display_name, c.account ORDER BY Netomian, Sessions DESC""", 0, 29, 12, 10,
+        describe('Each Netomian\'s Cortex work per customer in the range. Click a customer for its adoption page. ' + WHO_NOTE,
+                 'n360.v_cortex_user', 'Netomian, Customer', 'dashboard time range'),
+        field=field_config([hidden('account'), gauge_cell('Sessions', None, 'lavender'), width('Netomian', 140), width('Sessions', 170),
+                            with_links('Customer', drill(ADOPT_CUSTOMER[0], 'account', 'account', 'Open this customer\'s adoption')),
+                            with_links('Netomian', {'title': 'Only this Netomian', 'url': '/d/n360-cortex?var-netomian=${__value.raw}&${__url_time_range}'})]),
+        options={'cellHeight': 'sm'}, may_be_empty='no per-person Cortex data'))
+    p.append(cortex_split_by_customer(12, 12, 29, 12, 10))
+    return dashboard('n360-cortex', 'N360 · Cortex by Netomians', p, [var_netomian(), var_account()],
+                     [back_link(('n360-adoption', 'Adoption')), back_link()])
 
 
 def requests():
@@ -3043,7 +3213,7 @@ def risk_model_dashboard():
 
 
 DASHBOARDS = [overview, contracts, customer, health, risk, risk_model_dashboard, contract_line, va, forecast, anomalies, containment, pipeline,
-              adoption, requests, adoption_customer, adoption_va]
+              adoption, requests, adoption_customer, adoption_va, cortex_netomi]
 
 
 def main():

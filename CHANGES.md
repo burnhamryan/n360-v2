@@ -1,3 +1,18 @@
+# CHANGES · 27 Nov 2026 · Cortex by Netomians; Netomi against the customer; next step order
+
+- **Next step order decided:** V8 / V9 → Cortex → Recipes → Testing → Calibration → Explorer (docs/08).
+- **Cortex by Netomians** (`n360-cortex`, new): a leaderboard over the last 3 months (rank, sessions, production
+  edits, customers, VAs, last 30 days ▲▼), a running leaderboard (sessions added up day by day: lines cross where
+  the lead changed hands), sessions per week by Netomian, Netomi against the customer per week and per customer, and
+  who works where. Linked from Adoption.
+- **Netomi against the customer** on Adoption and Customer adoption: Cortex sessions split by who ran them, and
+  playbook executions split by who built the playbook.
+- **New table `cortex_user_day`** (Cortex per person; Netomi users by email, customer users counted, never named) and
+  view `v_cortex_user`. The export does not write it yet: spec in docs/25. Synthetic: eight invented Netomians, one
+  rising, one fading; the account totals, per-person rows and VA 30-day figures agree (tested).
+
+Tested: `code/ci.sh chdb` and `server`; screenshots of every dashboard in `docs/screenshots`.
+
 # CHANGES · 27 Nov 2026 · Adoption: Portfolio → Customer → VA
 
 **Three linked Adoption pages on the detail tables** (`va_adoption`, `playbook_window`, `feature_window`,

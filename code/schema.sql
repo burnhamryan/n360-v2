@@ -353,8 +353,8 @@ SELECT
     10000 AS adoption_long_playbook_chars,  -- PROPOSED: a playbook this long or longer is flagged as long (the 10000+ band)
     25  AS adoption_handoff_high_pct,     -- PROPOSED: handoffs from playbooks over this share of their conversations: look at it
     'netomi.com' AS adoption_staff_domain, -- playbook_window.creator_domain: this domain = built by Netomi, any other = the customer
-    -- PROPOSED: the order to move a customer through the features (next step = the first one not adopted)
-    ['V8 / V9', 'Test / playbook validation', 'Calibration', 'Action-oriented recipes', 'Explorer', 'Cortex'] AS adoption_next_order;
+    -- the order to move a customer through the features (next step = the first one not adopted): decided 27 Nov 2026
+    ['V8 / V9', 'Cortex', 'Action-oriented recipes', 'Test / playbook validation', 'Calibration', 'Explorer'] AS adoption_next_order;
 
 
 CREATE OR REPLACE VIEW n360.v_line_status AS
@@ -700,6 +700,21 @@ CREATE TABLE IF NOT EXISTS n360.playbook_window            -- each production pl
 )
 ENGINE = MergeTree ORDER BY (account, bot_id, playbook);
 
+CREATE TABLE IF NOT EXISTS n360.cortex_user_day            -- Cortex sessions per person per VA per day (27 Nov 2026, docs/25)
+(                                                          -- the Netomi leaderboard and Netomi-vs-customer comparisons
+    day               Date,
+    account           LowCardinality(String),
+    bot_id            Nullable(UUID),                      -- NULL = the session was not on one VA
+    user_type         Enum8('customer' = 1, 'staff' = 2),  -- staff = a Netomi user (settings.adoption_staff_domain)
+    user              Nullable(String),                    -- the Netomi user's email; NULL for every customer user:
+                                                           -- customer users are counted, never named
+    sessions          UInt32,
+    edits             Nullable(UInt32),                    -- playbook versions saved; NULL = not read
+    production_edits  Nullable(UInt32),                    -- of those, saved to a production playbook; NULL = not read
+    run_id            UUID
+)
+ENGINE = MergeTree PARTITION BY toYYYYMM(day) ORDER BY (account, day);
+
 CREATE TABLE IF NOT EXISTS n360.ps_ticket                  -- support tickets; area and ask tagged by hand
 (
     ticket_id     String,
@@ -876,6 +891,17 @@ SELECT p.account AS account, p.bot_id AS bot_id, p.va AS va, p.task_id AS task_i
        row_number() OVER (PARTITION BY p.bot_id ORDER BY ifNull(p.executions, 0) DESC, p.playbook) AS rank_on_va,
        indexOf(['<200 (short)', '200-999', '1000-2999', '3000-5999', '6000-9999', '10000+'], p.length_band) AS band_order
 FROM n360.playbook_window AS p;
+
+CREATE OR REPLACE VIEW n360.v_cortex_user AS
+-- n360.cortex_user_day with who it was (Netomi or the customer) and, for Netomi users only, a display name made from the
+-- email ("avery.kim@netomi.com" -> "Avery Kim"). Customer users have no name here, by design.
+SELECT c.day AS day, c.account AS account, c.bot_id AS bot_id, c.user_type AS user_type,
+       if(c.user_type = 'staff', 'Netomi', 'Customer') AS who, c.user AS user,
+       if(c.user_type = 'staff' AND c.user IS NOT NULL,
+          arrayStringConcat(arrayMap(w -> concat(upper(substring(w, 1, 1)), substring(w, 2)),
+                                     splitByChar('.', splitByChar('@', assumeNotNull(c.user))[1])), ' '), NULL) AS name,
+       c.sessions AS sessions, c.edits AS edits, c.production_edits AS production_edits
+FROM n360.cortex_user_day AS c;
 
 CREATE OR REPLACE VIEW n360.v_top_asks AS
 -- An ask wanted by several customers (spec 10 "top asks"). PROPOSED: "several" = 2 or more customers.

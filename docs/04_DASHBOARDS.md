@@ -128,8 +128,8 @@ definitions. Each state is decided once, in the views `v_va_feature_adoption` (p
 
 Hover a feature's column heading for what adopted means. The evidence behind every cell (counts, dates, what the
 source cannot tell) is in an "evidence" table on the Customer and VA levels. A customer has a feature when any VA
-has it, except V8 / V9 (every VA). **Next step** = the first feature not adopted, in the proposed order
-`n360.settings adoption_next_order` (V8 / V9, Testing, Calibration, Recipes, Explorer, Cortex). The Cortex caveat
+has it, except V8 / V9 (every VA). **Next step** = the first feature not adopted, in the agreed order
+`n360.settings adoption_next_order` (V8 / V9, Cortex, Recipes, then Testing, Calibration, Explorer). The Cortex caveat
 is on every Cortex cell: it has no user id, so who ran a session, and whether it changed a production playbook, is
 not known yet. The Adoption tables hold the newest read only: their panels show the 31-day window to the
 data-through day, whatever the time range; the history panels (Cortex per day, engine per week) follow it.
@@ -169,6 +169,25 @@ Sentence (engine, features of 6, playbooks live and idle, executions); tiles (ex
 off, playbooks that ran of live); **six feature cards** in their state colour; the evidence table; executions by
 playbook and length against traffic; every playbook on the VA with its task id; V8 playbooks and legacy intents
 week by week; engine week by week; configuration. Links back to Customer adoption, the VA page and Adoption.
+
+**Netomi against the customer** (27 Nov 2026): the Adoption page ends with Cortex sessions per customer split
+Netomi / customer, and playbook executions split by who built the playbook; Customer adoption ends with the same two,
+per week and per VA. Netomi = Netomi's email domain (`adoption_staff_domain`); customer users are counted, never named.
+
+### 9d. Cortex by Netomians · `n360-cortex` (variables `netomian`, `account`; linked from Adoption)
+
+**Question: who on the Netomi team builds in Cortex, for whom, and how is that moving?** Range: 3 months by default.
+
+| Row | Panel | Source |
+|---|---|---|
+| 1 | Sentence: Netomians in Cortex, sessions, customers, the leader, Netomi's share of all Cortex sessions; freshness stamp | `v_cortex_user` |
+| 2 | Tiles: Netomians in Cortex; sessions by Netomians; Netomi's share of Cortex; production edits by Netomians | `v_cortex_user` |
+| 3 | **Leaderboard** (rank, sessions as a bar, production edits, customers, VAs, last 30 days ▲▼, last active; click a name to focus on them) · **Running leaderboard** (each Netomian's sessions added up day by day: where lines cross, the lead changed hands) | `v_cortex_user` |
+| 4 | Sessions per week, stacked by Netomian · Cortex sessions per week, Netomi and the customer | `v_cortex_user` |
+| 5 | Who works where (Netomian × customer; click a customer → Customer adoption) · Cortex sessions per customer, Netomi and the customer | `v_cortex_user` |
+
+Netomians are told apart by Grafana's classic palette (identity, not status: no status colour is used). Needs
+`cortex_user_day` from the export (docs/25); until then every panel reads "Not reported yet".
 
 ## 10. Requests · `n360-requests` (Phase 2; BUILT on a proposed design, B22/B23)
 "Several customers" = 2 or more (proposed, in `v_top_asks`).

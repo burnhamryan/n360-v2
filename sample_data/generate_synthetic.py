@@ -111,7 +111,7 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
     T = {t: [] for t in ['account', 'va', 'contract_line', 'line_va', 'pool', 'rule', 'source', 'va_day',
                          'line_day', 'line_day_billable', 'forecast', 'line_totals_history',
                          'va_config_snapshot', 'playbook_day', 'cortex_day', 'explorer_day', 'ps_ticket',
-                         'feature_window', 'va_adoption', 'playbook_window']}
+                         'feature_window', 'va_adoption', 'playbook_window', 'cortex_user_day']}
 
     # ── rules
     rules = {
@@ -387,15 +387,10 @@ def phase2(T, va_daily, last, anchor, run_id):
             for ut, hi_s, hi_q in (('customer', 6, 15), ('staff', 4, 10)):
                 r = rnd('use', acct, ut, d)
                 weekday = d.weekday() < 5
-                if ut == 'customer' and d >= CORTEX_FROM:
-                    # Cortex has no user id (27 Nov 2026): one row per account and day, 'unknown', 0 on a day read with none
-                    rc = rnd('cortex', acct, d)
-                    quiet = acct in CORTEX_QUIET
-                    T['cortex_day'].append(dict(day=d.isoformat(), account=acct, user_type='unknown',
-                                                authoring_sessions=0 if quiet or not weekday else rc.randint(0, 5), run_id=run_id))
                 T['explorer_day'].append(dict(day=d.isoformat(), account=acct, user_type=ut,
                                               questions=r.randint(0, hi_q) if weekday else r.randint(0, 2), run_id=run_id))
-    adoption(T, va_daily, last, run_id, rnd)
+    cortex = cortex_people(T, va_daily, last, run_id, rnd)
+    adoption(T, va_daily, last, run_id, rnd, cortex)
     asks = [('Export conversations to CSV', 'Analytics', ['Atlas Streaming', 'Juniper Bank', 'Northwind Outfitters']),
             ('SMS opt-out keywords', 'Channels', ['Bluebird Air', 'Harbor Telecom']),
             ('Playbook version history', 'Playbooks', ['Pinecrest Retail']),
@@ -431,7 +426,72 @@ def band(chars):
     return next((b for lim, b in BANDS if chars < lim), '10000+')
 
 
-def adoption(T, va_daily, last, run_id, rnd):
+# Netomi users of Cortex (invented): (email name, sessions per weekday on a VA, arc over the 15 weeks)
+NETOMIANS = [('avery.kim', 1.5, 'steady'), ('jordan.patel', 1.3, 'rising'), ('sam.okafor', 1.0, 'steady'),
+             ('riley.chen', 1.2, 'fading'), ('morgan.diaz', 0.7, 'steady'), ('casey.novak', 0.6, 'rising'),
+             ('jamie.lund', 0.4, 'steady'), ('drew.haddad', 0.35, 'fading')]
+CUSTOMER_CORTEX = {'Atlas Help': 2.6, 'Harbor Chat': 1.2, 'Harbor IVR': 0.8, 'Pinecrest Chat': 0.7, 'Juniper Chat': 0.4,
+                   'Bluebird Web': 0.3, 'Kestrel Chat': 0.3}
+
+
+def poisson(r, lam):
+    l, k, p = math.exp(-lam), 0, 1.0
+    while True:
+        p *= r.random()
+        if p <= l:
+            return k
+        k += 1
+
+
+def cortex_people(T, va_daily, last, run_id, rnd):
+    """Cortex per person (docs/25, 27 Nov 2026): Netomi users by email, customer users counted, never named. Planted:
+    Jordan Patel and Casey Novak rising (the running leaderboard changes hands), Riley Chen fading; Atlas Help mostly
+    the customer's own users; Willow, Lakeside, Cedar and Summit quiet; Maple Voice not read. cortex_day (the account
+    total the export also writes, user_type unknown, since CORTEX_FROM) and va_adoption's 30-day sessions are sums of
+    these rows, so the three agree. Returns {VA: (sessions in the 30 days to `last`, last day used)}."""
+    start = last - dt.timedelta(104)
+    days = [start + dt.timedelta(n) for n in range(105)]
+    per_va, per_acct_day = {}, {}
+    vas = [v for v in sorted(va_daily) if v not in ('Lakeside Email', 'Cedar Ops Chat', 'Maple Voice')
+           and va_daily[v][0] not in CORTEX_QUIET]
+    for i, vname in enumerate(vas):
+        acct = va_daily[vname][0]
+        bot = uid('bot/' + vname)
+        people = [NETOMIANS[i % len(NETOMIANS)], NETOMIANS[(i + 3) % len(NETOMIANS)]]
+        for d in days:
+            if d.weekday() >= 5:
+                continue
+            t = (d - start).days / 104
+            rows = []
+            for name, rate, arc in people:
+                trend = {'steady': 1.0, 'rising': 0.25 + 1.5 * t, 'fading': 1.7 - 1.5 * t}[arc]
+                n = poisson(rnd('cx', vname, name, d), rate * trend * 0.8)
+                if n:
+                    rows.append(('staff', f'{name}@netomi.com', n))
+            n = poisson(rnd('cxc', vname, d), CUSTOMER_CORTEX.get(vname, 0.15))
+            if n:
+                rows.append(('customer', None, n))
+            for ut, user, n in rows:
+                r = rnd('cxe', vname, user, d)
+                edits = int(round(n * r.uniform(0.4, 0.9)))
+                T['cortex_user_day'].append(dict(day=d.isoformat(), account=acct, bot_id=bot, user_type=ut, user=user,
+                                                 sessions=n, edits=edits, production_edits=int(round(edits * r.uniform(0.2, 0.6))),
+                                                 run_id=run_id))
+                per_acct_day[(acct, d)] = per_acct_day.get((acct, d), 0) + n
+                if d > last - dt.timedelta(30):
+                    s30, ld = per_va.get(vname, (0, None))
+                    per_va[vname] = (s30 + n, max(ld or d, d))
+    for acct in sorted({a for a, *_ in va_daily.values()}):
+        d = CORTEX_FROM
+        while d <= last:
+            # the account total, one row per account and day, 'unknown' (the export's cortex_day): 0 on a day read with none
+            T['cortex_day'].append(dict(day=d.isoformat(), account=acct, user_type='unknown',
+                                        authoring_sessions=per_acct_day.get((acct, d), 0), run_id=run_id))
+            d += dt.timedelta(1)
+    return per_va
+
+
+def adoption(T, va_daily, last, run_id, rnd, cortex):
     """The Adoption detail tables as the export writes them since 27 Nov 2026 (docs/25): newest read only.
     Planted (docs/04 section 9):
       Harbor Chat       every one of the six features adopted (the model customer)
@@ -476,7 +536,6 @@ def adoption(T, va_daily, last, run_id, rnd):
         last_exec = max([w_end - dt.timedelta(r.randint(0, 2))] if execs else [None], key=lambda x: x or dt.date.min)
         full = vname == 'Harbor Chat'
         not_read = vname == 'Maple Voice'
-        quiet = acct in CORTEX_QUIET or vname == 'Summit NCW'
         cal_runs = 0 if not current or vname == 'Willow Chat' else (r.randint(2, 6) if full else r.randint(0, 3))
         cal_last = None if not cal_runs else (w_end - dt.timedelta(50 if vname == 'Pinecrest Chat' else r.randint(3, 25)))
         tests = 0 if not current or vname == 'Willow Chat' else (r.randint(20, 80) if full or vname == 'Bluebird Web' else r.randint(0, 15))
@@ -485,7 +544,8 @@ def adoption(T, va_daily, last, run_id, rnd):
         rec_prod = 0 if vname == 'Northwind Chat' else (recipes if full else r.randint(0, recipes))
         actions = 0 if not rec_prod else r.randint(1, rec_prod * 3)
         mcp = ['crm', 'orders', 'ticketing', 'knowledge base']
-        cortex = None if not_read else (0 if quiet or not current else r.randint(1, 30) + (20 if full else 0))
+        cx = cortex.get(vname, (0, None))
+        cortex_n = None if not_read else cx[0]
         explorer = None if not_read else (0 if vname in ('Summit NCW', 'Willow Chat') or not current else r.randint(1, 40))
         T['va_adoption'].append(dict(
             as_of=w_end.isoformat(), account=acct, bot_id=bot, va=vname, region='US',
@@ -504,13 +564,13 @@ def adoption(T, va_daily, last, run_id, rnd):
             mcp_names=', '.join(r.sample(mcp, 2)) if current else '',
             supervisory_live=r.randint(0, 3) if current else 0, supervisory_default=r.randint(0, 2),
             supervisory_names='tone, escalation' if current else '',
-            cortex_sessions_30d=cortex, cortex_last=None if not cortex else (w_end - dt.timedelta(r.randint(0, 6))).isoformat(),
+            cortex_sessions_30d=cortex_n, cortex_last=cx[1] and cx[1].isoformat() if cortex_n else None,
             explorer_questions_30d=explorer, explorer_users_30d=None if explorer is None else (r.randint(1, 6) if explorer else 0),
             explorer_last=None if not explorer else (w_end - dt.timedelta(r.randint(0, 10))).isoformat(), run_id=run_id))
         for feature, amount, unit, ut, last_day in (
                 ('V8 playbooks', execs if current else None, 'executions', 'customer', last_exec),
                 ('Analytics assistant', explorer, 'questions', 'customer', None),
-                ('Authoring tool', cortex, 'sessions', 'unknown', None)):
+                ('Authoring tool', cortex_n, 'sessions', 'unknown', None)):
             T['feature_window'].append(dict(
                 as_of=w_end.isoformat(), account=acct, bot_id=bot, feature=feature, user_type=ut,
                 window_start=w_start.isoformat(), window_end=w_end.isoformat(), amount=amount, unit=unit,

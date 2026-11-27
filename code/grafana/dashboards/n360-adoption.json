@@ -43,7 +43,7 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Customers using all six features (the v1.1 definitions), the conversations that ran at least one playbook and the share handed off to an agent from within one, and the feature most customers should move to next (the first not adopted, in the proposed order n360.settings adoption_next_order). Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_customer_adoption  \n**Filter:** Customer  \n**Window:** the 31 days to the data-through day",
+      "description": "Customers using all six features (the v1.1 definitions), the conversations that ran at least one playbook and the share handed off to an agent from within one, and the feature most customers should move to next (the first not adopted, in the agreed order n360.settings adoption_next_order: V8 / V9, Cortex, Recipes, then the rest). Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_customer_adoption  \n**Filter:** Customer  \n**Window:** the 31 days to the data-through day",
       "gridPos": {
         "x": 0,
         "y": 0,
@@ -408,7 +408,7 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Each customer against the six features of the v1.1 Adoption view. A cell is green when adopted, amber when partly (for example tests run with validation off, or calibration lapsed), light grey when not yet, grey when the source has nothing (\"Not reported yet\", never \"not yet\"). Hover a column heading for what adopted means. Adopted, of 6 is drawn as a bar. Next step: the first feature not adopted, in the proposed order (n360.settings adoption_next_order). Click a customer for its VAs and playbooks. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_customer_feature_adoption, n360.v_customer_adoption  \n**Filter:** Customer  \n**Window:** the newest read",
+      "description": "Each customer against the six features of the v1.1 Adoption view. A cell is green when adopted, amber when partly (for example tests run with validation off, or calibration lapsed), light grey when not yet, grey when the source has nothing (\"Not reported yet\", never \"not yet\"). Hover a column heading for what adopted means. Adopted, of 6 is drawn as a bar. Next step: the first feature not adopted, in the agreed order (n360.settings adoption_next_order). Click a customer for its VAs and playbooks. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_customer_feature_adoption, n360.v_customer_adoption  \n**Filter:** Customer  \n**Window:** the newest read",
       "gridPos": {
         "x": 0,
         "y": 8,
@@ -1074,7 +1074,7 @@
             "properties": [
               {
                 "id": "description",
-                "value": "The first of the six not adopted, in the proposed order V8 / V9 \u2192 Testing \u2192 Calibration \u2192 Recipes \u2192 Explorer \u2192 Cortex."
+                "value": "The first of the six not adopted, in the agreed order V8 / V9 \u2192 Cortex \u2192 Recipes \u2192 Testing \u2192 Calibration \u2192 Explorer."
               }
             ]
           },
@@ -1270,7 +1270,7 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Customers grouped by the next feature to move them to (the first of the six not adopted, in the proposed order n360.settings adoption_next_order), with the playbook traffic behind them: the biggest group with the most traffic is the campaign to run first. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_customer_adoption  \n**Filter:** Customer  \n**Window:** the newest read",
+      "description": "Customers grouped by the next feature to move them to (the first of the six not adopted, in the agreed order n360.settings adoption_next_order), with the playbook traffic behind them: the biggest group with the most traffic is the campaign to run first. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_customer_adoption  \n**Filter:** Customer  \n**Window:** the newest read",
       "gridPos": {
         "x": 12,
         "y": 26,
@@ -2904,6 +2904,202 @@
       "options": {
         "cellHeight": "sm"
       }
+    },
+    {
+      "id": 21,
+      "title": "Cortex sessions: Netomi and the customer",
+      "type": "barchart",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Cortex sessions per customer, split by who ran them: Netomi (blue-grey) or the customer's own users (green). Hover for the counts. A customer whose bar is all Netomi depends on Netomi to change its playbooks. Netomi = a Cortex user on Netomi's domain, or a playbook created from it (n360.settings adoption_staff_domain); customer users are counted, never named.\n\n**Source:** n360.v_cortex_user  \n**Filter:** Customer  \n**Window:** dashboard time range",
+      "gridPos": {
+        "x": 0,
+        "y": 93,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT a.display_name AS Customer, sumIf(c.sessions, c.who = 'Netomi') AS Netomi,\n               sumIf(c.sessions, c.who = 'Customer') AS `The customer`\n        FROM n360.v_cortex_user AS c INNER JOIN n360.account AS a ON a.account = c.account\n        WHERE c.account IN (${account:singlequote}) AND $__dateFilter(c.day) GROUP BY Customer ORDER BY sum(c.sessions) DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "fillOpacity": 90,
+            "lineWidth": 0,
+            "axisGridShow": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Netomi"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#7F9CC0"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "The customer"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#76C893"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "Customer",
+        "orientation": "horizontal",
+        "stacking": "normal",
+        "showValue": "auto",
+        "barWidth": 0.8,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "n360MayBeEmpty": "no per-person Cortex data"
+    },
+    {
+      "id": 22,
+      "title": "Executions: Netomi-built and customer-built playbooks",
+      "type": "barchart",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Playbook executions in 31 days, split by who created the playbook (creator domain): Netomi (blue-grey) or the customer (green), as a share. Hover for the counts. Netomi = a Cortex user on Netomi's domain, or a playbook created from it (n360.settings adoption_staff_domain); customer users are counted, never named. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_playbook  \n**Filter:** Customer  \n**Window:** the newest read",
+      "gridPos": {
+        "x": 12,
+        "y": 93,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT a.display_name AS Customer, sumIf(pb.executions, pb.built_by = 'Netomi') AS `Built by Netomi`,\n               sumIf(pb.executions, pb.built_by = 'Customer') AS `Built by the customer`,\n               sumIf(pb.executions, pb.built_by IS NULL) AS `Builder not reported`\n        FROM n360.v_playbook AS pb INNER JOIN n360.account AS a ON a.account = pb.account\n        WHERE pb.account IN (${account:singlequote}) GROUP BY Customer ORDER BY sum(pb.executions) DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "decimals": 0,
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "fillOpacity": 90,
+            "lineWidth": 0,
+            "axisGridShow": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Built by Netomi"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#7F9CC0"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Built by the customer"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#76C893"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Builder not reported"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#B4B4B4"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "Customer",
+        "orientation": "horizontal",
+        "stacking": "percent",
+        "showValue": "never",
+        "barWidth": 0.8,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "n360MayBeEmpty": "no playbook read"
     }
   ],
   "links": [
@@ -2911,6 +3107,17 @@
       "type": "link",
       "title": "Back to Overview",
       "url": "/d/n360-overview",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "type": "link",
+      "title": "Cortex by Netomians",
+      "url": "/d/n360-cortex",
       "icon": "dashboard",
       "keepTime": true,
       "includeVars": false,
