@@ -25,7 +25,7 @@ SWAP = ['account', 'va', 'contract_line', 'line_va', 'pool', 'rule', 'source',
 APPEND = ['line_totals_history']
 # Phase 2 (proposed): loaded and swapped only when the export carries the file; otherwise the live table is left
 # as it is, so a night without Phase 2 files loads exactly as before.
-OPTIONAL = ['va_config_snapshot', 'playbook_day', 'cortex_day', 'explorer_day', 'ps_ticket']
+OPTIONAL = ['va_config_snapshot', 'playbook_day', 'cortex_day', 'explorer_day', 'ps_ticket', 'feature_window', 'va_adoption', 'playbook_window']
 
 
 class CH:
