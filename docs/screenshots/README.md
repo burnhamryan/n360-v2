@@ -11,3 +11,7 @@ Salesforce records come from `sample_data/generate_salesforce.py` through the fa
 ratings are the ones `code/ci.sh` records.
 
 `18-risk-model.png`: the Risk model dashboard (`docs/21_RISK_MODEL.md`) on the same synthetic data, with Willow Energy chosen. The score is the expert prior (too few synthetic outcomes to train), and the backtest panels are empty until there is enough history.
+
+`07-adoption.png`, `19-adoption-customer.png` (Harbor Telecom) and `20-adoption-va.png` (Pinecrest Chat): the three
+Adoption pages rebuilt on 27 Nov 2026 (docs/04 section 9), on the same synthetic data. Pinecrest Chat shows a
+lapsed calibration (amber); Harbor Telecom has every feature adopted.

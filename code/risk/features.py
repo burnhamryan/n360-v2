@@ -111,11 +111,12 @@ LEGACY = """
     FROM n360.va_day AS d INNER JOIN cfg AS c ON c.bot_id = d.bot_id
     WHERE d.day > {D} - 30 AND d.day <= {D} GROUP BY account"""
 
+# Cortex rows are user_type unknown since 27 Nov 2026 (the source has no user id): every row but staff counts.
 FEATURES_USED = """
     SELECT account, toFloat64(sum(u)) AS features_used FROM (
         SELECT account, toUInt8(sum(executions) > 0) AS u FROM n360.playbook_day WHERE day > {D} - 30 AND day <= {D} GROUP BY account
         UNION ALL SELECT account, toUInt8(sum(authoring_sessions) > 0) FROM n360.cortex_day
-            WHERE user_type = 'customer' AND day > {D} - 30 AND day <= {D} GROUP BY account
+            WHERE user_type != 'staff' AND day > {D} - 30 AND day <= {D} GROUP BY account
         UNION ALL SELECT account, toUInt8(sum(questions) > 0) FROM n360.explorer_day
             WHERE user_type = 'customer' AND day > {D} - 30 AND day <= {D} GROUP BY account
         UNION ALL SELECT account, toUInt8(sum(mcp) > 0) FROM (SELECT account, bot_id, argMax(mcp_servers_live, snapshot_date) AS mcp
@@ -129,7 +130,7 @@ BUILD = """
                        100 * (sumIf(n, day > {D} - 30) - sumIf(n, day > {D} - 60 AND day <= {D} - 30))
                        / sumIf(n, day > {D} - 60 AND day <= {D} - 30)) AS build_change_pct FROM (
         SELECT account, day, ifNull(authoring_sessions, 0) AS n FROM n360.cortex_day
-            WHERE user_type = 'customer' AND day > {D} - 60 AND day <= {D}
+            WHERE user_type != 'staff' AND day > {D} - 60 AND day <= {D}
         UNION ALL SELECT account, day, ifNull(questions, 0) FROM n360.explorer_day
             WHERE user_type = 'customer' AND day > {D} - 60 AND day <= {D})
     GROUP BY account"""

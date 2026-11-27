@@ -347,7 +347,14 @@ SELECT
     3   AS risk_open_tickets,        -- this many open tickets or more: watch
     50  AS risk_building_drop_pct,   -- customer authoring + assistant use down this %: watch
     30  AS risk_pulse_valid_days,    -- a CSM's rating counts for this many days, then shows as expired
-    0.9 AS risk_downsell_ratio;      -- PROPOSED: a renewal won at under this share of the customer's previous won renewal is a downsell
+    0.9 AS risk_downsell_ratio,      -- PROPOSED: a renewal won at under this share of the customer's previous won renewal is a downsell
+    -- adoption (27 Nov 2026, docs/04 section 9): the six features' definitions come from the v1.1 page; these settle the edges
+    31  AS adoption_calibration_days,     -- "at least monthly": a calibration run within this many days of the window end
+    10000 AS adoption_long_playbook_chars,  -- PROPOSED: a playbook this long or longer is flagged as long (the 10000+ band)
+    25  AS adoption_handoff_high_pct,     -- PROPOSED: handoffs from playbooks over this share of their conversations: look at it
+    'netomi.com' AS adoption_staff_domain, -- playbook_window.creator_domain: this domain = built by Netomi, any other = the customer
+    -- PROPOSED: the order to move a customer through the features (next step = the first one not adopted)
+    ['V8 / V9', 'Test / playbook validation', 'Calibration', 'Action-oriented recipes', 'Explorer', 'Cortex'] AS adoption_next_order;
 
 
 CREATE OR REPLACE VIEW n360.v_line_status AS
@@ -728,6 +735,147 @@ SELECT cur.account AS account, cur.bot_id AS bot_id, cur.snapshot_date AS snapsh
        ]) AS changes
 FROM ranked AS cur INNER JOIN ranked AS prev ON prev.bot_id = cur.bot_id AND prev.rn = 2
 WHERE cur.rn = 1 AND length(changes) > 0;
+
+CREATE OR REPLACE VIEW n360.v_va_feature_adoption AS
+-- The six adoption features per VA (the v1.1 Adoption view), one row each, from n360.va_adoption (newest read).
+-- state: adopted | partly | none | not reported. value: the cell's words ("54 recipes"). detail: the tooltip. The
+-- "what adopted means" lines are the v1.1 page's, where the source cannot show it all (Cortex cannot tell who ran a
+-- session, or whether it changed a production playbook) the detail says so. NULL = not read = "not reported", never
+-- "none" (docs/25). Edges decided here, not in dashboards: n360.settings adoption_*.
+WITH (SELECT adoption_calibration_days FROM n360.settings) AS cal_days,
+     (SELECT engine_current_major FROM n360.settings) AS current_major
+SELECT a.account AS account, a.bot_id AS bot_id, a.va AS va, a.region AS region, f.1 AS ord, f.2 AS feature,
+       f.3 AS state, f.4 AS value, f.5 AS detail, f.6 AS metric, f.7 AS unit, f.8 AS means
+FROM n360.va_adoption AS a
+ARRAY JOIN [
+  (1, 'Cortex',
+   multiIf(a.cortex_sessions_30d IS NULL, 'not reported', a.cortex_sessions_30d > 0, 'adopted', 'none'),
+   multiIf(a.cortex_sessions_30d IS NULL, 'Not reported yet', a.cortex_sessions_30d > 0,
+           concat(toString(a.cortex_sessions_30d), if(a.cortex_sessions_30d = 1, ' session', ' sessions')), 'None recorded'),
+   multiIf(a.cortex_sessions_30d IS NULL, concat('Cortex is read for US VAs only· this VA is in ', toString(a.region), ' or was not read.'),
+           concat(toString(a.cortex_sessions_30d), if(a.cortex_sessions_30d = 1, ' Cortex session', ' Cortex sessions'), ' in the 30 days to ', concat(toString(toDayOfMonth(a.window_end)), ' ', formatDateTime(a.window_end, '%b %Y')),
+                  if(a.cortex_last IS NULL, '', concat(' · last ', concat(toString(toDayOfMonth(a.cortex_last)), ' ', formatDateTime(a.cortex_last, '%b %Y')))),
+                  '. Cortex has no user id: whether Netomi or the customer ran a session, and whether it changed a production playbook, is not known yet.')),
+   toFloat64(ifNull(a.cortex_sessions_30d, 0)), 'sessions',
+   'Used to create or edit a production playbook in the last 30 days'),
+  (2, 'Test / playbook validation',
+   multiIf(a.test_runs IS NULL AND a.behavior_validation IS NULL, 'not reported',
+           a.behavior_validation = 'enabled' AND ifNull(a.test_runs, 0) > 0, 'adopted',
+           ifNull(a.test_runs, 0) > 0 OR a.behavior_validation = 'enabled', 'partly', 'none'),
+   multiIf(a.test_runs IS NULL AND a.behavior_validation IS NULL, 'Not reported yet',
+           ifNull(a.test_runs, 0) > 0, concat(toString(a.test_runs), if(a.test_runs = 1, ' run', ' runs'),
+                                              if(a.behavior_validation = 'enabled', '', ', validation off')),
+           a.behavior_validation = 'enabled', 'On, no runs', 'None recorded'),
+   concat('Behavior Validation: ', ifNull(a.behavior_validation, 'not set'), '. ',
+          toString(ifNull(a.test_runs, 0)), if(a.test_runs = 1, ' test run in ', ' test runs in '), toString(ifNull(a.test_suites, 0)),
+          if(a.test_suites = 1, ' suite, ', ' suites, '),
+          toString(ifNull(a.test_conversations, 0)), ' validation conversations over ', toString(ifNull(a.test_days, 0)), if(a.test_days = 1, ' day', ' days'),
+          if(a.test_last IS NULL, '', concat(' · last ', concat(toString(toDayOfMonth(a.test_last)), ' ', formatDateTime(a.test_last, '%b %Y')))), '.'),
+   toFloat64(ifNull(a.test_runs, 0)), 'runs', 'Run on every playbook version before promotion'),
+  (3, 'Calibration',
+   multiIf(a.calibration_runs IS NULL, 'not reported',
+           a.calibration_last IS NOT NULL AND a.calibration_last > a.window_end - cal_days, 'adopted',
+           a.calibration_last IS NOT NULL OR a.calibration_runs > 0, 'partly', 'none'),
+   multiIf(a.calibration_runs IS NULL, 'Not reported yet',
+           a.calibration_last IS NOT NULL AND a.calibration_last > a.window_end - cal_days,
+             concat(toString(a.calibration_runs), if(a.calibration_runs = 1, ' run', ' runs')),
+           a.calibration_last IS NOT NULL, concat('Lapsed: last ', toString(toDayOfMonth(a.calibration_last)), ' ', formatDateTime(a.calibration_last, '%b')),
+           'None recorded'),
+   concat(toString(ifNull(a.calibration_runs, 0)), if(a.calibration_runs = 1, ' calibration run (', ' calibration runs ('), toString(ifNull(a.calibration_completed, 0)), ' completed)',
+          if(a.calibration_last IS NULL, ' · never run', concat(' · last ', concat(toString(toDayOfMonth(a.calibration_last)), ' ', formatDateTime(a.calibration_last, '%b %Y')))),
+          '. Adopted = a run in the last ', toString(cal_days), ' days (at least monthly).'),
+   toFloat64(ifNull(a.calibration_runs, 0)), 'runs', 'At least monthly on Tier 1 and Tier 2 use cases'),
+  (4, 'V8 / V9',
+   multiIf(a.engine_major IS NULL, 'not reported', a.engine_major >= current_major, 'adopted', 'none'),
+   multiIf(a.engine_major IS NULL, 'Not reported yet', a.engine_major >= current_major, ifNull(a.engine_version, 'V8+'),
+           concat(ifNull(a.engine_version, 'below V8'), ': upgrade')),
+   concat('Engine ', ifNull(a.engine_version, 'not read'), ' · ', toString(ifNull(a.playbooks_live, 0)), ' playbooks live (',
+          toString(ifNull(a.v8_playbooks, 0)), ' count as V8), ', toString(ifNull(a.legacy_intents, 0)), ' legacy intents.'),
+   toFloat64(a.engine_major >= current_major), 'VAs', 'Production VA running on V8 or V9, target 100%'),
+  (5, 'Action-oriented recipes',
+   multiIf(a.recipes IS NULL, 'not reported', ifNull(a.recipes_production, 0) > 0 AND ifNull(a.recipe_actions, 0) > 0, 'adopted',
+           a.recipes > 0, 'partly', 'none'),
+   multiIf(a.recipes IS NULL, 'Not reported yet',
+           ifNull(a.recipes_production, 0) > 0 AND ifNull(a.recipe_actions, 0) > 0,
+             concat(toString(a.recipes_production), ' in production'),
+           a.recipes > 0, concat(toString(a.recipes), ' built, none live'), 'None recorded'),
+   concat(toString(ifNull(a.recipes, 0)), if(a.recipes = 1, ' recipe, ', ' recipes, '), toString(ifNull(a.recipes_production, 0)),
+          ' in production, ', toString(ifNull(a.recipe_actions, 0)),
+          if(a.recipe_actions = 1, ' write action', ' write actions'), ' against customer systems.'),
+   toFloat64(ifNull(a.recipes_production, 0)), 'in production', 'At least one production recipe performs a write against a customer system'),
+  (6, 'Explorer',
+   multiIf(a.explorer_questions_30d IS NULL, 'not reported', a.explorer_questions_30d > 0, 'adopted', 'none'),
+   multiIf(a.explorer_questions_30d IS NULL, 'Not reported yet', a.explorer_questions_30d > 0,
+           concat(toString(a.explorer_questions_30d), if(a.explorer_questions_30d = 1, ' question', ' questions')), 'None recorded'),
+   if(a.explorer_questions_30d IS NULL, 'Explorer was not read for this VA.',
+      concat(toString(a.explorer_questions_30d), ' questions from ', toString(ifNull(a.explorer_users_30d, 0)),
+             ' customer users in the last 30 days', if(a.explorer_last IS NULL, '', concat(' · last ', concat(toString(toDayOfMonth(a.explorer_last)), ' ', formatDateTime(a.explorer_last, '%b %Y')))),
+             '. Production and Staging, Netomi staff never count.')),
+   toFloat64(ifNull(a.explorer_questions_30d, 0)), 'questions',
+   'At least one question by a customer user in the last 30 days, in Production or Staging· Netomi staff not counted')
+] AS f;
+
+CREATE OR REPLACE VIEW n360.v_customer_feature_adoption AS
+-- The six features per customer, rolled up from its VAs. A feature is adopted when any VA has adopted it, except
+-- V8 / V9, adopted only when every VA read is on V8 or later (target 100%). value: the cell's words. (Inner names
+-- x_*: ClickHouse would read an output name reused inside an aggregate as the aggregate.)
+SELECT account, ord, feature, any(x_means) AS means,
+       multiIf(countIf(x_state != 'not reported') = 0, 'not reported',
+               feature = 'V8 / V9', if(countIf(x_state = 'none') = 0, 'adopted', if(countIf(x_state = 'adopted') > 0, 'partly', 'none')),
+               countIf(x_state = 'adopted') > 0, 'adopted', countIf(x_state = 'partly') > 0, 'partly', 'none') AS state,
+       countIf(x_state = 'adopted') AS vas_adopted, countIf(x_state != 'not reported') AS vas_read,
+       sumIf(x_metric, x_state != 'not reported') AS metric,
+       multiIf(countIf(x_state != 'not reported') = 0, 'Not reported yet',
+               feature = 'V8 / V9', concat(toString(countIf(x_state = 'adopted')), ' of ', toString(countIf(x_state != 'not reported')),
+                                          if(countIf(x_state != 'not reported') = 1, ' VA', ' VAs')),
+               sumIf(x_metric, x_state != 'not reported') = 0 AND countIf(x_state = 'partly') = 0, 'None recorded',
+               countIf(x_state = 'adopted') = 0 AND countIf(x_state = 'partly') > 0, anyIf(x_value, x_state = 'partly'),
+               concat(toString(toUInt64(sumIf(x_metric, x_state != 'not reported'))), ' ',
+                      if(toUInt64(sumIf(x_metric, x_state != 'not reported')) = 1,
+                         transform(any(x_unit), ['sessions', 'runs', 'questions'], ['session', 'run', 'question'], any(x_unit)),
+                         any(x_unit)))) AS value,
+       concat(toString(countIf(x_state = 'adopted')), ' of ', toString(count()), ' VAs adopted · ',
+              arrayStringConcat(groupArray(concat(x_va, ': ', x_value)), ' · ')) AS detail
+FROM (SELECT account, ord, feature, means AS x_means, state AS x_state, metric AS x_metric, value AS x_value, unit AS x_unit,
+             va AS x_va FROM n360.v_va_feature_adoption)
+GROUP BY account, ord, feature;
+
+CREATE OR REPLACE VIEW n360.v_customer_adoption AS
+-- One row per customer: the six features adopted, the playbook window totals, and the next feature to move (the
+-- first not adopted, in settings.adoption_next_order: PROPOSED). Handoff share = handoffs from playbooks / the
+-- conversations that ran a playbook. A customer with no va_adoption row is not here (not reported).
+WITH (SELECT adoption_next_order FROM n360.settings) AS next_order
+SELECT a.account AS account, f.adopted AS features_adopted, f.read AS features_read, f.next_feature AS next_feature,
+       a.vas AS vas, a.vas_v8 AS vas_v8, a.executions AS executions, a.conversations AS conversations, a.handoffs AS handoffs,
+       if(a.conversations > 0, round(100 * a.handoffs / a.conversations, 1), NULL) AS handoff_pct,
+       a.playbooks_live AS playbooks_live, a.playbooks_executed AS playbooks_executed, a.idle_playbooks AS idle_playbooks,
+       a.last_execution AS last_execution, a.legacy_intents AS legacy_intents, a.window_start AS window_start, a.window_end AS window_end
+FROM (SELECT account, count() AS vas, countIf(engine_major >= (SELECT engine_current_major FROM n360.settings)) AS vas_v8,
+             sum(executions) AS executions, sum(conversations) AS conversations, sum(handoffs) AS handoffs,
+             sum(playbooks_live) AS playbooks_live, sum(playbooks_executed) AS playbooks_executed, sum(idle_playbooks) AS idle_playbooks,
+             max(last_execution) AS last_execution, sum(legacy_intents) AS legacy_intents,
+             min(window_start) AS window_start, max(window_end) AS window_end
+      FROM n360.va_adoption GROUP BY account) AS a
+INNER JOIN (SELECT account, countIf(state = 'adopted') AS adopted, countIf(state != 'not reported') AS read,
+                   arrayFirst(x -> has(groupArrayIf(feature, state IN ('none', 'partly')), x), next_order) AS next_feature
+            FROM n360.v_customer_feature_adoption GROUP BY account) AS f ON f.account = a.account;
+
+CREATE OR REPLACE VIEW n360.v_playbook AS
+-- Each production playbook (newest read, n360.playbook_window) with what the Adoption pages show about it: its share
+-- of its VA's executions, rank on the VA, whether it is long (settings.adoption_long_playbook_chars), short (< 200
+-- characters) and who built it (settings.adoption_staff_domain = Netomi, another domain = the customer, NULL = not read).
+WITH (SELECT adoption_long_playbook_chars FROM n360.settings) AS long_chars,
+     (SELECT adoption_staff_domain FROM n360.settings) AS staff
+SELECT p.account AS account, p.bot_id AS bot_id, p.va AS va, p.task_id AS task_id, p.playbook AS playbook,
+       p.instruction_chars AS instruction_chars, p.tools AS tools, p.trigger_chars AS trigger_chars, p.length_band AS length_band,
+       p.instruction_chars < 200 AS short, p.instruction_chars >= long_chars AS long, p.counts_as_v8 AS counts_as_v8,
+       p.executions AS executions, p.idle AS idle, p.window_start AS window_start, p.window_end AS window_end,
+       multiIf(p.creator_domain IS NULL, NULL, p.creator_domain = staff, 'Netomi', 'Customer') AS built_by,
+       if(sum(p.executions) OVER (PARTITION BY p.bot_id) > 0,
+          round(100 * p.executions / sum(p.executions) OVER (PARTITION BY p.bot_id), 1), NULL) AS share_of_va_pct,
+       row_number() OVER (PARTITION BY p.bot_id ORDER BY ifNull(p.executions, 0) DESC, p.playbook) AS rank_on_va,
+       indexOf(['<200 (short)', '200-999', '1000-2999', '3000-5999', '6000-9999', '10000+'], p.length_band) AS band_order
+FROM n360.playbook_window AS p;
 
 CREATE OR REPLACE VIEW n360.v_top_asks AS
 -- An ask wanted by several customers (spec 10 "top asks"). PROPOSED: "several" = 2 or more customers.
@@ -1330,8 +1478,9 @@ WITH (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') AS 
              LEFT JOIN n360.v_va_change AS c ON c.bot_id = g.bot_id
              LEFT JOIN cfgchg AS ch ON ch.bot_id = g.bot_id
              GROUP BY g.account),
+     -- Cortex: user_type 'unknown' since 27 Nov 2026 (no user id in the source), so every row but staff counts
      bld AS (SELECT account, 1 AS found, sumIf(n, day > dt - 30) AS b30, sumIf(n, day <= dt - 30 AND day > dt - 60) AS bp30 FROM (
-                 SELECT account, day, ifNull(authoring_sessions, 0) AS n FROM n360.cortex_day WHERE user_type = 'customer'
+                 SELECT account, day, ifNull(authoring_sessions, 0) AS n FROM n360.cortex_day WHERE user_type != 'staff'
                  UNION ALL SELECT account, day, ifNull(questions, 0) FROM n360.explorer_day WHERE user_type = 'customer')
              GROUP BY account),
      idle AS (SELECT account, count() AS n, any(playbook) AS pb FROM (

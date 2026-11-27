@@ -907,6 +907,17 @@
       "targetBlank": false,
       "asDropdown": false,
       "tags": []
+    },
+    {
+      "type": "link",
+      "title": "Adoption detail",
+      "url": "/d/n360-adoption-va",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": true,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
     }
   ]
 }

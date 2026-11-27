@@ -63,3 +63,16 @@ authoring_sessions summed over the account's US VAs; `user_type = 'unknown'`. A 
 6. **Live but idle**: V8 playbooks in production with no execution in the window, listed per VA.
 
 Keep the drill path Portfolio → Customer → VA. Customer-level panels filter on `account`, VA-level on `bot_id`.
+
+## Built (27 Nov 2026)
+
+The three pages are built on these tables: **Adoption** (portfolio), **Customer adoption** and **VA adoption**
+(docs/04 section 9). Views added: `v_va_feature_adoption` (six features × VA: state, words, evidence),
+`v_customer_feature_adoption`, `v_customer_adoption` (one row per customer with the next step), `v_playbook`
+(complexity, share of the VA, who built it). Settings added (`n360.settings`): `adoption_calibration_days` (31),
+`adoption_long_playbook_chars` (10000, proposed), `adoption_handoff_high_pct` (25, proposed),
+`adoption_staff_domain` (netomi.com), `adoption_next_order` (proposed). The synthetic generator writes all four
+tables with planted cases (docstring of `adoption()` in `sample_data/generate_synthetic.py`); `code/test_views.py`
+checks them, and that executions agree across `va_adoption`, `feature_window` and `playbook_window`.
+`cortex_day` rows are `unknown` now, so the risk features and the Risk page's "building" signal count every Cortex row
+but staff.

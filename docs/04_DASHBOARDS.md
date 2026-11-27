@@ -28,7 +28,9 @@ replaces the red/amber/green pace on every screen. The dashboards only map a sta
         │          │        │    │        │           │
         └──────────┴──► Contract line ──► VA ◄────────┴───┘
                                           │
-                              Phase 2: Adoption and coverage, Requests
+                              Phase 2: Requests
+
+    Adoption ──► Customer adoption ──► VA adoption      (Customer and VA pages link in: "Adoption detail")
 ```
 
 ## Conventions (every dashboard)
@@ -111,10 +113,62 @@ Controls: kind (drops and silences / spikes), include provisional (No default / 
 ## 8. Containment · `n360-containment` (BUILT, B13)
 Per VA, last 4 weeks vs previous 4 (table with change); weekly containment per VA (series); VAs without handoff data listed as "Not reported yet". Never one number across channels.
 
-## 9. Adoption and coverage · `n360-adoption` (Phase 2; BUILT on a proposed design, B22/B23)
-Tables `va_config_snapshot`, `playbook_day` (added: executions need a per-playbook table), `cortex_day` (read as authoring sessions), `explorer_day` (analytics-assistant questions): meanings are open questions in `08`.
+## 9. Adoption · three linked pages (rebuilt 27 Nov 2026 on the Adoption detail tables, docs/25)
 
-Engine version per VA (green = V8 or later); V8 playbooks vs legacy intents; playbook executions 31d with built-but-idle marked; MCP servers live, supervisory rules on; authoring sessions and analytics-assistant questions (customer users only); configuration changes since last week.
+**Portfolio → Customer → VA.** Every level carries the six features of the v1.1 Adoption view, with the same
+definitions. Each state is decided once, in the views `v_va_feature_adoption` (per VA) and
+`v_customer_feature_adoption` (per customer); the pages only colour it:
+
+| State | Colour | Example words in the cell |
+|---|---|---|
+| adopted | green | "12 in production", "38 sessions", "V8.3" |
+| partly | amber | "14 runs, validation off", "Lapsed: last 30 Sep", "8 built, none live" |
+| not yet | light grey | "None recorded", "V7.4: upgrade" |
+| not reported | grey | "Not reported yet" (never "not yet": the source had nothing) |
+
+Hover a feature's column heading for what adopted means. The evidence behind every cell (counts, dates, what the
+source cannot tell) is in an "evidence" table on the Customer and VA levels. A customer has a feature when any VA
+has it, except V8 / V9 (every VA). **Next step** = the first feature not adopted, in the proposed order
+`n360.settings adoption_next_order` (V8 / V9, Testing, Calibration, Recipes, Explorer, Cortex). The Cortex caveat
+is on every Cortex cell: it has no user id, so who ran a session, and whether it changed a production playbook, is
+not known yet. The Adoption tables hold the newest read only: their panels show the 31-day window to the
+data-through day, whatever the time range; the history panels (Cortex per day, engine per week) follow it.
+
+### 9a. Adoption · `n360-adoption` (the portfolio)
+
+| Row | Panel | Source |
+|---|---|---|
+| 1 | Sentence: customers on all six, conversations with a playbook and % handed off, most common next step; freshness stamp | `v_customer_adoption` |
+| 2 | Tiles: playbook executions 31d; % handed off from a playbook; VAs on V8+ (30-night line); customers on all six | `va_adoption`, `va_config_snapshot`, `v_customer_adoption` |
+| 3 | **Six features, every customer**: the grid, adopted-of-6 as a bar, next step, executions, % handed off. Click a customer → Customer adoption (or the Customer page) | `v_customer_feature_adoption`, `v_customer_adoption` |
+| 4 | Where each feature stands (customers adopted / partly / not yet / not reported, per feature) · Next step queue (customers grouped by next step, with their traffic: the campaign to run first) | same |
+| 5 | Playbook estate by customer: VAs on V8+, playbooks live, ran in 31 days, live but idle, executions (bar), conversations, % handed off, legacy intents left | `v_customer_adoption` |
+| 6 | Playbook length by customer (length bands) · Who builds the playbooks (customer vs Netomi, by creator domain) | `v_playbook` |
+| 7 | Cortex sessions per day, stacked by customer · The move to V8, week by week (VAs on / below V8, legacy intents left) | `cortex_day`, `va_config_snapshot` |
+| 8 | Longest playbooks (top 15) · Live but idle playbooks. Click a VA → VA adoption | `v_playbook` |
+| 9 | Upgrade queue (VAs below V8, busiest first) · Configuration changes since the last read | `v_va_change`, `va_adoption`, `v_va_config_change` |
+| 10 | Containment by channel · Target features used (the risk model's five, as the Overview counts them) | `v_va_change`, `v_feature_use` |
+
+### 9b. Customer adoption · `n360-adoption-customer` (variable `account`; from the grid, or "Adoption detail" on the Customer page)
+
+| Row | Panel | Source |
+|---|---|---|
+| 1 | Sentence: features of 6, conversations with a playbook, % handed off, next step | `v_customer_adoption` |
+| 2 | Tiles: executions; conversations with a playbook; % handed off; features adopted of 6 | `va_adoption`, `v_customer_adoption` |
+| 3 | **Six features, VA by VA** (click a VA → VA adoption, or the VA page) | `v_va_feature_adoption` |
+| 4 | The evidence behind each feature: this customer, every VA's reading, the definition | `v_customer_feature_adoption` |
+| 5 | Executions by playbook (top 20) · Length against traffic (each playbook a point: long and busy = riskiest to change) | `v_playbook` |
+| 6 | Every playbook (the v1.1 complexity table): length band, instruction / tool / trigger size, executions, share of the VA, idle, built by | `v_playbook` |
+| 7 | Length bands, VA by VA · Who built them (donut) · Live but idle | `v_playbook` |
+| 8 | Cortex sessions per day · Engine, week by week (one lane per VA) | `cortex_day`, `va_config_snapshot` |
+| 9 | Configuration, VA by VA (v1.1 parity): engine, playbooks, legacy intents, idle, calibration, Behavior Validation, test runs, recipes and write actions, MCP servers and names, supervisory rules | `va_adoption` |
+
+### 9c. VA adoption · `n360-adoption-va` (variables `account`, `va`; "Adoption detail" on the VA page)
+
+Sentence (engine, features of 6, playbooks live and idle, executions); tiles (executions, conversations, % handed
+off, playbooks that ran of live); **six feature cards** in their state colour; the evidence table; executions by
+playbook and length against traffic; every playbook on the VA with its task id; V8 playbooks and legacy intents
+week by week; engine week by week; configuration. Links back to Customer adoption, the VA page and Adoption.
 
 ## 10. Requests · `n360-requests` (Phase 2; BUILT on a proposed design, B22/B23)
 "Several customers" = 2 or more (proposed, in `v_top_asks`).

@@ -110,7 +110,8 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
     run_id = str(uuid.uuid4())
     T = {t: [] for t in ['account', 'va', 'contract_line', 'line_va', 'pool', 'rule', 'source', 'va_day',
                          'line_day', 'line_day_billable', 'forecast', 'line_totals_history',
-                         'va_config_snapshot', 'playbook_day', 'cortex_day', 'explorer_day', 'ps_ticket']}
+                         'va_config_snapshot', 'playbook_day', 'cortex_day', 'explorer_day', 'ps_ticket',
+                         'feature_window', 'va_adoption', 'playbook_window']}
 
     # ── rules
     rules = {
@@ -386,10 +387,15 @@ def phase2(T, va_daily, last, anchor, run_id):
             for ut, hi_s, hi_q in (('customer', 6, 15), ('staff', 4, 10)):
                 r = rnd('use', acct, ut, d)
                 weekday = d.weekday() < 5
-                T['cortex_day'].append(dict(day=d.isoformat(), account=acct, user_type=ut,
-                                            authoring_sessions=r.randint(0, hi_s) if weekday else 0, run_id=run_id))
+                if ut == 'customer' and d >= CORTEX_FROM:
+                    # Cortex has no user id (27 Nov 2026): one row per account and day, 'unknown', 0 on a day read with none
+                    rc = rnd('cortex', acct, d)
+                    quiet = acct in CORTEX_QUIET
+                    T['cortex_day'].append(dict(day=d.isoformat(), account=acct, user_type='unknown',
+                                                authoring_sessions=0 if quiet or not weekday else rc.randint(0, 5), run_id=run_id))
                 T['explorer_day'].append(dict(day=d.isoformat(), account=acct, user_type=ut,
                                               questions=r.randint(0, hi_q) if weekday else r.randint(0, 2), run_id=run_id))
+    adoption(T, va_daily, last, run_id, rnd)
     asks = [('Export conversations to CSV', 'Analytics', ['Atlas Streaming', 'Juniper Bank', 'Northwind Outfitters']),
             ('SMS opt-out keywords', 'Channels', ['Bluebird Air', 'Harbor Telecom']),
             ('Playbook version history', 'Playbooks', ['Pinecrest Retail']),
@@ -411,6 +417,104 @@ def phase2(T, va_daily, last, anchor, run_id):
             T['ps_ticket'].append(dict(ticket_id=f'SYN-{1000 + n}', account=a, opened=opened.isoformat(),
                                        title='[SYNTHETIC] Untriaged request', product_area=None, ask=None, status='open',
                                        run_id=run_id))
+
+
+CORTEX_FROM = dt.date(2026, 10, 5)          # the Cortex source starts here (docs/25)
+CORTEX_QUIET = {'Willow Energy', 'Lakeside Insurance', 'Cedar Logistics', 'Summit Games'}
+PLAYBOOKS = ['Order status', 'Refund request', 'Store hours', 'Password reset', 'Change address', 'Track a parcel',
+             'Cancel subscription', 'Update payment method', 'Book an appointment', 'Report an outage', 'Upgrade plan',
+             'Billing question', 'Loyalty points', 'Warranty claim', 'Escalate to a specialist', 'Gift cards']
+BANDS = [(200, '<200 (short)'), (1000, '200-999'), (3000, '1000-2999'), (6000, '3000-5999'), (10000, '6000-9999')]
+
+
+def band(chars):
+    return next((b for lim, b in BANDS if chars < lim), '10000+')
+
+
+def adoption(T, va_daily, last, run_id, rnd):
+    """The Adoption detail tables as the export writes them since 27 Nov 2026 (docs/25): newest read only.
+    Planted (docs/04 section 9):
+      Harbor Chat       every one of the six features adopted (the model customer)
+      Northwind Chat    'Gift cards' live but idle; recipes built, none in production
+      Pinecrest Chat    calibration lapsed (last run 50 days ago); two playbooks over 10,000 characters
+      Bluebird Web      test runs but Behavior Validation off (partly adopted)
+      Summit NCW        no Explorer question; Cortex none recorded
+      Maple Voice       Cortex and Explorer not read (NULL: Not reported yet)
+      Willow Chat       V8, nothing else adopted, executions falling to a handful
+      Lakeside Email, Cedar Ops Chat   below V8: no V8 playbooks, everything else reads 0
+      Atlas Help        a customer-built playbook estate (most playbooks created by the customer's own domain)"""
+    w_end, w_start = last, last - dt.timedelta(30)
+    v7 = {'Lakeside Email', 'Cedar Ops Chat'}
+    for vname, (acct, vch, ex, rows) in sorted(va_daily.items()):
+        bot = uid('bot/' + vname)
+        r = rnd('adopt', vname)
+        conv31 = sum((rows.get(last - dt.timedelta(n), (0,))[0] or 0) for n in range(31))
+        current = vname not in v7
+        domain = acct.split()[0].lower() + '.example'
+        books = []
+        if current:
+            n_books = 3 + r.randint(0, 9) + (4 if vname == 'Harbor Chat' else 0)
+            names = r.sample(PLAYBOOKS[:-1], min(n_books, len(PLAYBOOKS) - 1)) + (['Gift cards'] if vname == 'Northwind Chat' else [])
+            for i, name in enumerate(names):
+                rb = rnd('pb', vname, name)
+                chars = int(rb.lognormvariate(7.6, 0.9))
+                if vname == 'Pinecrest Chat' and i < 2:
+                    chars = 10400 + 2600 * i
+                execs = 0 if name == 'Gift cards' else int(conv31 * rb.uniform(0.01, 0.09) * (0.05 if vname == 'Willow Chat' else 1))
+                customer_built = rb.random() < (0.8 if vname == 'Atlas Help' else 0.25)
+                books.append(dict(name=name, chars=chars, tools=rb.randint(0, 9), trigger=rb.randint(40, 260), execs=execs,
+                                  creator=domain if customer_built else 'netomi.com'))
+        for i, b in enumerate(books):
+            T['playbook_window'].append(dict(
+                as_of=w_end.isoformat(), account=acct, bot_id=bot, va=vname, task_id=f'syn-{uid("task/" + vname + b["name"])[:8]}',
+                playbook=f'[SYNTHETIC] {b["name"]}', instruction_chars=b['chars'], tools=b['tools'], trigger_chars=b['trigger'],
+                length_band=band(b['chars']), counts_as_v8=True, executions=b['execs'], idle=b['execs'] == 0,
+                window_start=w_start.isoformat(), window_end=w_end.isoformat(), creator_domain=b['creator'], run_id=run_id))
+        execs = sum(b['execs'] for b in books)
+        convs = int(execs * r.uniform(0.82, 0.95))
+        hand = int(convs * (0.34 if vname == 'Willow Chat' else r.uniform(0.06, 0.22)))
+        last_exec = max([w_end - dt.timedelta(r.randint(0, 2))] if execs else [None], key=lambda x: x or dt.date.min)
+        full = vname == 'Harbor Chat'
+        not_read = vname == 'Maple Voice'
+        quiet = acct in CORTEX_QUIET or vname == 'Summit NCW'
+        cal_runs = 0 if not current or vname == 'Willow Chat' else (r.randint(2, 6) if full else r.randint(0, 3))
+        cal_last = None if not cal_runs else (w_end - dt.timedelta(50 if vname == 'Pinecrest Chat' else r.randint(3, 25)))
+        tests = 0 if not current or vname == 'Willow Chat' else (r.randint(20, 80) if full or vname == 'Bluebird Web' else r.randint(0, 15))
+        validation = 'enabled' if full else 'off' if vname == 'Bluebird Web' else (None if not current else r.choice(['enabled', 'off', None]))
+        recipes = 0 if not current or vname == 'Willow Chat' else r.randint(1, 8) + (6 if full else 0)
+        rec_prod = 0 if vname == 'Northwind Chat' else (recipes if full else r.randint(0, recipes))
+        actions = 0 if not rec_prod else r.randint(1, rec_prod * 3)
+        mcp = ['crm', 'orders', 'ticketing', 'knowledge base']
+        cortex = None if not_read else (0 if quiet or not current else r.randint(1, 30) + (20 if full else 0))
+        explorer = None if not_read else (0 if vname in ('Summit NCW', 'Willow Chat') or not current else r.randint(1, 40))
+        T['va_adoption'].append(dict(
+            as_of=w_end.isoformat(), account=acct, bot_id=bot, va=vname, region='US',
+            engine_version='V7.4' if vname == 'Lakeside Email' else 'V7.9' if vname == 'Cedar Ops Chat' else 'V8.3',
+            engine_major=7 if not current else 8, playbooks_live=len(books), v8_playbooks=len(books) if current else 0,
+            legacy_intents=r.randint(25, 60) if not current else r.randint(0, 20),
+            window_start=w_start.isoformat(), window_end=w_end.isoformat(), executions=execs, conversations=convs, handoffs=hand,
+            playbooks_executed=sum(1 for b in books if b['execs']), last_execution=last_exec and last_exec.isoformat(),
+            idle_playbooks=sum(1 for b in books if not b['execs']),
+            calibration_runs=cal_runs, calibration_completed=max(0, cal_runs - r.randint(0, 1)) if cal_runs else 0,
+            calibration_last=cal_last and cal_last.isoformat(), behavior_validation=validation,
+            test_conversations=tests * r.randint(3, 9) if tests else 0, test_days=min(31, tests // 3) if tests else 0,
+            test_suites=r.randint(1, 4) if tests else 0, test_runs=tests, test_last=(w_end - dt.timedelta(r.randint(0, 9))).isoformat() if tests else None,
+            recipes=recipes, recipes_production=rec_prod, recipe_actions=actions,
+            mcp_live=r.randint(0, 2) + (2 if full else 0) if current else 0, mcp_not_live=r.randint(0, 1),
+            mcp_names=', '.join(r.sample(mcp, 2)) if current else '',
+            supervisory_live=r.randint(0, 3) if current else 0, supervisory_default=r.randint(0, 2),
+            supervisory_names='tone, escalation' if current else '',
+            cortex_sessions_30d=cortex, cortex_last=None if not cortex else (w_end - dt.timedelta(r.randint(0, 6))).isoformat(),
+            explorer_questions_30d=explorer, explorer_users_30d=None if explorer is None else (r.randint(1, 6) if explorer else 0),
+            explorer_last=None if not explorer else (w_end - dt.timedelta(r.randint(0, 10))).isoformat(), run_id=run_id))
+        for feature, amount, unit, ut, last_day in (
+                ('V8 playbooks', execs if current else None, 'executions', 'customer', last_exec),
+                ('Analytics assistant', explorer, 'questions', 'customer', None),
+                ('Authoring tool', cortex, 'sessions', 'unknown', None)):
+            T['feature_window'].append(dict(
+                as_of=w_end.isoformat(), account=acct, bot_id=bot, feature=feature, user_type=ut,
+                window_start=w_start.isoformat(), window_end=w_end.isoformat(), amount=amount, unit=unit,
+                last_day=last_day and last_day.isoformat(), run_id=run_id))
 
 
 def forecast_row(acct, skey, pool, start, end, last, used, last30, billed, run_id):

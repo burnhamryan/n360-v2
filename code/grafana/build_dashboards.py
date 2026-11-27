@@ -27,7 +27,8 @@ UID = {'overview': 'n360-overview', 'contracts': 'n360-contracts', 'customer': '
        'va': 'n360-va', 'forecast': 'n360-forecast', 'anomalies': 'n360-anomalies',
        'adoption': 'n360-adoption', 'requests': 'n360-requests',
        'containment': 'n360-containment', 'pipeline': 'n360-pipeline', 'health': 'n360-health', 'risk': 'n360-risk',
-       'risk_model': 'n360-risk-model'}   # never change (links depend on them)
+       'risk_model': 'n360-risk-model', 'adoption_customer': 'n360-adoption-customer',
+       'adoption_va': 'n360-adoption-va'}   # never change (links depend on them)
 FORECAST_WINDOWS = (30, 60, 90)   # Forecast "Crossing billed" stat (spec 6): display windows
 
 # Display colours: ONE palette (v2 principle 6: colour means status, nowhere else). Mid tones chosen to read on both
@@ -862,7 +863,8 @@ def customer():
                                 {'text': 'Not tagged yet', 'color': COLOUR['grey'], 'index': 0}}}])) for c in ('Area', 'Ask')],
                             width('Opened', 110), width('Status', 80)], noValue='No tickets for this customer'),
         options={'cellHeight': 'sm'}, may_be_empty='a customer with no tickets'))
-    return dashboard(UID['customer'], 'N360 · Customer', p, [var_one_account(), var_vas(), var_period()], [back_link()])
+    return dashboard(UID['customer'], 'N360 · Customer', p, [var_one_account(), var_vas(), var_period()],
+                     [back_link(), {**back_link(ADOPT_CUSTOMER, keep_vars=True), 'title': 'Adoption detail'}])
 
 
 def contract_line():
@@ -1127,7 +1129,8 @@ def va():
                  'and the newest scored day against its own normal.', 'n360.v_va_change, n360.v_va_day_anomaly', 'VA',
                  'the 60 days to the data-through day'))
     return dashboard(UID['va'], 'N360 · VA', p, [var_one_account(), var_va()],
-                     [back_link(CUSTOMER, keep_vars=True), back_link()])
+                     [back_link(CUSTOMER, keep_vars=True), back_link(),
+                      {**back_link(ADOPT_VA, keep_vars=True), 'title': 'Adoption detail'}])
 
 
 def contracts():
@@ -1673,166 +1676,601 @@ def pipeline():
 
 
 
+# ───────────────────────── Adoption: Portfolio → Customer → VA (27 Nov 2026) ─────────────────────────
+# Three linked pages on the Adoption detail tables (docs/25): n360.va_adoption, n360.playbook_window,
+# n360.feature_window, n360.cortex_day, and the views v_va_feature_adoption, v_customer_feature_adoption,
+# v_customer_adoption, v_playbook. Every state (adopted, partly, not yet, not reported) is decided in those views.
+
+ADOPT = {'adopted': ('Adopted', 'green'), 'partly': ('Partly', 'amber'), 'none': ('Not yet', 'grey_light'),
+         'not reported': (NOT_READ, 'grey')}
+# (column, name in the views, what adopted means): the v1.1 Adoption view's definitions (docs/25)
+FEATURES = [('Cortex', 'Cortex', 'Used to create or edit a production playbook in the last 30 days. Cortex is read for '
+             'US VAs only and has no user id: whether Netomi or the customer ran a session is not known yet.'),
+            ('Testing', 'Test / playbook validation', 'Run on every playbook version before promotion (Behavior '
+             'Validation on, with test runs). Runs with validation off = partly.'),
+            ('Calibration', 'Calibration', 'At least monthly on Tier 1 and Tier 2 use cases: a run in the last 31 days '
+             '(n360.settings adoption_calibration_days). An older run = partly (lapsed).'),
+            ('V8 / V9', 'V8 / V9', 'Production VA running on V8 or V9; target 100%. A customer is adopted only when '
+             'every VA is.'),
+            ('Recipes', 'Action-oriented recipes', 'At least one production recipe performs a write against a customer '
+             'system. Recipes built but none writing in production = partly.'),
+            ('Explorer', 'Explorer', 'At least one question by a customer user in the last 30 days, in Production or '
+             'Staging; Netomi staff not counted.')]
+BANDS = ['<200 (short)', '200-999', '1000-2999', '3000-5999', '6000-9999', '10000+']
+ADOPT_NOTE = ('Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so '
+              'these are the 31-day window to the data-through day, not the dashboard\'s time range.')
+ONE_VA = "toString(bot_id) IN (${va:singlequote})"
+ADOPT_CUSTOMER = ('n360-adoption-customer', 'Customer adoption')
+ADOPT_VA = ('n360-adoption-va', 'VA adoption')
+
+
+def adopt_cells(columns, cell='color-background'):
+    """Feature cells: the view writes "state|words"; the cell shows the words on the state's colour.
+    Regex mappings with a capture group ($1): one column carries both the colour and the evidence."""
+    maps = [{'type': 'regex', 'options': {'pattern': f'^{k}\\|(.*)$', 'result': {'text': '$1', 'color': COLOUR[c], 'index': i}}}
+            for i, (k, (_, c)) in enumerate(ADOPT.items())]
+    return [override(col, ('mappings', maps + [empty_grey()]), ('custom.cellOptions', {'type': cell}),
+                     ('color', {'mode': 'fixed', 'fixedColor': COLOUR['none']}), ('description', means), ('custom.align', 'center'), ('custom.minWidth', 150))
+            for col, means in columns]
+
+
+def gauge_cell(column, max_value, colour='green', unit=None):
+    """A number drawn as a bar inside its cell (the colour is fixed: a bar here is a size, not a status)."""
+    props = [('custom.cellOptions', {'type': 'gauge', 'mode': 'basic', 'valueDisplayMode': 'text'}),
+             ('color', {'mode': 'fixed', 'fixedColor': COLOUR[colour]}), ('min', 0)]
+    if max_value is not None:
+        props.append(('max', max_value))
+    if unit:
+        props.append(('unit', unit))
+    return override(column, *props)
+
+
 def adoption():
-    """Adoption (v2): what do customers use, and what do we move next? Customer architects, product (Phase 2 data)."""
+    """Adoption, the portfolio: which features each customer has adopted, how much the playbooks carry, and what to move
+    next. Customer architects, CSMs, product. Drills: a customer → Customer adoption → VA adoption."""
     p = page_header(1, f"""
-        WITH (SELECT argMax(c.va, c.convs_30) FROM n360.v_va_change AS c
-              INNER JOIN n360.v_va_config_latest AS g ON g.bot_id = c.bot_id WHERE NOT g.current_engine AND c.{ACCT}) AS busiest,
-             (SELECT argMin(feature, n) FROM (SELECT feature, countIf(used) AS n FROM n360.v_feature_use
-                                               WHERE {ACCT} GROUP BY feature HAVING countIf(used IS NOT NULL) > 0)) AS least
-        SELECT if((SELECT count() FROM n360.v_va_config_latest) = 0, NULL, concat(
-                   toString(countIf(current_engine)), ' of ', {plural('count()', 'VA', 'VAs')}, ' on V8 or later · ',
-                   toString((SELECT countIf(n >= (SELECT target_features_min FROM n360.settings)) FROM
-                             (SELECT account, countIf(used) AS n FROM n360.v_feature_use WHERE {ACCT} GROUP BY account))),
-                   ' customers use 3+ target features',
-                   if(busiest = '', '', concat(' · busiest VA still to upgrade: ', busiest)),
-                   if(least = '', '', concat(' · least-used feature: ', least)))) AS sentence
-        FROM n360.v_va_config_latest WHERE {ACCT}""",
-        describe('VAs on engine V8 or later, customers using 3 or more target features (proposed), the VA with the most '
-                 'conversations still below V8, and the target feature fewest customers use. ' + PHASE2_NOTE,
-                 'n360.v_va_config_latest, n360.v_feature_use, n360.v_va_change', 'Customer',
-                 'the newest configuration read; the last 30 days'))
-    p.append(tile(3, 'VAs on V8 or later', f"""
+        WITH (SELECT topK(1)(next_feature)[1] FROM n360.v_customer_adoption WHERE next_feature != '' AND {ACCT}) AS common_next,
+             (SELECT countIf(next_feature = common_next) FROM n360.v_customer_adoption WHERE {ACCT}) AS n_next
+        SELECT if(count() = 0, NULL, concat(
+                   toString(countIf(features_adopted = 6)), ' of ', {plural('count()', 'customer', 'customers')},
+                   ' use all six features · playbooks ran in ', {num_sql('sum(conversations)')}, ' conversations in 31 days, ',
+                   toString(round(100 * sum(handoffs) / nullIf(sum(conversations), 0))), '% handed off',
+                   if(common_next = '', '', concat(' · most common next step: ', common_next, ' (', toString(n_next), ')')))) AS sentence
+        FROM n360.v_customer_adoption WHERE {ACCT}""",
+        describe('Customers using all six features (the v1.1 definitions), the conversations that ran at least one playbook '
+                 'and the share handed off to an agent from within one, and the feature most customers should move to next '
+                 '(the first not adopted, in the proposed order n360.settings adoption_next_order). ' + ADOPT_NOTE,
+                 'n360.v_customer_adoption', 'Customer', 'the 31 days to the data-through day'))
+    p.append(single_tile(3, 'Playbook executions, 31 days', f"""
+        SELECT if(count() = 0, NULL, sum(executions)) AS `across every V8 playbook` FROM n360.v_customer_adoption WHERE {ACCT}""", 0, 3,
+        describe('Playbook executions on V8 VAs in the 31 days to the data-through day: the same figure as the v1.1 page\'s '
+                 'first tile. Not added to Cortex sessions or Explorer questions (different things). ' + ADOPT_NOTE,
+                 'n360.va_adoption', 'Customer', 'the 31 days to the data-through day'),
+        links=[{'title': 'Every playbook, busiest first', 'url': f"/d/{ADOPT_CUSTOMER[0]}?${{__url_time_range}}"}]))
+    p.append(single_tile(4, 'Handed off from a playbook', f"""
+        SELECT if(sum(conversations) = 0, NULL, round(100 * sum(handoffs) / sum(conversations), 1)) AS `of conversations that ran one`
+        FROM n360.v_customer_adoption WHERE {ACCT}""", 6, 3,
+        describe('Handoffs to an agent from within a playbook, as a share of the conversations that ran at least one '
+                 'playbook. ' + ADOPT_NOTE, 'n360.va_adoption', 'Customer', 'the 31 days to the data-through day'),
+        field=plain(field_config(unit='percent', decimals=1))))
+    p.append(tile(5, 'VAs on V8 or later', f"""
         SELECT snapshot_date AS night, toUInt64(countIf(engine_major >= (SELECT engine_current_major FROM n360.settings))) AS value
-        FROM n360.va_config_snapshot WHERE {ACCT} GROUP BY night""", 0, 3,
-        describe('VAs whose weekly configuration read shows V8 or later; change against the read 30 days earlier. '
-                 + PHASE2_NOTE, 'n360.va_config_snapshot', 'Customer', 'weekly reads, the last 30 days'),
-        metric='vas on v8'))
-    p.append(single_tile(4, 'Customers using 3+ target features', f"""
-        SELECT if(countIf(n_read > 0) = 0, NULL, countIf(n_used >= (SELECT target_features_min FROM n360.settings))) AS `of the 5 target features`
-        FROM (SELECT account, countIf(used) AS n_used, countIf(used IS NOT NULL) AS n_read FROM n360.v_feature_use
-              WHERE {ACCT} GROUP BY account)""", 6, 3,
-        describe('Customers that used at least 3 of the 5 target features in the last 30 days (proposed list). '
-                 + PHASE2_NOTE, 'n360.v_feature_use', 'Customer', 'the 30 days to the data-through day'),
-        metric='customers on 3+ features'))
-    p.append(single_tile(5, 'Legacy intents on VAs below V8', f"""
-        SELECT if(count() = 0, NULL, sumIf(legacy_intents, NOT current_engine)) AS `to move to playbooks`
-        FROM n360.v_va_config_latest WHERE {ACCT}""", 12, 3,
-        describe('Legacy intents still configured on VAs older than V8: the upgrade backlog. ' + PHASE2_NOTE,
-                 'n360.v_va_config_latest', 'Customer', 'the newest read per VA')))
-    p.append(single_tile(6, 'VAs containing under 50%', f"""
-        SELECT countIf(containment_30 < (SELECT containment_low_pct FROM n360.settings)) AS `of VAs with handoff data`
-        FROM n360.v_va_change WHERE {ACCT}""", 18, 3,
-        describe('VAs whose containment (1 - handoffs / engaged, per VA) over the last 30 days is under 50% (proposed, '
-                 'n360.settings containment_low_pct). VAs without handoff data are not counted.', 'n360.v_va_change',
-                 'Customer', 'the 30 days to the data-through day'), links=[panel_link('containment', 'Containment')]))
-    p.append(panel(7, 'Engine by customer', 'barchart', f"""
-        SELECT a.display_name AS Customer, countIf(c.current_engine) AS `V8 or later`, countIf(NOT c.current_engine) AS Older
-        FROM n360.v_va_config_latest AS c INNER JOIN n360.account AS a ON a.account = c.account
-        WHERE c.{ACCT} GROUP BY Customer ORDER BY countIf(c.current_engine) / count() DESC, Customer""", 0, 8, 14, 10,
-        describe('Each customer\'s VAs by engine, as a share (V8 or later green, older amber: the v1.1 page\'s colours), '
-                 'sorted by V8 share. ' + PHASE2_NOTE, 'n360.v_va_config_latest', 'Customer', 'the newest read per VA'),
-        field=field_config([override('V8 or later', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['green']}),
-                                     ('custom.axisPlacement', 'hidden')),
-                            override('Older', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['amber']}),
-                                     ('custom.axisPlacement', 'hidden'))],
-                           decimals=0, min=0, max=1, custom={'fillOpacity': 90, 'lineWidth': 0}),
-        options={'xField': 'Customer', 'orientation': 'horizontal', 'stacking': 'percent', 'showValue': 'never',
-                 'barWidth': 0.8, 'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
-                 'tooltip': {'mode': 'multi', 'sort': 'none'}}, may_be_empty='no configuration read loaded'))
-    p.append(panel(8, 'Customers using each target feature', 'barchart', f"""
-        SELECT feature AS Feature, countIf(used) AS Customers FROM n360.v_feature_use WHERE {ACCT}
-        GROUP BY feature HAVING countIf(used IS NOT NULL) > 0 ORDER BY Customers DESC""", 14, 8, 10, 10,
-        describe('How many customers used each target feature in the last 30 days (proposed list; Testing, Calibration and '
-                 'Recipes are not exported yet). ' + PHASE2_NOTE, 'n360.v_feature_use', 'Customer',
-                 'the 30 days to the data-through day'),
-        field=field_config(decimals=0, min=0, color={'mode': 'fixed', 'fixedColor': COLOUR['series']}),
-        options={'xField': 'Feature', 'orientation': 'horizontal', 'showValue': 'always', 'barWidth': 0.7,
-                 'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'}},
-        may_be_empty='no feature data loaded'))
-    feats = ['V8 playbooks', 'Authoring tool', 'Analytics assistant', 'MCP servers', 'Supervisory rules']
-    cols = ',\n               '.join(f"anyIf(if(f.used IS NULL, NULL, if(f.used, 'Used', 'Not used')), f.feature = '{x}') AS `{x}`"
-                                    for x in feats)
-    p.append(panel(9, 'Coverage and adoption by customer', 'table', f"""
-        SELECT a.display_name AS Customer,
-               (SELECT if(count() = 0, NULL, concat(toString(countIf(current_engine)), ' of ', toString(count())))
-                FROM n360.v_va_config_latest AS g WHERE g.account = a.account) AS `VAs on V8+`,
-               {cols}, a.account AS account
-        FROM n360.account AS a INNER JOIN n360.v_feature_use AS f ON f.account = a.account
-        WHERE a.{ACCT} GROUP BY a.display_name, a.account ORDER BY Customer""", 0, 18, 24, 9,
-        describe('Per customer: VAs on V8 or later, and each target feature used (green) or not (light grey) in the last '
-                 '30 days; "Not reported yet" where the source has no rows for the customer. ' + PHASE2_NOTE,
-                 'n360.v_feature_use, n360.v_va_config_latest', 'Customer', 'the 30 days to the data-through day'),
-        field=field_config([hidden('account'), override('VAs on V8+', ('mappings', [empty_grey()])),
-                            *[coloured(x, {'Used': ('Used', 'green'), 'Not used': ('Not used', 'grey_light')}, 'color-background')
-                              for x in feats],
-                            width('Customer', 190), with_links('Customer', drill(UID['customer'], 'account', 'account', 'Open customer'))]),
+        FROM n360.va_config_snapshot WHERE {ACCT} GROUP BY night""", 12, 3,
+        describe('VAs whose weekly configuration read shows V8 or later; change against the read 30 days earlier.',
+                 'n360.va_config_snapshot', 'Customer', 'weekly reads, the last 30 days'), metric='vas on v8'))
+    p.append(single_tile(6, 'Customers on all six features', f"""
+        SELECT if(count() = 0, NULL, countIf(features_adopted = 6)) AS `customers` FROM n360.v_customer_adoption WHERE {ACCT}""", 18, 3,
+        describe('Customers that have adopted every one of the six features (the grid below shows where the rest stand). '
+                 + ADOPT_NOTE, 'n360.v_customer_adoption', 'Customer', 'the newest read')))
+    # lead: the grid, one row per customer
+    cols = ',\n               '.join(f"anyIf(concat(f.state, '|', f.value), f.feature = '{name}') AS `{col}`" for col, name, _ in FEATURES)
+    p.append(panel(7, 'Six features, every customer', 'table', f"""
+        SELECT a.display_name AS Customer, c.features_adopted AS `Adopted, of 6`, {cols},
+               if(c.next_feature = '', 'Every feature adopted', c.next_feature) AS `Next step`,
+               c.executions AS `Executions, 31 days`, c.handoff_pct AS `Handed off`, a.account AS account
+        FROM n360.v_customer_feature_adoption AS f INNER JOIN n360.account AS a ON a.account = f.account
+        INNER JOIN n360.v_customer_adoption AS c ON c.account = f.account
+        WHERE f.{ACCT}
+        GROUP BY a.display_name, a.account, c.features_adopted, c.next_feature, c.executions, c.handoff_pct
+        ORDER BY `Adopted, of 6` DESC, `Executions, 31 days` DESC""", 0, 8, 24, 18,
+        describe('Each customer against the six features of the v1.1 Adoption view. A cell is green when adopted, amber '
+                 'when partly (for example tests run with validation off, or calibration lapsed), light grey when not yet, '
+                 'grey when the source has nothing ("Not reported yet", never "not yet"). Hover a column heading for what '
+                 'adopted means. Adopted, of 6 is drawn as a bar. Next step: the first feature not adopted, in the proposed '
+                 'order (n360.settings adoption_next_order). Click a customer for its VAs and playbooks. ' + ADOPT_NOTE,
+                 'n360.v_customer_feature_adoption, n360.v_customer_adoption', 'Customer', 'the newest read'),
+        field=field_config([hidden('account'), *adopt_cells([(c, m) for c, _, m in FEATURES]),
+                            gauge_cell('Adopted, of 6', 6), count_col('Executions, 31 days'), pct('Handed off'),
+                            override('Next step', ('description', 'The first of the six not adopted, in the proposed order '
+                                                   'V8 / V9 → Testing → Calibration → Recipes → Explorer → Cortex.')),
+                            width('Customer', 170), width('Adopted, of 6', 120), width('Next step', 190),
+                            with_links('Customer', drill(ADOPT_CUSTOMER[0], 'account', 'account', 'Open this customer\'s adoption'),
+                                       drill(UID['customer'], 'account', 'account', 'Open the Customer page'))]),
+        options={'cellHeight': 'md', 'sortBy': []}))
+    # where each feature stands, and the next-step queue
+    states = ',\n               '.join(f"countIf(state = '{k}') AS `{t}`" for k, (t, _) in ADOPT.items())
+    p.append(panel(8, 'Where each feature stands', 'barchart', f"""
+        SELECT feature AS Feature, {states}
+        FROM n360.v_customer_feature_adoption WHERE {ACCT} GROUP BY ord, feature ORDER BY ord""", 0, 26, 12, 9,
+        describe('For each feature, how many customers have adopted it, partly, not yet, or are not reported. Hover a bar '
+                 'for the counts. ' + ADOPT_NOTE, 'n360.v_customer_feature_adoption', 'Customer', 'the newest read'),
+        field=field_config([override(t, ('color', {'mode': 'fixed', 'fixedColor': COLOUR[c]})) for t, c in ADOPT.values()],
+                           decimals=0, min=0, custom={'fillOpacity': 90, 'lineWidth': 0, 'axisGridShow': False}),
+        options={'xField': 'Feature', 'orientation': 'horizontal', 'stacking': 'normal', 'showValue': 'auto', 'barWidth': 0.75,
+                 'xTickLabelMaxLength': 30,
+                 'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'none'}}))
+    p.append(panel(9, 'Next step queue', 'table', f"""
+        SELECT if(c.next_feature = '', 'Every feature adopted', c.next_feature) AS `Next step`,
+               count() AS Customers, arrayStringConcat(arraySort(groupArray(a.display_name)), ', ') AS Who,
+               sum(c.executions) AS `Their executions, 31 days`,
+               indexOf((SELECT adoption_next_order FROM n360.settings), c.next_feature) AS o
+        FROM n360.v_customer_adoption AS c INNER JOIN n360.account AS a ON a.account = c.account
+        WHERE c.{ACCT} GROUP BY c.next_feature ORDER BY o = 0, o""", 12, 26, 12, 9,
+        describe('Customers grouped by the next feature to move them to (the first of the six not adopted, in the proposed '
+                 'order n360.settings adoption_next_order), with the playbook traffic behind them: the biggest group with '
+                 'the most traffic is the campaign to run first. ' + ADOPT_NOTE,
+                 'n360.v_customer_adoption', 'Customer', 'the newest read'),
+        field=field_config([hidden('o'), count_col('Their executions, 31 days'),
+                            width('Next step', 180), width('Customers', 110)]),
+        options={'cellHeight': 'md'}))
+    # the playbook estate per customer
+    p.append(panel(10, 'Playbook estate by customer', 'table', f"""
+        SELECT a.display_name AS Customer, concat(toString(c.vas_v8), ' of ', toString(c.vas)) AS `VAs on V8+`,
+               c.playbooks_live AS `Playbooks live`, c.playbooks_executed AS `Ran in 31 days`, c.idle_playbooks AS `Live but idle`,
+               c.executions AS Executions, c.conversations AS `Conversations with a playbook`, c.handoff_pct AS `Handed off`,
+               c.legacy_intents AS `Legacy intents left`, {date_sql('c.last_execution')} AS `Last execution`, a.account AS account
+        FROM n360.v_customer_adoption AS c INNER JOIN n360.account AS a ON a.account = c.account
+        WHERE c.{ACCT} ORDER BY Executions DESC""", 0, 35, 24, 13,
+        describe('Per customer: VAs on V8 or later, playbooks live and how many ran in 31 days, live-but-idle playbooks, '
+                 'executions (bar), conversations that ran a playbook, the share handed off from within one, and the legacy '
+                 'intents still to move. Click a customer to open its adoption. ' + ADOPT_NOTE,
+                 'n360.v_customer_adoption', 'Customer', 'the 31 days to the data-through day'),
+        field=field_config([hidden('account'), gauge_cell('Executions', None, 'series'), count_col('Conversations with a playbook'),
+                            pct('Handed off'), amber_cell('Live but idle'), width('Customer', 170), width('Executions', 220),
+                            with_links('Customer', drill(ADOPT_CUSTOMER[0], 'account', 'account', 'Open this customer\'s adoption'))]),
         options={'cellHeight': 'sm'}))
-    p[-1]['targets'][0]['rawSql'] = p[-1]['targets'][0]['rawSql'].replace(
-        """(SELECT if(count() = 0, NULL, concat(toString(countIf(current_engine)), ' of ', toString(count())))
-                FROM n360.v_va_config_latest AS g WHERE g.account = a.account)""", "any(g.v8)").replace(
-        "INNER JOIN n360.v_feature_use AS f ON f.account = a.account", """INNER JOIN n360.v_feature_use AS f ON f.account = a.account
-        LEFT JOIN (SELECT account, toNullable(concat(toString(countIf(current_engine)), ' of ', toString(count()))) AS v8
-                   FROM n360.v_va_config_latest GROUP BY account) AS g ON g.account = a.account""")
-    p.append(panel(10, 'Upgrade queue: VAs below V8, busiest first', 'table', f"""
-        SELECT c.va AS VA, a.display_name AS Customer, g.engine_version AS Engine, g.legacy_intents AS `Legacy intents`,
-               g.v8_playbooks AS `V8 playbooks`, c.convs_30 AS `Conversations, 30 days`,
-               concat('/d/n360-va?var-account=', c.account, '&var-va=', toString(c.bot_id)) AS drill
-        FROM n360.v_va_change AS c INNER JOIN n360.v_va_config_latest AS g ON g.bot_id = c.bot_id
+    # complexity and who builds
+    bands = ',\n               '.join(f"countIf(length_band = '{b}') AS `{b}`" for b in BANDS)
+    p.append(panel(11, 'Playbook length, by customer', 'barchart', f"""
+        SELECT a.display_name AS Customer, {bands}
+        FROM n360.v_playbook AS pb INNER JOIN n360.account AS a ON a.account = pb.account
+        WHERE pb.{ACCT} GROUP BY Customer ORDER BY count() DESC""", 0, 48, 12, 10,
+        describe('Production playbooks per customer by the length of their instructions (characters), shortest band palest. '
+                 'Long playbooks (10,000+) are the hardest to test and to change; short ones (under 200) may be '
+                 'placeholders. Hover for the counts. ' + ADOPT_NOTE, 'n360.v_playbook', 'Customer', 'the newest read'),
+        field=field_config(decimals=0, min=0, custom={'fillOpacity': 90, 'lineWidth': 0, 'axisGridShow': False},
+                           **series_colours()),
+        options={'xField': 'Customer', 'orientation': 'horizontal', 'stacking': 'normal', 'showValue': 'never', 'barWidth': 0.8,
+                 'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'none'}}, may_be_empty='no playbook read'))
+    p.append(panel(12, 'Who builds the playbooks', 'barchart', f"""
+        SELECT a.display_name AS Customer, countIf(pb.built_by = 'Customer') AS `The customer`, countIf(pb.built_by = 'Netomi') AS Netomi,
+               countIf(pb.built_by IS NULL) AS `Not reported`
+        FROM n360.v_playbook AS pb INNER JOIN n360.account AS a ON a.account = pb.account
+        WHERE pb.{ACCT} GROUP BY Customer ORDER BY countIf(pb.built_by = 'Customer') / count() DESC""", 12, 48, 12, 10,
+        describe('Each customer\'s production playbooks by who created them (the creator\'s email domain: Netomi\'s '
+                 'domain = Netomi, any other = the customer, n360.settings adoption_staff_domain), as a share. The customers '
+                 'at the top build for themselves; at the bottom, Netomi does the work. ' + ADOPT_NOTE,
+                 'n360.v_playbook', 'Customer', 'the newest read'),
+        field=field_config([override('The customer', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['green']})),
+                            override('Netomi', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series']})),
+                            override('Not reported', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['grey']}))],
+                           decimals=0, min=0, max=1, custom={'fillOpacity': 90, 'lineWidth': 0, 'axisGridShow': False}),
+        options={'xField': 'Customer', 'orientation': 'horizontal', 'stacking': 'percent', 'showValue': 'never', 'barWidth': 0.8,
+                 'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'none'}}, may_be_empty='no playbook read'))
+    # history: Cortex daily, V8 weekly
+    p.append(panel(13, 'Cortex sessions per day', 'timeseries', f"""
+        SELECT toDateTime(c.day) AS time, a.display_name AS Customer, sum(c.authoring_sessions) AS Sessions
+        FROM n360.cortex_day AS c INNER JOIN n360.account AS a ON a.account = c.account
+        WHERE c.{ACCT} AND $__dateFilter(c.day) GROUP BY time, Customer ORDER BY time""", 0, 58, 12, 9,
+        describe('Cortex sessions per day, stacked by customer (US VAs only; who ran a session is not known yet). Read '
+                 'since 5 Oct 2026; a day read with no session is 0. Hover for every customer that day.',
+                 'n360.cortex_day', 'Customer', 'dashboard time range'),
+        fmt='timeseries', field=field_config(decimals=0, min=0, displayName='${__field.labels.Customer}',
+                                             custom={'drawStyle': 'bars', 'fillOpacity': 80, 'lineWidth': 0, 'barWidthFactor': 0.9,
+                                                     'stacking': {'mode': 'normal', 'group': 'A'}}, **series_colours()),
+        options={'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'desc'}}, may_be_empty='no Cortex day read'))
+    p[-1]['transformations'] = [{'id': 'prepareTimeSeries', 'options': {'format': 'multi'}}]
+    p.append(panel(14, 'The move to V8, week by week', 'timeseries', f"""
+        SELECT toDateTime(snapshot_date) AS time,
+               countIf(engine_major >= (SELECT engine_current_major FROM n360.settings)) AS `V8 or later`,
+               countIf(engine_major < (SELECT engine_current_major FROM n360.settings)) AS `Below V8`,
+               sum(legacy_intents) AS `Legacy intents left`
+        FROM n360.va_config_snapshot WHERE {ACCT} AND $__dateFilter(snapshot_date) GROUP BY time ORDER BY time""", 12, 58, 12, 9,
+        describe('Each weekly configuration read: VAs on V8 or later (green) and below (amber), and the legacy intents still '
+                 'configured (dashed, right axis): the upgrade backlog shrinking.',
+                 'n360.va_config_snapshot', 'Customer', 'dashboard time range, weekly reads'),
+        fmt='timeseries', field=field_config(
+            [override('V8 or later', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['green']})),
+             override('Below V8', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['amber']})),
+             override('Legacy intents left', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['reference']}),
+                      ('custom.axisPlacement', 'right'), ('custom.lineStyle', {'fill': 'dash', 'dash': [6, 4]}),
+                      ('custom.drawStyle', 'line'), ('custom.fillOpacity', 0))],
+            decimals=0, min=0, custom={'drawStyle': 'bars', 'fillOpacity': 85, 'lineWidth': 2, 'stacking': {'mode': 'normal', 'group': 'A'}}),
+        options={'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'none'}}, may_be_empty='no configuration read'))
+    # action lists
+    p.append(panel(15, 'Longest playbooks', 'table', f"""
+        SELECT pb.playbook AS Playbook, a.display_name AS Customer, pb.va AS VA, pb.instruction_chars AS `Instructions (characters)`,
+               pb.tools AS Tools, pb.executions AS `Executions, 31 days`, ifNull(pb.built_by, '') AS `Built by`,
+               pb.account AS account, toString(pb.bot_id) AS bot
+        FROM n360.v_playbook AS pb INNER JOIN n360.account AS a ON a.account = pb.account
+        WHERE pb.{ACCT} ORDER BY `Instructions (characters)` DESC LIMIT 15""", 0, 67, 12, 9,
+        describe('The 15 longest production playbooks (instruction characters, drawn as a bar), with their tools and '
+                 'traffic. Long and busy = worth splitting or testing first. Click a VA for its playbooks. ' + ADOPT_NOTE,
+                 'n360.v_playbook', 'Customer', 'the newest read'),
+        field=field_config([hidden('account'), hidden('bot'), gauge_cell('Instructions (characters)', None, 'lavender'),
+                            count_col('Executions, 31 days'), width('Playbook', 190), width('Instructions (characters)', 190),
+                            with_links('VA', {'title': 'Open this VA\'s adoption', 'url': f"/d/{ADOPT_VA[0]}?var-account=${{__data.fields.account}}&var-va=${{__data.fields.bot}}&${{__url_time_range}}"})]),
+        options={'cellHeight': 'sm'}, may_be_empty='no playbook read'))
+    p.append(panel(16, 'Live but idle: no run in 31 days', 'table', f"""
+        SELECT pb.playbook AS Playbook, a.display_name AS Customer, pb.va AS VA, pb.instruction_chars AS `Instructions (characters)`,
+               ifNull(pb.built_by, '') AS `Built by`, pb.account AS account, toString(pb.bot_id) AS bot
+        FROM n360.v_playbook AS pb INNER JOIN n360.account AS a ON a.account = pb.account
+        WHERE pb.{ACCT} AND pb.idle ORDER BY Customer, VA""", 12, 67, 12, 9,
+        describe('V8 playbooks in production with no execution in their window: built, switched on, never triggered. Check '
+                 'the trigger, or retire them. Click a VA for its playbooks. ' + ADOPT_NOTE, 'n360.v_playbook', 'Customer',
+                 'the newest read'),
+        field=field_config([hidden('account'), hidden('bot'), count_col('Instructions (characters)'), width('Playbook', 200),
+                            with_links('VA', {'title': 'Open this VA\'s adoption', 'url': f"/d/{ADOPT_VA[0]}?var-account=${{__data.fields.account}}&var-va=${{__data.fields.bot}}&${{__url_time_range}}"})],
+                           noValue='No idle playbook'),
+        options={'cellHeight': 'sm'}, may_be_empty='no idle playbook'))
+    p.append(panel(17, 'Upgrade queue: VAs below V8, busiest first', 'table', f"""
+        SELECT c.va AS VA, a.display_name AS Customer, ad.engine_version AS Engine, ad.legacy_intents AS `Legacy intents`,
+               c.convs_30 AS `Conversations, 30 days`,
+               concat('/d/{ADOPT_VA[0]}?var-account=', c.account, '&var-va=', toString(c.bot_id)) AS drill
+        FROM n360.v_va_change AS c INNER JOIN n360.va_adoption AS ad ON ad.bot_id = c.bot_id
         INNER JOIN n360.account AS a ON a.account = c.account
-        WHERE c.{ACCT} AND NOT g.current_engine ORDER BY `Conversations, 30 days` DESC""", 0, 27, 12, 8,
+        WHERE c.{ACCT} AND ad.engine_major < (SELECT engine_current_major FROM n360.settings)
+        ORDER BY `Conversations, 30 days` DESC""", 0, 76, 12, 8,
         describe('VAs still on an engine older than V8, ranked by conversations in the last 30 days: the first row is the '
-                 'one to upgrade next (most traffic moves). ' + PHASE2_NOTE, 'n360.v_va_change, n360.v_va_config_latest',
+                 'one to upgrade next (most traffic moves). ' + ADOPT_NOTE, 'n360.v_va_change, n360.va_adoption',
                  'Customer', 'the newest read; the 30 days to the data-through day'),
-        field=field_config([hidden('drill'), count_col('Conversations, 30 days'), width('VA', 200),
-                            with_links('VA', path_link('drill', 'Open VA'))], noValue='Every VA is on V8 or later'),
+        field=field_config([hidden('drill'), count_col('Conversations, 30 days'), width('VA', 170),
+                            with_links('VA', path_link('drill', 'Open this VA\'s adoption'))], noValue='Every VA is on V8 or later'),
         options={'cellHeight': 'sm'}, may_be_empty='every VA on V8'))
-    p.append(panel(11, 'Containment by channel', 'table', f"""
+    p.append(panel(18, 'Configuration changes since the last read', 'table', f"""
+        SELECT {VA_LABEL} AS VA, ac.display_name AS Customer, {date_sql('ch.snapshot_date')} AS `Read on`,
+               arrayStringConcat(ch.changes, '; ') AS Changes,
+               concat('/d/{ADOPT_VA[0]}?var-account=', ch.account, '&var-va=', toString(ch.bot_id)) AS drill
+        FROM n360.v_va_config_change AS ch INNER JOIN n360.va AS v ON v.bot_id = ch.bot_id
+        INNER JOIN n360.account AS ac ON ac.account = ch.account
+        WHERE ch.{ACCT}""", 12, 76, 12, 8,
+        describe('What changed per VA between its two newest weekly configuration reads.', 'n360.v_va_config_change',
+                 'Customer', 'the two newest reads per VA'),
+        field=field_config([hidden('drill'), width('VA', 170), width('Customer', 140), width('Read on', 105),
+                            with_links('VA', path_link('drill', 'Open this VA\'s adoption'))], noValue='No changes since the last read'),
+        options={'cellHeight': 'sm'}, may_be_empty='no change since the last read'))
+    p.append(panel(19, 'Containment by channel', 'table', f"""
         SELECT c.channel AS Channel, c.va AS VA, a.display_name AS Customer, c.containment_30 AS `Last 30 days`,
                c.containment_prev_30 AS `30 before`,
                multiIf(c.containment_change_pts IS NULL, NULL, c.containment_change_pts >= 1, concat('▲ ', toString(c.containment_change_pts)),
                        c.containment_change_pts <= -1, concat('▼ ', toString(abs(c.containment_change_pts))), '● steady') AS Change,
                concat('/d/n360-va?var-account=', c.account, '&var-va=', toString(c.bot_id)) AS drill
         FROM n360.v_va_change AS c INNER JOIN n360.account AS a ON a.account = c.account
-        WHERE c.{ACCT} AND c.containment_30 IS NOT NULL ORDER BY Channel, `Last 30 days`""", 12, 27, 12, 8,
+        WHERE c.{ACCT} AND c.containment_30 IS NOT NULL ORDER BY Channel, `Last 30 days`""", 0, 84, 12, 9,
         describe('Containment per VA, grouped by channel (never one number across channels), last 30 days against the 30 '
                  'before; the change is in points (▼ down, ▲ up). VAs without handoff data are on the Containment '
                  'dashboard.', 'n360.v_va_change', 'Customer; VAs with handoff data', 'the 60 days to the data-through day'),
         field=field_config([hidden('drill'), *[override(c, ('unit', 'percent'), ('decimals', 0)) for c in ('Last 30 days', '30 before')],
                             override('Change', ('mappings', [{'type': 'regex', 'options': {'pattern': '^▼.*', 'result': {
                                 'color': COLOUR['down'], 'index': 0}}}]), ('custom.cellOptions', {'type': 'color-text'})),
-                            width('Channel', 70), width('VA', 180), width('Customer', 140), width('Last 30 days', 95),
+                            width('Channel', 70), width('VA', 160), width('Customer', 130), width('Last 30 days', 95),
                             width('30 before', 85), with_links('VA', path_link('drill', 'Open VA'))]),
         options={'cellHeight': 'sm'}))
-    p.append(panel(12, 'Idle playbooks: built, not run in 31 days', 'table', f"""
-        SELECT pb.playbook AS Playbook, {VA_LABEL} AS VA, ac.display_name AS Customer,
-               concat('/d/n360-va?var-account=', pb.account, '&var-va=', toString(pb.bot_id)) AS drill
-        FROM n360.playbook_day AS pb INNER JOIN n360.va AS v ON v.bot_id = pb.bot_id
-        INNER JOIN n360.account AS ac ON ac.account = pb.account
-        WHERE pb.{ACCT} AND pb.day > {DATA_THROUGH_SQL} - 31
-        GROUP BY pb.playbook, pb.account, pb.bot_id, v.va_name, v.channels, ac.display_name HAVING sum(pb.executions) = 0
-        ORDER BY Customer""", 0, 35, 12, 7,
-        describe('Playbooks that exist (they have daily rows) but ran 0 times in the 31 days to the data-through day '
-                 '(v1.1 "Authored, not live"). ' + PHASE2_NOTE, 'n360.playbook_day', 'Customer',
-                 'the 31 days to the data-through day'),
-        field=field_config([hidden('drill'), with_links('VA', path_link('drill', 'Open VA'))], noValue='No idle playbook'),
-        options={'cellHeight': 'sm'}, may_be_empty='no idle playbook'))
-    p.append(panel(13, 'Configuration changes since the last read', 'table', f"""
-        SELECT {VA_LABEL} AS VA, ac.display_name AS Customer, {date_sql('ch.snapshot_date')} AS `Read on`,
-               arrayStringConcat(ch.changes, '; ') AS Changes
-        FROM n360.v_va_config_change AS ch INNER JOIN n360.va AS v ON v.bot_id = ch.bot_id
-        INNER JOIN n360.account AS ac ON ac.account = ch.account
-        WHERE ch.{ACCT}""", 12, 35, 12, 7,
-        describe('What changed per VA between its two newest weekly reads. ' + PHASE2_NOTE, 'n360.v_va_config_change',
-                 'Customer', 'the two newest reads per VA'),
-        field=field_config([width('VA', 170), width('Customer', 140), width('Read on', 105)],
-                           noValue='No changes since the last read'),
-        options={'cellHeight': 'sm'}, may_be_empty='no change since the last read'))
-    p.append(panel(14, 'Authoring sessions and assistant questions, customer users', 'timeseries', f"""
-        SELECT toDateTime(toMonday(c.day)) AS time, sum(c.authoring_sessions) AS `Authoring sessions`,
-               sum(e.questions) AS `Analytics-assistant questions`
-        FROM n360.cortex_day AS c INNER JOIN n360.explorer_day AS e
-             ON e.account = c.account AND e.day = c.day AND e.user_type = c.user_type
-        WHERE c.{ACCT} AND c.user_type = 'customer' AND $__dateFilter(c.day)
-          AND toMonday(c.day) >= toDate($__fromTime) AND toMonday(c.day) + 6 <= {DATA_THROUGH_SQL}
-        GROUP BY time ORDER BY time""", 0, 42, 24, 8,
-        describe('Per complete week, sessions in the authoring tool and questions to the analytics assistant by customer '
-                 'users only (staff left out). ' + PHASE2_NOTE, 'n360.cortex_day, n360.explorer_day',
-                 'Customer; customer users', 'dashboard time range, complete weeks'),
-        fmt='timeseries', field=field_config(decimals=0, min=0, custom={'drawStyle': 'line', 'lineWidth': 2, 'spanNulls': False},
-                                             **series_colours()),
-        may_be_empty='no usage data loaded'))
+    feats = ['V8 playbooks', 'Authoring tool', 'Analytics assistant', 'MCP servers', 'Supervisory rules']
+    cols5 = ',\n               '.join(f"anyIf(if(f.used IS NULL, NULL, if(f.used, 'Used', 'Not used')), f.feature = '{x}') AS `{x}`"
+                                     for x in feats)
+    p.append(panel(20, 'Target features used (the risk model\'s list)', 'table', f"""
+        SELECT a.display_name AS Customer, {cols5}, a.account AS account
+        FROM n360.account AS a INNER JOIN n360.v_feature_use AS f ON f.account = a.account
+        WHERE a.{ACCT} GROUP BY a.display_name, a.account ORDER BY Customer""", 12, 84, 12, 9,
+        describe('The five target features the risk model and the Overview count ("customers using 3+ target features"): '
+                 'used in the last 30 days (green) or not (light grey); "Not reported yet" where the source has no rows.',
+                 'n360.v_feature_use', 'Customer', 'the 30 days to the data-through day'),
+        field=field_config([hidden('account'),
+                            *[coloured(x, {'Used': ('Used', 'green'), 'Not used': ('Not used', 'grey_light')}, 'color-background')
+                              for x in feats],
+                            width('Customer', 140), with_links('Customer', drill(UID['customer'], 'account', 'account', 'Open customer'))]),
+        options={'cellHeight': 'sm'}))
     return dashboard(UID['adoption'], 'N360 · Adoption', p, [var_account()], [back_link()])
+
+
+def amber_cell(column):
+    """A count that needs a look when above zero: amber text then, plain at zero."""
+    return override(column, ('mappings', amber_when_any()), ('custom.cellOptions', {'type': 'color-text'}),
+                    ('color', {'mode': 'fixed', 'fixedColor': COLOUR['none']}))
+
+
+def adoption_customer():
+    """Customer adoption: one customer's six features VA by VA, its playbooks, and who does the work.
+    From the Adoption grid (or the Customer page); drills to VA adoption."""
+    p = page_header(1, f"""
+        SELECT if(count() = 0, NULL, concat(any(a.display_name), ': ', toString(any(c.features_adopted)), ' of 6 features · ',
+                   'playbooks ran in ', {num_sql('any(c.conversations)')}, ' conversations in 31 days, ',
+                   toString(round(any(c.handoff_pct))), '% handed off · ',
+                   if(any(c.next_feature) = '', 'every feature adopted', concat('next step: ', any(c.next_feature))))) AS sentence
+        FROM n360.v_customer_adoption AS c INNER JOIN n360.account AS a ON a.account = c.account WHERE c.{ACCT}""",
+        describe('The customer\'s features adopted (of the six), the conversations that ran at least one playbook and the '
+                 'share handed off from within one, and the next feature to move to (proposed order). ' + ADOPT_NOTE,
+                 'n360.v_customer_adoption', 'Customer', 'the 31 days to the data-through day'))
+    p.append(single_tile(3, 'Playbook executions, 31 days', f"""
+        SELECT if(count() = 0, NULL, sum(executions)) AS `across every V8 playbook` FROM n360.va_adoption WHERE {ACCT}""", 0, 3,
+        describe('Playbook executions on V8 VAs in the 31 days to the data-through day. ' + ADOPT_NOTE,
+                 'n360.va_adoption', 'Customer', 'the 31 days to the data-through day')))
+    p.append(single_tile(4, 'Conversations with a playbook', f"""
+        SELECT if(count() = 0, NULL, sum(conversations)) AS `ran at least one` FROM n360.va_adoption WHERE {ACCT}""", 6, 3,
+        describe('Conversations that ran at least one playbook, 31 days. ' + ADOPT_NOTE, 'n360.va_adoption', 'Customer',
+                 'the 31 days to the data-through day')))
+    p.append(single_tile(5, 'Handed off from a playbook', f"""
+        SELECT if(sum(conversations) = 0, NULL, round(100 * sum(handoffs) / sum(conversations), 1)) AS `of those conversations`
+        FROM n360.va_adoption WHERE {ACCT}""", 12, 3,
+        describe('Handoffs to an agent from within a playbook, as a share of the conversations that ran one. ' + ADOPT_NOTE,
+                 'n360.va_adoption', 'Customer', 'the 31 days to the data-through day'),
+        field=plain(field_config(unit='percent', decimals=1))))
+    p.append(single_tile(6, 'Features adopted', f"""
+        SELECT if(count() = 0, NULL, any(features_adopted)) AS `of 6` FROM n360.v_customer_adoption WHERE {ACCT}""", 18, 3,
+        describe('Of the six features, how many this customer has adopted on at least one VA (V8 / V9: on every VA). '
+                 + ADOPT_NOTE, 'n360.v_customer_adoption', 'Customer', 'the newest read')))
+    cols = ',\n               '.join(f"anyIf(concat(f.state, '|', f.value), f.feature = '{name}') AS `{col}`" for col, name, _ in FEATURES)
+    p.append(panel(7, 'Six features, VA by VA', 'table', f"""
+        SELECT f.va AS VA, any(f.region) AS Region, countIf(f.state = 'adopted') AS `Adopted, of 6`, {cols},
+               toString(f.bot_id) AS bot, any(f.account) AS acct
+        FROM n360.v_va_feature_adoption AS f WHERE f.{ACCT} GROUP BY f.va, f.bot_id ORDER BY `Adopted, of 6` DESC, VA""", 0, 8, 24, 6,
+        describe('Each VA against the six features: green adopted, amber partly, light grey not yet, grey not reported. '
+                 'Hover a heading for what adopted means; the evidence behind each cell is in the table below. Click a VA '
+                 'for its playbooks and configuration. ' + ADOPT_NOTE, 'n360.v_va_feature_adoption', 'Customer', 'the newest read'),
+        field=field_config([hidden('bot'), hidden('acct'), *adopt_cells([(c, m) for c, _, m in FEATURES]),
+                            gauge_cell('Adopted, of 6', 6), width('VA', 170), width('Region', 70), width('Adopted, of 6', 120),
+                            with_links('VA', {'title': 'Open this VA\'s adoption', 'url': f"/d/{ADOPT_VA[0]}?var-account=${{__data.fields.acct}}&var-va=${{__data.fields.bot}}&${{__url_time_range}}"},
+                                       {'title': 'Open the VA page (traffic, anomalies)', 'url': "/d/n360-va?var-account=${__data.fields.acct}&var-va=${__data.fields.bot}&${__url_time_range}"})]),
+        options={'cellHeight': 'md'}))
+    p.append(panel(8, 'The evidence behind each feature', 'table', f"""
+        SELECT feature AS Feature, concat(state, '|', value) AS `This customer`, detail AS `VA by VA`, means AS `What adopted means`
+        FROM n360.v_customer_feature_adoption WHERE {ACCT} ORDER BY ord""", 0, 14, 24, 9,
+        describe('For each feature: where the customer stands, every VA\'s reading, and the definition it is judged by. '
+                 + ADOPT_NOTE, 'n360.v_customer_feature_adoption', 'Customer', 'the newest read'),
+        field=field_config([*adopt_cells([('This customer', 'Adopted on any VA; V8 / V9 only when every VA is.')]),
+                            width('Feature', 190), width('This customer', 190), override('VA by VA', ('custom.cellOptions', {'type': 'auto', 'wrapText': True}))]),
+        options={'cellHeight': 'sm'}))
+    p.append(panel(9, 'Executions by playbook', 'barchart', f"""
+        SELECT concat(playbook, '  ·  ', va) AS Playbook, executions AS Executions
+        FROM n360.v_playbook WHERE {ACCT} AND executions > 0 ORDER BY executions DESC LIMIT 20""", 0, 23, 12, 11,
+        describe('The 20 busiest playbooks over 31 days. Hover a bar for the count. Long tails are normal; one playbook '
+                 'carrying most of a VA is a single point of failure. ' + ADOPT_NOTE, 'n360.v_playbook', 'Customer',
+                 'the newest read'),
+        field=field_config(decimals=0, min=0, custom={'fillOpacity': 85, 'lineWidth': 0, 'axisGridShow': False}, **series_colours()),
+        options={'xField': 'Playbook', 'orientation': 'horizontal', 'showValue': 'always', 'barWidth': 0.75,
+                 'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'},
+                 'tooltip': {'mode': 'single', 'sort': 'none'}}, may_be_empty='no playbook executed'))
+    p.append(panel(10, 'Length against traffic', 'xychart', f"""
+        SELECT instruction_chars AS `Instructions (characters)`, executions AS `Executions, 31 days`, playbook AS Playbook,
+               va AS VA
+        FROM n360.v_playbook WHERE {ACCT} AND executions IS NOT NULL ORDER BY instruction_chars""", 12, 23, 12, 11,
+        describe('Every production playbook as a point: instruction length across, executions up. Top right (long and busy) '
+                 'is where a change is riskiest and testing matters most; bottom right (long and quiet) is effort that is '
+                 'not used. Hover a point for the playbook. ' + ADOPT_NOTE, 'n360.v_playbook', 'Customer', 'the newest read'),
+        field=field_config(decimals=0, min=0, color={'mode': 'fixed', 'fixedColor': COLOUR['lavender']},
+                           custom={'show': 'points', 'pointSize': {'fixed': 9}}),
+        options={'mapping': 'auto', 'series': [{}], 'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'},
+                 'tooltip': {'mode': 'single', 'sort': 'none'}}, may_be_empty='no playbook read'))
+    p.append(panel(11, 'Every playbook', 'table', f"""
+        SELECT playbook AS Playbook, va AS VA, length_band AS Length, instruction_chars AS `Instructions (characters)`, tools AS Tools,
+               trigger_chars AS `Trigger (characters)`, if(short, 'yes', 'no') AS `Short (<200)`,
+               executions AS `Executions, 31 days`, share_of_va_pct AS `Share of the VA`,
+               multiIf(idle IS NULL, NULL, idle, 'Idle', 'Ran') AS `In use`, ifNull(built_by, '') AS `Built by`,
+               toString(bot_id) AS bot, account
+        FROM n360.v_playbook WHERE {ACCT} ORDER BY VA, rank_on_va""", 0, 34, 24, 10,
+        describe('Every production playbook (the v1.1 complexity table): instruction, tool and trigger size, length band, '
+                 'executions and their share of the VA\'s, whether it ran, and who built it. Click a VA for its page. '
+                 + ADOPT_NOTE, 'n360.v_playbook', 'Customer', 'the newest read'),
+        field=field_config([hidden('bot'), hidden('account'), gauge_cell('Share of the VA', 100, 'series', 'percent'),
+                            gauge_cell('Instructions (characters)', None, 'lavender'), count_col('Executions, 31 days'),
+                            coloured('In use', {'Idle': ('Idle', 'amber'), 'Ran': ('Ran', 'none')}),
+                            width('Playbook', 200), width('VA', 140), width('Length', 105), width('Instructions (characters)', 180),
+                            width('Share of the VA', 150),
+                            with_links('VA', {'title': 'Open this VA\'s adoption', 'url': f"/d/{ADOPT_VA[0]}?var-account=${{__data.fields.account}}&var-va=${{__data.fields.bot}}&${{__url_time_range}}"})]),
+        options={'cellHeight': 'sm'}, may_be_empty='no playbook read'))
+    bands = ',\n               '.join(f"countIf(length_band = '{b}') AS `{b}`" for b in BANDS)
+    p.append(panel(12, 'Length bands, VA by VA', 'table', f"""
+        SELECT va AS VA, count() AS Playbooks, {bands}, toString(bot_id) AS bot, any(account) AS acct
+        FROM n360.v_playbook WHERE {ACCT} GROUP BY va, bot_id ORDER BY VA""", 0, 44, 12, 7,
+        describe('Production playbooks per VA in each length band (instruction characters). ' + ADOPT_NOTE,
+                 'n360.v_playbook', 'Customer', 'the newest read'),
+        field=field_config([hidden('bot'), hidden('acct'), width('VA', 120),
+                            with_links('VA', {'title': 'Open this VA\'s adoption', 'url': f"/d/{ADOPT_VA[0]}?var-account=${{__data.fields.acct}}&var-va=${{__data.fields.bot}}&${{__url_time_range}}"})],
+                           custom={'minWidth': 55}),
+        options={'cellHeight': 'sm'}, may_be_empty='no playbook read'))
+    p.append(panel(13, 'Who built them', 'piechart', f"""
+        SELECT countIf(built_by = 'Customer') AS `The customer`, countIf(built_by = 'Netomi') AS Netomi,
+               countIf(built_by IS NULL) AS `Not reported`
+        FROM n360.v_playbook WHERE {ACCT}""", 12, 44, 6, 7,
+        describe('Production playbooks by who created them (creator email domain; n360.settings adoption_staff_domain). '
+                 + ADOPT_NOTE, 'n360.v_playbook', 'Customer', 'the newest read'),
+        field=field_config([override('The customer', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['green']})),
+                            override('Netomi', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['series']})),
+                            override('Not reported', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['grey']}))], decimals=0),
+        options={'reduceOptions': {'calcs': ['lastNotNull'], 'fields': '', 'values': False}, 'pieType': 'donut',
+                 'displayLabels': ['percent'], 'legend': {'displayMode': 'list', 'placement': 'right', 'showLegend': True,
+                                                          'values': ['value']},
+                 'tooltip': {'mode': 'single', 'sort': 'none'}}, may_be_empty='no playbook read'))
+    p.append(panel(14, 'Live but idle', 'table', f"""
+        SELECT playbook AS Playbook, va AS VA FROM n360.v_playbook WHERE {ACCT} AND idle ORDER BY VA, Playbook""", 18, 44, 6, 7,
+        describe('Production V8 playbooks with no execution in their window. ' + ADOPT_NOTE, 'n360.v_playbook', 'Customer',
+                 'the newest read'),
+        field=field_config(noValue='None idle'), options={'cellHeight': 'sm'}, may_be_empty='no idle playbook'))
+    p.append(panel(15, 'Cortex sessions per day', 'timeseries', f"""
+        SELECT toDateTime(day) AS time, sum(authoring_sessions) AS Sessions FROM n360.cortex_day
+        WHERE {ACCT} AND $__dateFilter(day) GROUP BY time ORDER BY time""", 0, 51, 12, 8,
+        describe('Cortex sessions per day on the customer\'s US VAs (who ran them is not known yet). Read since 5 Oct 2026; '
+                 'a day read with none is 0.', 'n360.cortex_day', 'Customer', 'dashboard time range'),
+        fmt='timeseries', field=field_config(decimals=0, min=0, custom={'drawStyle': 'bars', 'fillOpacity': 80, 'lineWidth': 0},
+                                              **series_colours()),
+        options={'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'},
+                 'tooltip': {'mode': 'single', 'sort': 'none'}}, may_be_empty='no Cortex day read'))
+    p.append(panel(16, 'Engine, week by week', 'state-timeline', f"""
+        SELECT toDateTime(c.snapshot_date) AS time, {VA_LABEL} AS VA, c.engine_version AS Engine
+        FROM n360.va_config_snapshot AS c INNER JOIN n360.va AS v ON v.bot_id = c.bot_id
+        WHERE c.{ACCT} AND $__dateFilter(c.snapshot_date) ORDER BY time""", 12, 51, 12, 8,
+        describe('Each VA\'s engine version at each weekly configuration read: green V8 or later, amber older. Hover for '
+                 'the version.', 'n360.va_config_snapshot', 'Customer', 'dashboard time range, weekly reads'),
+        fmt='timeseries', field=field_config(mappings=[
+            {'type': 'regex', 'options': {'pattern': '^[Vv]?(8|9|[1-9][0-9]).*', 'result': {'color': COLOUR['green'], 'index': 0}}},
+            {'type': 'regex', 'options': {'pattern': '^[Vv]?[0-7]\\..*', 'result': {'color': COLOUR['amber'], 'index': 1}}}],
+            color={'mode': 'fixed', 'fixedColor': COLOUR['grey']}, custom={'fillOpacity': 80, 'lineWidth': 0}),
+        options={'showValue': 'always', 'mergeValues': True, 'rowHeight': 0.8, 'alignValue': 'center',
+                 'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'},
+                 'tooltip': {'mode': 'single', 'sort': 'none'}}, may_be_empty='no configuration read'))
+    p[-1]['transformations'] = [{'id': 'partitionByValues', 'options': {'fields': ['VA'], 'keepFields': False, 'naming': {'asLabels': True}}}]
+    p[-1]['fieldConfig']['defaults']['displayName'] = '${__field.labels.VA}'
+    p.append(config_table(17, ACCT, 0, 59, 'Customer'))
+    return dashboard(ADOPT_CUSTOMER[0], 'N360 · Customer adoption', p, [var_one_account()],
+                     [back_link(('n360-adoption', 'Adoption')), back_link(CUSTOMER, keep_vars=True), back_link()])
+
+
+def config_table(pid, where, x, y, filter_text, h=8):
+    """The v1.1 configuration per VA: engine, playbooks, calibration, testing, recipes, MCP servers, supervisory rules."""
+    return panel(pid, 'Configuration, VA by VA', 'table', f"""
+        SELECT va AS VA, engine_version AS Engine, playbooks_live AS `Playbooks live`, legacy_intents AS `Legacy intents`,
+               idle_playbooks AS Idle,
+               concat(toString(ifNull(calibration_runs, 0)), if(calibration_runs = 1, ' run, ', ' runs, '),
+                      toString(ifNull(calibration_completed, 0)), ' completed') AS Calibration,
+               {date_sql('calibration_last')} AS `Last calibrated`, ifNull(behavior_validation, 'not set') AS `Behavior Validation`,
+               test_runs AS `Test runs`, concat(toString(ifNull(recipes_production, 0)), ' of ', toString(ifNull(recipes, 0)), ' live') AS Recipes,
+               recipe_actions AS `Write actions`,
+               concat(toString(ifNull(mcp_live, 0)), ' live', if(ifNull(mcp_not_live, 0) > 0, concat(', ', toString(mcp_not_live), ' set up, not live'), '')) AS `MCP servers`,
+               mcp_names AS `MCP names`,
+               concat(toString(ifNull(supervisory_live, 0)), ' live, ', toString(ifNull(supervisory_default, 0)), ' default') AS `Supervisory rules`,
+               supervisory_names AS `Rule names`, toString(bot_id) AS bot, account
+        FROM n360.va_adoption WHERE {where} ORDER BY VA""", x, y, 24, h,
+        describe('Per VA, the v1.1 configuration table: engine and playbooks, legacy intents left, idle playbooks, '
+                 'calibration, Behavior Validation and test runs, recipes live and their write actions, MCP servers (live, '
+                 'set up but not live, names) and supervisory rules (live, default). ' + ADOPT_NOTE,
+                 'n360.va_adoption', filter_text, 'the newest read'),
+        field=field_config([hidden('bot'), hidden('account'), amber_cell('Idle'),
+                            coloured('Behavior Validation', {'enabled': ('Enabled', 'green'), 'off': ('Off', 'amber'),
+                                                             'not set': ('Not set', 'grey_light')}),
+                            width('VA', 130), width('MCP names', 150), width('Rule names', 130),
+                            with_links('VA', {'title': 'Open this VA\'s adoption', 'url': f"/d/{ADOPT_VA[0]}?var-account=${{__data.fields.account}}&var-va=${{__data.fields.bot}}&${{__url_time_range}}"})]),
+        options={'cellHeight': 'sm'})
+
+
+def adoption_va():
+    """VA adoption: one VA's six features as cards, its playbooks, and its configuration over time."""
+    p = page_header(1, f"""
+        SELECT if(count() = 0, NULL, concat(any(a.va), ' on ', ifNull(any(a.engine_version), 'an unread engine'), ' · ',
+                   toString(any(c.n)), ' of 6 features · ', toString(any(a.playbooks_live)), ' playbooks live',
+                   if(any(a.idle_playbooks) > 0, concat(', ', toString(any(a.idle_playbooks)), ' idle'), ''), ' · ',
+                   {num_sql('any(a.executions)')}, ' executions in 31 days')) AS sentence
+        FROM n360.va_adoption AS a
+        LEFT JOIN (SELECT bot_id, countIf(state = 'adopted') AS n FROM n360.v_va_feature_adoption GROUP BY bot_id) AS c ON c.bot_id = a.bot_id
+        WHERE toString(a.bot_id) IN (${{va:singlequote}})""",
+        describe('The VA\'s engine, features adopted of the six, playbooks live and idle, and executions. ' + ADOPT_NOTE,
+                 'n360.va_adoption, n360.v_va_feature_adoption', 'VA', 'the 31 days to the data-through day'))
+    p.append(single_tile(3, 'Playbook executions, 31 days', f"""
+        SELECT any(executions) AS `on this VA` FROM n360.va_adoption WHERE {ONE_VA}""", 0, 3,
+        describe('Playbook executions in the 31 days to the data-through day. ' + ADOPT_NOTE, 'n360.va_adoption', 'VA',
+                 'the 31 days to the data-through day')))
+    p.append(single_tile(4, 'Conversations with a playbook', f"""
+        SELECT any(conversations) AS `ran at least one` FROM n360.va_adoption WHERE {ONE_VA}""", 6, 3,
+        describe('Conversations that ran at least one playbook, 31 days. ' + ADOPT_NOTE, 'n360.va_adoption', 'VA',
+                 'the 31 days to the data-through day')))
+    p.append(single_tile(5, 'Handed off from a playbook', f"""
+        SELECT if(any(conversations) = 0, NULL, round(100 * any(handoffs) / any(conversations), 1)) AS `of those conversations`
+        FROM n360.va_adoption WHERE {ONE_VA}""", 12, 3,
+        describe('Handoffs to an agent from within a playbook, as a share of the conversations that ran one. ' + ADOPT_NOTE,
+                 'n360.va_adoption', 'VA', 'the 31 days to the data-through day'),
+        field=plain(field_config(unit='percent', decimals=1))))
+    p.append(single_tile(6, 'Playbooks that ran', f"""
+        SELECT if(count() = 0, NULL, concat(toString(any(playbooks_executed)), ' of ', toString(any(playbooks_live)))) AS `live playbooks`
+        FROM n360.va_adoption WHERE {ONE_VA}""", 18, 3,
+        describe('Production playbooks that ran at least once in 31 days, of those live. ' + ADOPT_NOTE, 'n360.va_adoption',
+                 'VA', 'the 31 days to the data-through day'),
+        field=plain(field_config(noValue=NOT_READ))))
+    maps = [{'type': 'regex', 'options': {'pattern': f'^{k}\\|(.*)$', 'result': {'text': '$1', 'color': COLOUR[c], 'index': i}}}
+            for i, (k, (_, c)) in enumerate(ADOPT.items())]
+    for i, (col, name, means) in enumerate(FEATURES):
+        p.append(panel(7 + i, col, 'stat', f"""
+            SELECT concat(state, '|', value) AS v FROM n360.v_va_feature_adoption WHERE {ONE_VA} AND feature = '{name}'""",
+            4 * i, 8, 4, 4,
+            describe(f'{means} Green adopted, amber partly, light grey not yet, grey not reported. The evidence is in the '
+                     'table below. ' + ADOPT_NOTE, 'n360.v_va_feature_adoption', 'VA', 'the newest read'),
+            field=field_config(mappings=maps + [empty_grey()], color={'mode': 'fixed', 'fixedColor': COLOUR['grey']}),
+            options={'reduceOptions': {'calcs': ['lastNotNull'], 'fields': '/.*/'}, 'textMode': 'value', 'colorMode': 'background',
+                     'graphMode': 'none', 'justifyMode': 'center', 'text': {'valueSize': 18}}))
+    p.append(panel(13, 'The evidence behind each feature', 'table', f"""
+        SELECT feature AS Feature, concat(state, '|', value) AS `This VA`, detail AS Evidence, means AS `What adopted means`
+        FROM n360.v_va_feature_adoption WHERE {ONE_VA} ORDER BY ord""", 0, 12, 24, 11,
+        describe('For each feature: the reading, the evidence (counts and dates from the source) and the definition. '
+                 + ADOPT_NOTE, 'n360.v_va_feature_adoption', 'VA', 'the newest read'),
+        field=field_config([*adopt_cells([('This VA', 'Green adopted, amber partly, light grey not yet, grey not reported.')]),
+                            width('Feature', 190), width('This VA', 190),
+                            override('Evidence', ('custom.cellOptions', {'type': 'auto', 'wrapText': True}))]),
+        options={'cellHeight': 'sm'}))
+    p.append(panel(14, 'Executions by playbook', 'barchart', f"""
+        SELECT playbook AS Playbook, executions AS Executions FROM n360.v_playbook WHERE {ONE_VA} ORDER BY ifNull(executions, 0) DESC""",
+        0, 23, 12, 10,
+        describe('Every production playbook on this VA by executions over 31 days (an idle one shows 0). ' + ADOPT_NOTE,
+                 'n360.v_playbook', 'VA', 'the newest read'),
+        field=field_config(decimals=0, min=0, custom={'fillOpacity': 85, 'lineWidth': 0, 'axisGridShow': False}, **series_colours()),
+        options={'xField': 'Playbook', 'orientation': 'horizontal', 'showValue': 'always', 'barWidth': 0.75,
+                 'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'},
+                 'tooltip': {'mode': 'single', 'sort': 'none'}}, may_be_empty='no playbook read'))
+    p.append(panel(15, 'Length against traffic', 'xychart', f"""
+        SELECT instruction_chars AS `Instructions (characters)`, executions AS `Executions, 31 days`, playbook AS Playbook
+        FROM n360.v_playbook WHERE {ONE_VA} AND executions IS NOT NULL ORDER BY instruction_chars""", 12, 23, 12, 10,
+        describe('Each playbook on this VA as a point: instruction length across, executions up. Hover a point for the '
+                 'playbook. ' + ADOPT_NOTE, 'n360.v_playbook', 'VA', 'the newest read'),
+        field=field_config(decimals=0, min=0, color={'mode': 'fixed', 'fixedColor': COLOUR['lavender']},
+                           custom={'show': 'points', 'pointSize': {'fixed': 10}}),
+        options={'mapping': 'auto', 'series': [{}], 'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'},
+                 'tooltip': {'mode': 'single', 'sort': 'none'}}, may_be_empty='no playbook read'))
+    p.append(panel(16, 'Every playbook on this VA', 'table', f"""
+        SELECT playbook AS Playbook, length_band AS Length, instruction_chars AS `Instructions (characters)`, tools AS Tools,
+               trigger_chars AS `Trigger (characters)`, if(short, 'yes', 'no') AS `Short (<200)`,
+               executions AS `Executions, 31 days`, share_of_va_pct AS `Share of the VA`,
+               multiIf(idle IS NULL, NULL, idle, 'Idle', 'Ran') AS `In use`, ifNull(built_by, '') AS `Built by`, task_id AS Task
+        FROM n360.v_playbook WHERE {ONE_VA} ORDER BY rank_on_va""", 0, 33, 24, 9,
+        describe('Every production playbook on this VA: sizes, length band, executions and their share of the VA, whether it '
+                 'ran, who built it, and its task id (to find it in the product). ' + ADOPT_NOTE, 'n360.v_playbook', 'VA',
+                 'the newest read'),
+        field=field_config([gauge_cell('Share of the VA', 100, 'series', 'percent'), gauge_cell('Instructions (characters)', None, 'lavender'),
+                            count_col('Executions, 31 days'), coloured('In use', {'Idle': ('Idle', 'amber'), 'Ran': ('Ran', 'none')}),
+                            width('Playbook', 220), width('Length', 105), width('Instructions (characters)', 190),
+                            width('Share of the VA', 160)]),
+        options={'cellHeight': 'sm'}, may_be_empty='no playbook read'))
+    p.append(panel(17, 'Playbooks and legacy intents, week by week', 'timeseries', f"""
+        SELECT toDateTime(snapshot_date) AS time, any(v8_playbooks) AS `V8 playbooks`, any(legacy_intents) AS `Legacy intents`
+        FROM n360.va_config_snapshot WHERE {ONE_VA} AND $__dateFilter(snapshot_date) GROUP BY time ORDER BY time""", 0, 42, 12, 8,
+        describe('At each weekly configuration read: V8 playbooks (solid) and legacy intents still configured (dashed). '
+                 'The migration is done when the dashed line reaches 0.', 'n360.va_config_snapshot', 'VA',
+                 'dashboard time range, weekly reads'),
+        fmt='timeseries', field=field_config(
+            [override('Legacy intents', ('color', {'mode': 'fixed', 'fixedColor': COLOUR['reference']}),
+                      ('custom.lineStyle', {'fill': 'dash', 'dash': [6, 4]}))],
+            decimals=0, min=0, color={'mode': 'fixed', 'fixedColor': COLOUR['series']},
+            custom={'drawStyle': 'line', 'lineWidth': 2, 'showPoints': 'always', 'pointSize': 6}),
+        options={'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
+                 'tooltip': {'mode': 'multi', 'sort': 'none'}}, may_be_empty='no configuration read'))
+    p.append(panel(18, 'Engine, week by week', 'state-timeline', f"""
+        SELECT toDateTime(snapshot_date) AS time, engine_version AS Engine
+        FROM n360.va_config_snapshot WHERE {ONE_VA} AND $__dateFilter(snapshot_date) ORDER BY time""", 12, 42, 12, 8,
+        describe('The engine version at each weekly read: green V8 or later, amber older. Hover for the version.',
+                 'n360.va_config_snapshot', 'VA', 'dashboard time range, weekly reads'),
+        fmt='timeseries', field=field_config(mappings=[
+            {'type': 'regex', 'options': {'pattern': '^[Vv]?(8|9|[1-9][0-9]).*', 'result': {'color': COLOUR['green'], 'index': 0}}},
+            {'type': 'regex', 'options': {'pattern': '^[Vv]?[0-7]\\..*', 'result': {'color': COLOUR['amber'], 'index': 1}}}],
+            color={'mode': 'fixed', 'fixedColor': COLOUR['grey']}, custom={'fillOpacity': 80, 'lineWidth': 0}),
+        options={'showValue': 'always', 'mergeValues': True, 'rowHeight': 0.8, 'alignValue': 'center',
+                 'legend': {'showLegend': False, 'displayMode': 'list', 'placement': 'bottom'},
+                 'tooltip': {'mode': 'single', 'sort': 'none'}}, may_be_empty='no configuration read'))
+    p.append(config_table(19, ONE_VA, 0, 50, 'VA', h=4))
+    return dashboard(ADOPT_VA[0], 'N360 · VA adoption', p, [var_one_account(), var_va()],
+                     [back_link(ADOPT_CUSTOMER, keep_vars=True), back_link(('n360-va', 'VA'), keep_vars=True),
+                      back_link(('n360-adoption', 'Adoption'))])
 
 
 def requests():
@@ -2605,7 +3043,7 @@ def risk_model_dashboard():
 
 
 DASHBOARDS = [overview, contracts, customer, health, risk, risk_model_dashboard, contract_line, va, forecast, anomalies, containment, pipeline,
-              adoption, requests]
+              adoption, requests, adoption_customer, adoption_va]
 
 
 def main():
