@@ -38,11 +38,14 @@ services:
       # GF_INSTALL_PLUGINS is deprecated in 13.x. Pin the version in .env (empty = latest, not reproducible).
       GF_PLUGINS_PREINSTALL_SYNC: grafana-clickhouse-datasource@${GRAFANA_CH_PLUGIN_VERSION:-}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # The Welcome page is everyone's home page (code/grafana/build_dashboards.py welcome())
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/n360-welcome.json
       GRAFANA_CH_PASSWORD: ${GRAFANA_CH_PASSWORD}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./grafana/welcome:/usr/share/grafana/public/img/n360:ro     # Welcome page thumbnails (synthetic data)
 
 volumes:
   ch-data:

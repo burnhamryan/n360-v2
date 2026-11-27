@@ -1,0 +1,549 @@
+{
+  "uid": "n360-welcome",
+  "title": "N360 \u00b7 Welcome",
+  "tags": [
+    "n360"
+  ],
+  "editable": false,
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "utc",
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "In one sentence",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "What N360 covers today and how many customers need a look. Open the Overview for which ones and why.\n\n**Source:** n360.account, n360.v_contract_status, n360.va, n360.v_needs_attention, n360.v_risk_customer  \n**Filter:** none  \n**Window:** the latest load",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 18,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "WITH (SELECT count() FROM n360.account) AS customers,\n             (SELECT count() FROM n360.v_contract_status) AS lines,\n             (SELECT count() FROM n360.va) AS vas,\n             (SELECT uniqExact(account) FROM n360.v_needs_attention) AS attention,\n             (SELECT countIf(level = 'risk') FROM n360.v_risk_customer) AS at_risk\n        SELECT if(customers = 0, NULL, concat('N360 is following ', toString(customers), ' customers, ', toString(lines),\n                  ' contract lines and ', toString(vas), ' VAs \u00b7 ', toString(attention), ' customers need attention today \u00b7 ',\n                  toString(at_risk), ' at risk')) AS sentence",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Nothing loaded yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "valueSize": 17
+        }
+      },
+      "links": [
+        {
+          "title": "Open the Overview",
+          "url": "/d/n360-overview"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Data",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "The last day of usage in this load, and the day it was loaded. Amber when the data is more than 2 days old (n360.settings stamp_stale_days): the numbers are the last good night's. Click for Pipeline health.\n\n**Source:** n360.v_freshness (n360.runs: loaded runs only)  \n**Filter:** none  \n**Window:** the latest load",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(stamp, if(stale, concat(' \u00b7 ', toString(days_old), ' days old'), '')) AS stamp FROM n360.v_freshness",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": ".* days old$",
+                "result": {
+                  "color": "#F0C25A",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline"
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 13
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "What N360 is",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 14,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<div style=\"font-size:22px;font-weight:600;margin-bottom:8px\">Welcome to N360</div> <p style=\"font-size:14px;line-height:1.55;margin:0 0 10px\">N360 shows, for every enterprise customer, how much of each signed contract is being used and how fast, when it will run out, whether anything unusual is happening, which features they have adopted, and which customers are at risk.</p> <p style=\"font-size:14px;line-height:1.55;margin:0 0 10px\">It refreshes every night from the usage pipeline, plus Salesforce and what CSMs record. The stamp at the top right of every page says how fresh the numbers are: amber means they are more than two days old.</p> <p style=\"font-size:13px;line-height:1.5;opacity:0.8;margin:0\">Every page reads the same way: <b>a sentence</b> that answers its question, <b>four headline numbers</b> with what changed, <b>one chart</b>, then <b>the lists</b>. Hover the \u24d8 on any panel for what it shows and where it comes from. Click a customer, line, VA or playbook to drill in; <b>Back</b> links at the top take you up again. The pictures below are examples on invented data.</p>"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Find your way",
+      "type": "text",
+      "gridPos": {
+        "x": 14,
+        "y": 3,
+        "w": 10,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<div style=\"margin:0 0 12px\"><div style=\"font-weight:600;font-size:14px;margin-bottom:3px\">CSM</div> <div style=\"font-size:13px\"><a href=\"/d/n360-overview\">Overview</a> \u00b7 <a href=\"/d/n360-customer\">Customer</a> \u00b7 <a href=\"/d/n360-risk\">Risk</a> \u00b7 <a href=\"/d/n360-contracts\">Contracts</a></div> <div style=\"font-size:12px;opacity:0.65;margin-top:2px\">Before a QBR: Customer, then Customer adoption.</div></div><div style=\"margin:0 0 12px\"><div style=\"font-weight:600;font-size:14px;margin-bottom:3px\">Customer architect</div> <div style=\"font-size:13px\"><a href=\"/d/n360-health\">Customer health</a> \u00b7 <a href=\"/d/n360-va\">VA</a> \u00b7 <a href=\"/d/n360-adoption\">Adoption</a> \u00b7 <a href=\"/d/n360-containment\">Containment</a></div> <div style=\"font-size:12px;opacity:0.65;margin-top:2px\">For an upgrade plan: Adoption's next step queue.</div></div><div style=\"margin:0 0 12px\"><div style=\"font-weight:600;font-size:14px;margin-bottom:3px\">Leader</div> <div style=\"font-size:13px\"><a href=\"/d/n360-overview\">Overview</a> \u00b7 <a href=\"/d/n360-risk\">Risk</a> \u00b7 <a href=\"/d/n360-risk-model\">Risk model</a> \u00b7 <a href=\"/d/n360-cortex\">Cortex by Netomians</a></div> <div style=\"font-size:12px;opacity:0.65;margin-top:2px\">For the week: the Overview sentence and Risk.</div></div>"
+      }
+    },
+    {
+      "id": 5,
+      "title": "A five-minute tour",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 5
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<div style=\"display:flex;gap:12px\"><a href=\"/d/n360-overview\" style=\"display:block;width:16%;box-sizing:border-box; color:inherit;text-decoration:none;padding:10px 12px;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:12px;opacity:0.65\">Step 1</div> <div style=\"font-size:15px;font-weight:600;margin:2px 0 4px\">Overview \u2192</div> <div style=\"font-size:12.5px;line-height:1.4\">Read the sentence, then the list of what needs attention.</div></a><a href=\"/d/n360-customer\" style=\"display:block;width:16%;box-sizing:border-box; color:inherit;text-decoration:none;padding:10px 12px;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:12px;opacity:0.65\">Step 2</div> <div style=\"font-size:15px;font-weight:600;margin:2px 0 4px\">A customer \u2192</div> <div style=\"font-size:12.5px;line-height:1.4\">Click a name anywhere: its contracts, usage and VAs.</div></a><a href=\"/d/n360-line\" style=\"display:block;width:16%;box-sizing:border-box; color:inherit;text-decoration:none;padding:10px 12px;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:12px;opacity:0.65\">Step 3</div> <div style=\"font-size:15px;font-weight:600;margin:2px 0 4px\">A contract line \u2192</div> <div style=\"font-size:12.5px;line-height:1.4\">From the customer, click a line: use against the term and the forecast.</div></a><a href=\"/d/n360-health\" style=\"display:block;width:16%;box-sizing:border-box; color:inherit;text-decoration:none;padding:10px 12px;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:12px;opacity:0.65\">Step 4</div> <div style=\"font-size:15px;font-weight:600;margin:2px 0 4px\">Customer health \u2192</div> <div style=\"font-size:12.5px;line-height:1.4\">Who is moving the wrong way, and the reason in words.</div></a><a href=\"/d/n360-risk\" style=\"display:block;width:16%;box-sizing:border-box; color:inherit;text-decoration:none;padding:10px 12px;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:12px;opacity:0.65\">Step 5</div> <div style=\"font-size:15px;font-weight:600;margin:2px 0 4px\">Risk \u2192</div> <div style=\"font-size:12.5px;line-height:1.4\">Twelve signals per customer; who is acting on each risk.</div></a><a href=\"/d/n360-adoption\" style=\"display:block;width:16%;box-sizing:border-box; color:inherit;text-decoration:none;padding:10px 12px;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:12px;opacity:0.65\">Step 6</div> <div style=\"font-size:15px;font-weight:600;margin:2px 0 4px\">Adoption \u2192</div> <div style=\"font-size:12.5px;line-height:1.4\">Six features per customer and the next step to move each one.</div></a></div>"
+      }
+    },
+    {
+      "id": 6,
+      "title": "What the colours mean",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 5
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<div style=\"font-size:13px;display:flex;gap:16px\"> <div style=\"width:52%;box-sizing:border-box;padding-right:16px\"> <div style=\"font-weight:600;margin-bottom:4px\">Contract status</div><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#F2A07B;color:#1a1a1a;font-size:12px\">Over billed</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#C3B0F2;color:#1a1a1a;font-size:12px\">Will exceed</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#3E7CC4;color:#1a1a1a;font-size:12px\">Renewal risk</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#9CC8EE;color:#1a1a1a;font-size:12px\">Below pace</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#76C893;color:#1a1a1a;font-size:12px\">Ahead</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#76C893;color:#1a1a1a;font-size:12px\">On pace</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#D3D3D3;color:#1a1a1a;font-size:12px\">Too early to tell</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#B4B4B4;color:#1a1a1a;font-size:12px\">Under review</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#B4B4B4;color:#1a1a1a;font-size:12px\">Billed not recorded</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#B4B4B4;color:#1a1a1a;font-size:12px\">Unmapped</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#B4B4B4;color:#1a1a1a;font-size:12px\">Not built</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#B4B4B4;color:#1a1a1a;font-size:12px\">Not measured</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#B4B4B4;color:#1a1a1a;font-size:12px\">Not reported yet</span></div> <div style=\"width:22%;box-sizing:border-box;padding-right:16px\"> <div style=\"font-weight:600;margin-bottom:4px\">Risk</div><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#E07B5F;color:#1a1a1a;font-size:12px\">Risk</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#F0C25A;color:#1a1a1a;font-size:12px\">Watch</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#76C893;color:#1a1a1a;font-size:12px\">OK</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#B4B4B4;color:#1a1a1a;font-size:12px\">Not reported</span></div> <div style=\"width:25%;box-sizing:border-box\"> <div style=\"font-weight:600;margin-bottom:4px\">Adoption</div><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#76C893;color:#1a1a1a;font-size:12px\">Adopted</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#F0C25A;color:#1a1a1a;font-size:12px\">Partly</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#D3D3D3;color:#1a1a1a;font-size:12px\">Not yet</span><span style=\"display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;background:#B4B4B4;color:#1a1a1a;font-size:12px\">Not reported yet</span></div> </div> <div style=\"font-size:12px;opacity:0.7;padding-top:6px\">Grey always means the source had nothing to read, never \"fine\". Red is not used: renewal risk is a strong blue. Charts that are not statuses use one neutral blue-grey.</div>"
+      }
+    },
+    {
+      "id": 7,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 24,
+        "h": 2
+      },
+      "transparent": true,
+      "options": {
+        "mode": "html",
+        "content": "<div style=\"font-size:18px;font-weight:600;padding-top:4px\">Every morning: where the book stands</div>"
+      }
+    },
+    {
+      "id": 8,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-overview\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/overview.jpg\" alt=\"Overview: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">Overview \u2192</div> <div style=\"font-size:13px;line-height:1.4\">What needs attention today, across every customer, in one sentence and a list.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: Everyone. Start here</div> </a>"
+      }
+    },
+    {
+      "id": 9,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 6,
+        "y": 24,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-contracts\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/contracts.jpg\" alt=\"Contracts: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">Contracts \u2192</div> <div style=\"font-size:13px;line-height:1.4\">Every contract line's status: over billed, set to exceed, below pace, renewal risk.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: CSMs, leaders</div> </a>"
+      }
+    },
+    {
+      "id": 10,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-health\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/health.jpg\" alt=\"Customer health: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">Customer health \u2192</div> <div style=\"font-size:13px;line-height:1.4\">Whose usage or containment is moving the wrong way, and how fast.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: CSMs, customer architects</div> </a>"
+      }
+    },
+    {
+      "id": 11,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 18,
+        "y": 24,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-risk\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/risk.jpg\" alt=\"Risk: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">Risk \u2192</div> <div style=\"font-size:13px;line-height:1.4\">Twelve risk signals per customer, the risk register and the renewals ahead.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: CSMs, customer architects, leaders</div> </a>"
+      }
+    },
+    {
+      "id": 12,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 24,
+        "h": 2
+      },
+      "transparent": true,
+      "options": {
+        "mode": "html",
+        "content": "<div style=\"font-size:18px;font-weight:600;padding-top:4px\">One customer, in depth</div>"
+      }
+    },
+    {
+      "id": 13,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-customer\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/customer.jpg\" alt=\"Customer: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">Customer \u2192</div> <div style=\"font-size:13px;line-height:1.4\">One customer: its contracts, usage, VAs and notes on one page.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: CSMs before a call or QBR</div> </a>"
+      }
+    },
+    {
+      "id": 14,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 6,
+        "y": 35,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-line\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/line.jpg\" alt=\"Contract line: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">Contract line \u2192</div> <div style=\"font-size:13px;line-height:1.4\">One contract line: use against the term, the forecast, the VAs behind it.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: CSMs, finance</div> </a>"
+      }
+    },
+    {
+      "id": 15,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 12,
+        "y": 35,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-va\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/va.jpg\" alt=\"VA: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">VA \u2192</div> <div style=\"font-size:13px;line-height:1.4\">One virtual agent: traffic against its normal, containment, configuration.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: Customer architects</div> </a>"
+      }
+    },
+    {
+      "id": 16,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 18,
+        "y": 35,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-requests\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/requests.jpg\" alt=\"Requests: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">Requests \u2192</div> <div style=\"font-size:13px;line-height:1.4\">What customers are asking for: open tickets and the asks several share.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: Product, CSMs</div> </a>"
+      }
+    },
+    {
+      "id": 17,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 24,
+        "h": 2
+      },
+      "transparent": true,
+      "options": {
+        "mode": "html",
+        "content": "<div style=\"font-size:18px;font-weight:600;padding-top:4px\">Adoption: what customers use</div>"
+      }
+    },
+    {
+      "id": 18,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 46,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-adoption\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/adoption.jpg\" alt=\"Adoption: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">Adoption \u2192</div> <div style=\"font-size:13px;line-height:1.4\">The six features for every customer, the next step for each, the playbook estate.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: Customer architects, CSMs, product</div> </a>"
+      }
+    },
+    {
+      "id": 19,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 6,
+        "y": 46,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-adoption-customer\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/adoption_customer.jpg\" alt=\"Customer adoption: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">Customer adoption \u2192</div> <div style=\"font-size:13px;line-height:1.4\">One customer's features VA by VA, the evidence, and every playbook.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: Customer architects</div> </a>"
+      }
+    },
+    {
+      "id": 20,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 12,
+        "y": 46,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-adoption-va\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/adoption_va.jpg\" alt=\"VA adoption: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">VA adoption \u2192</div> <div style=\"font-size:13px;line-height:1.4\">One VA's features as cards, its playbooks and its move to V8.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: Customer architects</div> </a>"
+      }
+    },
+    {
+      "id": 21,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 18,
+        "y": 46,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-cortex\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/cortex.jpg\" alt=\"Cortex by Netomians: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">Cortex by Netomians \u2192</div> <div style=\"font-size:13px;line-height:1.4\">Who at Netomi builds in Cortex, for whom: a running 3-month leaderboard.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: Netomi team leads</div> </a>"
+      }
+    },
+    {
+      "id": 22,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 55,
+        "w": 24,
+        "h": 2
+      },
+      "transparent": true,
+      "options": {
+        "mode": "html",
+        "content": "<div style=\"font-size:18px;font-weight:600;padding-top:4px\">Deeper: forecasts, flags and the risk model</div>"
+      }
+    },
+    {
+      "id": 23,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 57,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-forecast\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/forecast.jpg\" alt=\"Forecast and runway: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">Forecast and runway \u2192</div> <div style=\"font-size:13px;line-height:1.4\">When each line runs out at its current pace, and how accurate past forecasts were.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: CSMs, finance</div> </a>"
+      }
+    },
+    {
+      "id": 24,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 6,
+        "y": 57,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-anomalies\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/anomalies.jpg\" alt=\"Anomalies: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">Anomalies \u2192</div> <div style=\"font-size:13px;line-height:1.4\">Drops, spikes and silent VAs, with a review log.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: Customer architects, support</div> </a>"
+      }
+    },
+    {
+      "id": 25,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 12,
+        "y": 57,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-containment\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/containment.jpg\" alt=\"Containment: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">Containment \u2192</div> <div style=\"font-size:13px;line-height:1.4\">How much each VA resolves without an agent, by channel.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: Customer architects</div> </a>"
+      }
+    },
+    {
+      "id": 26,
+      "title": "",
+      "type": "text",
+      "gridPos": {
+        "x": 18,
+        "y": 57,
+        "w": 6,
+        "h": 9
+      },
+      "transparent": false,
+      "options": {
+        "mode": "html",
+        "content": "<a href=\"/d/n360-risk-model\" style=\"display:block;color:inherit;text-decoration:none\"> <img src=\"/public/img/n360/risk_model.jpg\" alt=\"Risk model: example on invented data\" style=\"width:100%;aspect-ratio:1.61;object-fit:cover;object-position:top;border-radius:4px;border:1px solid rgba(128,128,128,0.35)\"> <div style=\"font-size:16px;font-weight:600;margin:10px 0 4px\">Risk model \u2192</div> <div style=\"font-size:13px;line-height:1.4\">A health score and the chance of churn or downsell at renewal, with the reasons.</div> <div style=\"font-size:12px;opacity:0.65;margin-top:6px\">For: Leaders, CS operations</div> </a>"
+      }
+    }
+  ],
+  "links": [
+    {
+      "type": "link",
+      "title": "Overview",
+      "url": "/d/n360-overview",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    }
+  ]
+}

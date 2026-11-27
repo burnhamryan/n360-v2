@@ -1247,5 +1247,18 @@
         }
       }
     }
+  ],
+  "links": [
+    {
+      "type": "link",
+      "title": "Welcome and tour",
+      "url": "/d/n360-welcome",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    }
   ]
 }
