@@ -65,7 +65,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT concat(\n          'Last night pulled: ', ifNull((SELECT any(night) FROM (SELECT night FROM n360.ops_night FINAL\n                                  WHERE claude_result LIKE 'published%' OR code_result = 'complete' ORDER BY night DESC LIMIT 1)), 'none on record'),\n          ' \u00b7 last load: ', ifNull((SELECT concat(toString(argMax(data_date, loaded_at)), ' ', toString(argMax(status, loaded_at))) FROM n360.runs), 'none'),\n          ' \u00b7 runner: ', ifNull((SELECT concat(argMax(action, started), ' ', argMax(state, started)) FROM n360.ops_job FINAL), 'no job yet')) AS sentence",
+          "rawSql": "SELECT concat(\n          'Last night pulled: ', ifNull((SELECT toString(any(night)) FROM (SELECT night FROM n360.ops_night FINAL\n                                  WHERE claude_result LIKE 'published%' OR code_result = 'complete' ORDER BY night DESC LIMIT 1)), 'none on record'),\n          ' \u00b7 last load: ', ifNull((SELECT concat(toString(argMax(data_date, loaded_at)), ' ', toString(argMax(status, loaded_at))) FROM n360.runs), 'none'),\n          ' \u00b7 runner: ', ifNull((SELECT concat(argMax(action, started), ' ', argMax(state, started)) FROM n360.ops_job FINAL), 'no job yet')) AS sentence",
           "refId": "A"
         }
       ],
@@ -234,7 +234,7 @@
               "options": {
                 "pattern": "^(published|loaded|done|complete).*",
                 "result": {
-                  "color": "green",
+                  "color": "#76C893",
                   "index": 0
                 }
               }
@@ -244,7 +244,7 @@
               "options": {
                 "pattern": "^(stopped|failed|refused).*",
                 "result": {
-                  "color": "red",
+                  "color": "#E07B5F",
                   "index": 1
                 }
               }
@@ -254,7 +254,7 @@
               "options": {
                 "pattern": "^(running|not loaded yet|export only|ran).*",
                 "result": {
-                  "color": "orange",
+                  "color": "#F0C25A",
                   "index": 2
                 }
               }
@@ -327,7 +327,7 @@
               "options": {
                 "pattern": "^(published|loaded|done|complete).*",
                 "result": {
-                  "color": "green",
+                  "color": "#76C893",
                   "index": 0
                 }
               }
@@ -337,7 +337,7 @@
               "options": {
                 "pattern": "^(stopped|failed|refused).*",
                 "result": {
-                  "color": "red",
+                  "color": "#E07B5F",
                   "index": 1
                 }
               }
@@ -347,7 +347,7 @@
               "options": {
                 "pattern": "^(running|not loaded yet|export only|ran).*",
                 "result": {
-                  "color": "orange",
+                  "color": "#F0C25A",
                   "index": 2
                 }
               }
@@ -420,7 +420,7 @@
               "options": {
                 "pattern": "^(published|loaded|done|complete).*",
                 "result": {
-                  "color": "green",
+                  "color": "#76C893",
                   "index": 0
                 }
               }
@@ -430,7 +430,7 @@
               "options": {
                 "pattern": "^(stopped|failed|refused).*",
                 "result": {
-                  "color": "red",
+                  "color": "#E07B5F",
                   "index": 1
                 }
               }
@@ -440,7 +440,7 @@
               "options": {
                 "pattern": "^(running|not loaded yet|export only|ran).*",
                 "result": {
-                  "color": "orange",
+                  "color": "#F0C25A",
                   "index": 2
                 }
               }
@@ -513,7 +513,7 @@
               "options": {
                 "pattern": "^(published|loaded|done|complete).*",
                 "result": {
-                  "color": "green",
+                  "color": "#76C893",
                   "index": 0
                 }
               }
@@ -523,7 +523,7 @@
               "options": {
                 "pattern": "^(stopped|failed|refused).*",
                 "result": {
-                  "color": "red",
+                  "color": "#E07B5F",
                   "index": 1
                 }
               }
@@ -533,7 +533,7 @@
               "options": {
                 "pattern": "^(running|not loaded yet|export only|ran).*",
                 "result": {
-                  "color": "orange",
+                  "color": "#F0C25A",
                   "index": 2
                 }
               }
@@ -613,7 +613,7 @@
                     "options": {
                       "pattern": "^(published|loaded|done|complete).*",
                       "result": {
-                        "color": "green",
+                        "color": "#76C893",
                         "index": 0
                       }
                     }
@@ -623,7 +623,7 @@
                     "options": {
                       "pattern": "^(stopped|failed|refused).*",
                       "result": {
-                        "color": "red",
+                        "color": "#E07B5F",
                         "index": 1
                       }
                     }
@@ -633,7 +633,7 @@
                     "options": {
                       "pattern": "^(running|not loaded yet|export only|ran).*",
                       "result": {
-                        "color": "orange",
+                        "color": "#F0C25A",
                         "index": 2
                       }
                     }
@@ -662,7 +662,7 @@
                     "options": {
                       "pattern": "^(published|loaded|done|complete).*",
                       "result": {
-                        "color": "green",
+                        "color": "#76C893",
                         "index": 0
                       }
                     }
@@ -672,7 +672,7 @@
                     "options": {
                       "pattern": "^(stopped|failed|refused).*",
                       "result": {
-                        "color": "red",
+                        "color": "#E07B5F",
                         "index": 1
                       }
                     }
@@ -682,7 +682,7 @@
                     "options": {
                       "pattern": "^(running|not loaded yet|export only|ran).*",
                       "result": {
-                        "color": "orange",
+                        "color": "#F0C25A",
                         "index": 2
                       }
                     }
@@ -711,7 +711,7 @@
                     "options": {
                       "pattern": "^(published|loaded|done|complete).*",
                       "result": {
-                        "color": "green",
+                        "color": "#76C893",
                         "index": 0
                       }
                     }
@@ -721,7 +721,7 @@
                     "options": {
                       "pattern": "^(stopped|failed|refused).*",
                       "result": {
-                        "color": "red",
+                        "color": "#E07B5F",
                         "index": 1
                       }
                     }
@@ -731,7 +731,7 @@
                     "options": {
                       "pattern": "^(running|not loaded yet|export only|ran).*",
                       "result": {
-                        "color": "orange",
+                        "color": "#F0C25A",
                         "index": 2
                       }
                     }
@@ -807,7 +807,7 @@
                     "options": {
                       "pattern": "^(published|loaded|done|complete).*",
                       "result": {
-                        "color": "green",
+                        "color": "#76C893",
                         "index": 0
                       }
                     }
@@ -817,7 +817,7 @@
                     "options": {
                       "pattern": "^(stopped|failed|refused).*",
                       "result": {
-                        "color": "red",
+                        "color": "#E07B5F",
                         "index": 1
                       }
                     }
@@ -827,7 +827,7 @@
                     "options": {
                       "pattern": "^(running|not loaded yet|export only|ran).*",
                       "result": {
-                        "color": "orange",
+                        "color": "#F0C25A",
                         "index": 2
                       }
                     }
@@ -921,7 +921,7 @@
                     "options": {
                       "pattern": "^(published|loaded|done|complete).*",
                       "result": {
-                        "color": "green",
+                        "color": "#76C893",
                         "index": 0
                       }
                     }
@@ -931,7 +931,7 @@
                     "options": {
                       "pattern": "^(stopped|failed|refused).*",
                       "result": {
-                        "color": "red",
+                        "color": "#E07B5F",
                         "index": 1
                       }
                     }
@@ -941,7 +941,7 @@
                     "options": {
                       "pattern": "^(running|not loaded yet|export only|ran).*",
                       "result": {
-                        "color": "orange",
+                        "color": "#F0C25A",
                         "index": 2
                       }
                     }

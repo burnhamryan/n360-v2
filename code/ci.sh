@@ -134,13 +134,24 @@ cp -r "$ROOT/code/grafana/dashboards" "$WORK/committed"
 cp -r "$ROOT/code/grafana/provisioning/alerting" "$WORK/committed_alerting"
 python3 "$ROOT/code/grafana/build_dashboards.py"
 python3 "$ROOT/code/grafana/build_alerts.py"
+python3 "$ROOT/code/grafana/build_ops.py"
 diff -r "$WORK/committed_alerting" "$ROOT/code/grafana/provisioning/alerting" \
   || { echo "FAIL: committed alert rules differ from build_alerts.py output (run it and commit)"; exit 1; }
 for f in "$ROOT"/code/grafana/dashboards/*.json; do
   python3 -m json.tool "$f" > /dev/null || { echo "FAIL: invalid JSON $f"; exit 1; }
 done
 diff -r "$WORK/committed" "$ROOT/code/grafana/dashboards" \
-  || { echo "FAIL: committed dashboard JSON differs from build_dashboards.py output (run it and commit)"; exit 1; }
+  || { echo "FAIL: committed dashboard JSON differs from build_dashboards.py / build_ops.py output (run them and commit)"; exit 1; }
+
+# The Operations dashboard reads two tables the company pipeline's local runner writes (never loaded from exports).
+# A few [SYNTHETIC] rows, so every one of its panels is tested: one night per loaded run, one refused, a job each state.
+sql "INSERT INTO n360.ops_night (night, claude_result, claude_published, code_result, export_run_id, export_counts, updated)
+     SELECT data_date, if(status = 'loaded', 'published v1', 'stopped: [SYNTHETIC] a check failed'), if(status = 'loaded', 1, NULL),
+            'not run', toString(run_id), '[SYNTHETIC] va_day 1', now64(3) FROM n360.runs"
+sql "INSERT INTO n360.ops_job (job_id, action, state, started, finished, exit_code, last_line, updated) VALUES
+     ('syn-1', 'load', 'done', now() - 7200, now() - 7000, 0, '[SYNTHETIC] LOADED', now64(3)),
+     ('syn-2', 'export', 'failed', now() - 3600, now() - 3500, 2, '[SYNTHETIC] export failed', now64(3)),
+     ('syn-3', 'pull', 'running', now() - 60, NULL, NULL, '[SYNTHETIC] pulling', now64(3))"
 
 python3 "$ROOT/code/grafana/test_panels.py" "${PANEL_CONN[@]}"
 python3 "$ROOT/code/grafana/test_alerts.py" "${PANEL_CONN[@]}" --scenario final

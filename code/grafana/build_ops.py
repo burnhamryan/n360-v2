@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Generate the N360 · Operations dashboard (uid n360-ops): what ran each night, the runner's jobs, the loads, and the
 buttons that start a job. Added 26 Nov 2026. Separate from build_dashboards.py on purpose: it depends on the local
-runner (the company pipeline's ops_runner.py on 127.0.0.1:8099) and on two tables that runner creates
-(n360.ops_job, n360.ops_night), which are not part of schema.sql or the 8 checks.
+runner (the company pipeline's ops_runner.py on 127.0.0.1:8099) and on the two tables that runner writes
+(n360.ops_job, n360.ops_night). They are declared in schema.sql so a fresh server and CI have them, but they are not
+loaded from exports and are not part of the 8 checks. CI writes a few [SYNTHETIC] rows to test every panel.
 
     python3 code/grafana/build_ops.py        # writes code/grafana/dashboards/n360-ops.json
 
 Grafana cannot run commands. Each button is a link to the runner's confirm page (new tab); the runner starts the job
 only from its own confirm form (one-time token), so a stray click or another web page cannot start one.
 """
-import json, os
+import json, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from build_dashboards import COLOUR  # noqa: E402  the one N360 palette: done green, stopped warm, in progress amber
 DS = {'type': 'grafana-clickhouse-datasource', 'uid': 'n360-clickhouse'}
 RUNNER = 'http://127.0.0.1:8099'
 NOT_READ = 'Not reported yet'
@@ -37,8 +40,8 @@ def rx(pattern, color, idx):
     return {'type': 'regex', 'options': {'pattern': pattern, 'result': {'color': color, 'index': idx}}}
 
 
-STATUS_MAP = [rx('^(published|loaded|done|complete).*', 'green', 0), rx('^(stopped|failed|refused).*', 'red', 1),
-              rx('^(running|not loaded yet|export only|ran).*', 'orange', 2)]
+STATUS_MAP = [rx('^(published|loaded|done|complete).*', COLOUR['green'], 0), rx('^(stopped|failed|refused).*', COLOUR['risk'], 1),
+              rx('^(running|not loaded yet|export only|ran).*', COLOUR['amber'], 2)]
 
 
 def table(pid, title, sql, x, y, w, h, desc, colored=(), links=None):
@@ -76,7 +79,7 @@ def dashboard():
     p = []
     p.append(stat(1, 'In one sentence', """
         SELECT concat(
-          'Last night pulled: ', ifNull((SELECT any(night) FROM (SELECT night FROM n360.ops_night FINAL
+          'Last night pulled: ', ifNull((SELECT toString(any(night)) FROM (SELECT night FROM n360.ops_night FINAL
                                   WHERE claude_result LIKE 'published%' OR code_result = 'complete' ORDER BY night DESC LIMIT 1)), 'none on record'),
           ' · last load: ', ifNull((SELECT concat(toString(argMax(data_date, loaded_at)), ' ', toString(argMax(status, loaded_at))) FROM n360.runs), 'none'),
           ' · runner: ', ifNull((SELECT concat(argMax(action, started), ' ', argMax(state, started)) FROM n360.ops_job FINAL), 'no job yet')) AS sentence""",
