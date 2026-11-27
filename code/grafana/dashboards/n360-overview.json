@@ -384,7 +384,7 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Customers using at least 3 of the 5 target features in the last 30 days: V8 playbooks run, the authoring tool, the analytics assistant, MCP servers live, supervisory rules on (proposed list; the v1.1 page also counts Testing, Calibration and Recipes, not exported yet). Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.v_feature_use  \n**Filter:** none (every customer)  \n**Window:** the 30 days to the data-through day",
+      "description": "Customers using at least 3 of the 5 target features in the last 30 days: V8 playbooks run, the Cortex, Explorer, MCP servers live, supervisory rules on (proposed list; the v1.1 page also counts Testing, Calibration and Recipes, not exported yet). Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.v_feature_use  \n**Filter:** none (every customer)  \n**Window:** the 30 days to the data-through day",
       "gridPos": {
         "x": 18,
         "y": 3,

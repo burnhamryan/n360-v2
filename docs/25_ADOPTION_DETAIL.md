@@ -63,3 +63,38 @@ authoring_sessions summed over the account's US VAs; `user_type = 'unknown'`. A 
 6. **Live but idle**: V8 playbooks in production with no execution in the window, listed per VA.
 
 Keep the drill path Portfolio → Customer → VA. Customer-level panels filter on `account`, VA-level on `bot_id`.
+
+## Built (27 Nov 2026)
+
+The three pages are built on these tables: **Adoption** (portfolio), **Customer adoption** and **VA adoption**
+(docs/04 section 9). Views added: `v_va_feature_adoption` (six features × VA: state, words, evidence),
+`v_customer_feature_adoption`, `v_customer_adoption` (one row per customer with the next step), `v_playbook`
+(complexity, share of the VA, who built it). Settings added (`n360.settings`): `adoption_calibration_days` (31),
+`adoption_long_playbook_chars` (10000, proposed), `adoption_handoff_high_pct` (25, proposed),
+`adoption_staff_domain` (netomi.com), `adoption_next_order` (decided 27 Nov: V8 / V9, Cortex, Recipes, Testing,
+Calibration, Explorer). The synthetic generator writes all four
+tables with planted cases (docstring of `adoption()` in `sample_data/generate_synthetic.py`); `code/test_views.py`
+checks them, and that executions agree across `va_adoption`, `feature_window` and `playbook_window`.
+`cortex_day` rows are `unknown` now, so the risk features and the Risk page's "building" signal count every Cortex row
+but staff.
+
+## Wanted next: Cortex per person (`cortex_user_day`, 27 Nov 2026)
+
+For the **Cortex by Netomians** leaderboard (`n360-cortex`) and the Netomi-against-customer comparisons, the export
+needs Cortex sessions **per person**. `cortex_day` cannot do it: the source behind it has no user id. If Cortex logs
+who opened a session (user email or id) anywhere, export one row per day, account, VA and person:
+
+| Column | Type | Meaning |
+|---|---|---|
+| day | Date | UTC day |
+| account | String | Account key |
+| bot_id | UUID, nullable | The VA the session was on (NULL = not on one VA) |
+| user_type | `customer` or `staff` | `staff` = the user's email is on Netomi's domain |
+| user | String, nullable | **Netomi users only:** their email (first.last@netomi.com, shown as "First Last"). **Customer users: always NULL.** They are counted, never named |
+| sessions | UInt32 | Cortex sessions that day (0 rows need not be written) |
+| edits | UInt32, nullable | Playbook versions saved (NULL = not read) |
+| production_edits | UInt32, nullable | Of those, saved to a production playbook (NULL = not read) |
+| run_id | UUID | |
+
+From 1 Sep 2026 if the source holds it (the leaderboard covers 3 months). The table is replaced whole each night.
+Keep `cortex_day` as it is: N360 checks that the two add up to the same totals.

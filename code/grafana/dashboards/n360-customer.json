@@ -454,7 +454,7 @@
         "type": "grafana-clickhouse-datasource",
         "uid": "n360-clickhouse"
       },
-      "description": "Target features this customer used in the last 30 days (proposed list: V8 playbooks, authoring tool, analytics assistant, MCP servers, supervisory rules). Which ones: Adoption, below. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.v_feature_use  \n**Filter:** Customer  \n**Window:** the 30 days to the data-through day",
+      "description": "Target features this customer used in the last 30 days (proposed list: V8 playbooks, Cortex, Explorer, MCP servers, supervisory rules). Which ones: Adoption, below. Phase 2 (proposed design, tested on synthetic only): field meanings are open questions in docs/08_DECISIONS.md. Empty until the company export carries these files.\n\n**Source:** n360.v_feature_use  \n**Filter:** Customer  \n**Window:** the 30 days to the data-through day",
       "gridPos": {
         "x": 12,
         "y": 3,
@@ -2426,6 +2426,17 @@
       "icon": "dashboard",
       "keepTime": true,
       "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "type": "link",
+      "title": "Adoption detail",
+      "url": "/d/n360-adoption-customer",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": true,
       "targetBlank": false,
       "asDropdown": false,
       "tags": []

@@ -130,7 +130,7 @@ to their source. **Every other threshold here is a proposal to calibrate on our 
 | 12 | Capped automation | CA | No MCP servers live (no actions or integrations) | Any VA with 0 MCP servers live and containment < 50% |
 | 13 | Stale configuration | CA | Weeks since the last configuration change (derived from `va_config_snapshot`) | No change in 8+ weeks (proposed; no published threshold) |
 | 14 | Idle build | CA | Playbooks built but not run in 31 days | Any |
-| 15 | Customer builder disengaged | both | Authoring sessions and analytics-assistant questions by customer users, 30 days vs before | Down 50%, or none in 30 days |
+| 15 | Customer builder disengaged | both | Cortex sessions and Explorer questions by customer users, 30 days vs before | Down 50%, or none in 30 days |
 | 16 | Open support load | both | Open tickets, oldest open ticket age (`ps_ticket`) | Oldest open > 30 days; 3+ open |
 | 17 | Feature breadth | CSM | Target features used (`v_feature_use`) | Under 3 of 5 |
 

@@ -1,3 +1,41 @@
+# CHANGES · 27 Nov 2026 · Cortex by Netomians; Netomi against the customer; next step order
+
+- **Next step order decided:** V8 / V9 → Cortex → Recipes → Testing → Calibration → Explorer (docs/08).
+- **Cortex by Netomians** (`n360-cortex`, new): a leaderboard over the last 3 months (rank, sessions, production
+  edits, customers, VAs, last 30 days ▲▼), a running leaderboard (sessions added up day by day: lines cross where
+  the lead changed hands), sessions per week by Netomian, Netomi against the customer per week and per customer, and
+  who works where. Linked from Adoption.
+- **Netomi against the customer** on Adoption and Customer adoption: Cortex sessions split by who ran them, and
+  playbook executions split by who built the playbook.
+- **New table `cortex_user_day`** (Cortex per person; Netomi users by email, customer users counted, never named) and
+  view `v_cortex_user`. The export does not write it yet: spec in docs/25. Synthetic: eight invented Netomians, one
+  rising, one fading; the account totals, per-person rows and VA 30-day figures agree (tested).
+
+Tested: `code/ci.sh chdb` and `server`; screenshots of every dashboard in `docs/screenshots`.
+
+# CHANGES · 27 Nov 2026 · Adoption: Portfolio → Customer → VA
+
+**Three linked Adoption pages on the detail tables** (`va_adoption`, `playbook_window`, `feature_window`,
+`cortex_day`; docs/25), replacing the single proposed-design page:
+- **Adoption** (`n360-adoption`, uid unchanged): the six features for every customer in one grid (green adopted,
+  amber partly, light grey not yet, grey not reported), next step per customer and a next-step queue, playbook
+  estate, length bands, who builds the playbooks, Cortex per day, the move to V8, longest and idle playbooks,
+  upgrade queue.
+- **Customer adoption** (`n360-adoption-customer`, new): six features VA by VA, the evidence behind each, busiest
+  playbooks, length against traffic, every playbook, length bands, who built them, Cortex per day, engine week by
+  week, configuration per VA (v1.1 parity).
+- **VA adoption** (`n360-adoption-va`, new): six feature cards, evidence, playbooks, migration week by week,
+  configuration.
+- Drill paths: grid → customer → VA; "Adoption detail" links from the Customer and VA pages; data links on every
+  customer, VA and playbook row; column headings carry what adopted means; every panel's (i) says how to read it.
+
+**Views** `v_va_feature_adoption`, `v_customer_feature_adoption`, `v_customer_adoption`, `v_playbook`; **settings**
+`adoption_*` (docs/08, proposed edges). The synthetic generator writes the four tables with planted cases;
+`test_views.py` checks them. `cortex_day` is `unknown` user type now: the risk features and the Risk page's
+"building" signal count every Cortex row but staff.
+
+Tested: `code/ci.sh chdb`; rendered in Grafana 13.3.1 (screenshots `docs/screenshots/07`, `19`, `20`).
+
 # CHANGES · 26 Nov 2026 · Adoption export spec
 
 `docs/24_ADOPTION_EXPORT.md`: the five files the company export must add (`va_config_snapshot`, `playbook_day`,

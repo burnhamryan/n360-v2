@@ -149,6 +149,61 @@ def main():
         check('Phase 2: top asks = the ask from 3 customers and the one from 2',
               asks == {'Export conversations to CSV': 3, 'SMS opt-out keywords': 2}, asks)
 
+    # Adoption detail (27 Nov 2026, docs/25): the six features per VA and customer, from the planted synthetic cases
+    if int(q('SELECT count() AS n FROM n360.va_adoption')[0]['n']):
+        va_f = {(r['va'], r['feature']): (r['state'], r['value']) for r in q('SELECT va, feature, state, value FROM n360.v_va_feature_adoption')}
+        check('adoption: Harbor Chat has adopted all six features',
+              all(va_f[('Harbor Chat', f)][0] == 'adopted' for f in ('Cortex', 'Test / playbook validation', 'Calibration',
+                                                                    'V8 / V9', 'Action-oriented recipes', 'Explorer')),
+              {k: v for k, v in va_f.items() if k[0] == 'Harbor Chat'})
+        check('adoption: partly = tests with validation off (Bluebird Web), calibration lapsed (Pinecrest Chat), recipes '
+              'not live (Northwind Chat)',
+              va_f[('Bluebird Web', 'Test / playbook validation')][0] == 'partly'
+              and va_f[('Pinecrest Chat', 'Calibration')] == ('partly', 'Lapsed: last 30 Sep')
+              and va_f[('Northwind Chat', 'Action-oriented recipes')][0] == 'partly',
+              [va_f[('Bluebird Web', 'Test / playbook validation')], va_f[('Pinecrest Chat', 'Calibration')],
+               va_f[('Northwind Chat', 'Action-oriented recipes')]])
+        check('adoption: not read is "Not reported yet", never "none" (Maple Voice Cortex and Explorer); below V8 is "none"',
+              va_f[('Maple Voice', 'Cortex')] == ('not reported', 'Not reported yet')
+              and va_f[('Maple Voice', 'Explorer')][0] == 'not reported'
+              and va_f[('Lakeside Email', 'V8 / V9')] == ('none', 'V7.4: upgrade'),
+              [va_f[('Maple Voice', 'Cortex')], va_f[('Lakeside Email', 'V8 / V9')]])
+        cu = {r['account']: r for r in q('SELECT account, features_adopted, next_feature FROM n360.v_customer_adoption')}
+        check('adoption: customers roll up from their VAs; the next step follows the proposed order',
+              int(cu['Harbor Telecom']['features_adopted']) == 6 and cu['Harbor Telecom']['next_feature'] == ''
+              and cu['Lakeside Insurance']['next_feature'] == 'V8 / V9' and cu['Cedar Logistics']['next_feature'] == 'V8 / V9',
+              {k: (v['features_adopted'], v['next_feature']) for k, v in cu.items()})
+        one = q("SELECT (SELECT sum(executions) FROM n360.va_adoption) AS a, "
+                "(SELECT sum(amount) FROM n360.feature_window WHERE feature = 'V8 playbooks') AS f, "
+                "(SELECT sum(executions) FROM n360.playbook_window) AS p")[0]
+        check('adoption: one number, one value: executions agree in va_adoption, feature_window and playbook_window',
+              int(one['a']) == int(one['f']) == int(one['p']), one)
+        pb = {r['playbook']: r for r in q("SELECT playbook, long, idle, built_by FROM n360.v_playbook WHERE va IN ('Northwind Chat', 'Pinecrest Chat')")}
+        check('adoption: Gift cards is live but idle; Pinecrest has playbooks over 10,000 characters, flagged long',
+              int(pb['[SYNTHETIC] Gift cards']['idle']) == 1 and sum(int(r['long']) for r in pb.values()) >= 2, pb)
+        nx = {r['account']: r['next_feature'] for r in q('SELECT account, next_feature FROM n360.v_customer_adoption')}
+        check('adoption: the next step order is V8 / V9, Cortex, Recipes, then the rest (Summit and Willow: Cortex; '
+              'Northwind: recipes; Lakeside: V8 / V9)',
+              nx['Summit Games'] == 'Cortex' and nx['Willow Energy'] == 'Cortex' and nx['Northwind Outfitters'] == 'Action-oriented recipes'
+              and nx['Lakeside Insurance'] == 'V8 / V9', nx)
+
+    # Cortex per person (27 Nov 2026): the leaderboard and Netomi against the customer
+    if int(q('SELECT count() AS n FROM n360.cortex_user_day')[0]['n']):
+        tot = q("SELECT (SELECT sum(authoring_sessions) FROM n360.cortex_day) AS acct, "
+                "(SELECT sum(c.sessions) FROM n360.cortex_user_day AS c WHERE c.day >= (SELECT min(day) FROM n360.cortex_day)) AS people, "
+                "(SELECT sum(cortex_sessions_30d) FROM n360.va_adoption) AS va30, "
+                "(SELECT sum(sessions) FROM n360.cortex_user_day WHERE day > (SELECT max(window_end) FROM n360.va_adoption) - 30) AS people30")[0]
+        check('Cortex: one number, one value: the account totals, the per-person rows and the VAs\' 30 days agree',
+              int(tot['acct']) == int(tot['people']) and int(tot['va30']) == int(tot['people30']), tot)
+        named = q("SELECT countIf(user_type = 'customer' AND user IS NOT NULL) AS cust_named, "
+                  "countIf(who = 'Customer' AND name IS NOT NULL) AS shown FROM n360.v_cortex_user")[0]
+        check('Cortex: customer users are counted, never named', int(named['cust_named']) == 0 and int(named['shown']) == 0, named)
+        lb = [r['name'] for r in q("SELECT name FROM n360.v_cortex_user WHERE who = 'Netomi' GROUP BY name ORDER BY sum(sessions) DESC")]
+        l30 = q("SELECT name FROM n360.v_cortex_user WHERE who = 'Netomi' AND day > (SELECT max(day) FROM n360.cortex_user_day) - 30 "
+                "GROUP BY name ORDER BY sum(sessions) DESC LIMIT 1")[0]['name']
+        check('Cortex: the leaderboard: Avery Kim leads the 15 weeks, Jordan Patel (rising) leads the last 30 days; '
+              'names come from the email', lb[:2] == ['Avery Kim', 'Jordan Patel'] and l30 == 'Jordan Patel' and len(lb) == 8, (lb, l30))
+
     # Contract status (dashboard review, 25 Nov 2026): every v1.1 status from a planted synthetic case
     st = {r['full_label']: r for r in q("SELECT full_label, status, toUInt8(renewal_risk) AS risk, used, pct_billed, "
                                          "issue, toUInt8(needs_attention) AS na FROM n360.v_contract_status")}

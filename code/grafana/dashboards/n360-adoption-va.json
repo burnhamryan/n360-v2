@@ -1,0 +1,2001 @@
+{
+  "uid": "n360-adoption-va",
+  "title": "N360 \u00b7 VA adoption",
+  "tags": [
+    "n360"
+  ],
+  "editable": false,
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "utc",
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "account",
+        "label": "Customer",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "n360-clickhouse"
+        },
+        "query": "SELECT account, display_name FROM n360.account ORDER BY display_name",
+        "definition": "SELECT account, display_name FROM n360.account ORDER BY display_name",
+        "multi": false,
+        "includeAll": false,
+        "refresh": 1
+      },
+      {
+        "name": "va",
+        "label": "VA",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "n360-clickhouse"
+        },
+        "query": "SELECT toString(v.bot_id), concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')')\n        FROM n360.va AS v WHERE v.account IN (${account:singlequote}) ORDER BY 2",
+        "definition": "SELECT toString(v.bot_id), concat(v.va_name, ' (', arrayStringConcat(v.channels, ', '), ')')\n        FROM n360.va AS v WHERE v.account IN (${account:singlequote}) ORDER BY 2",
+        "multi": false,
+        "includeAll": false,
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "In one sentence",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "The VA's engine, features adopted of the six, playbooks live and idle, and executions. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.va_adoption, n360.v_va_feature_adoption  \n**Filter:** VA  \n**Window:** the 31 days to the data-through day",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 18,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if(count() = 0, NULL, concat(any(a.va), ' on ', ifNull(any(a.engine_version), 'an unread engine'), ' \u00b7 ',\n                   toString(any(c.n)), ' of 6 features \u00b7 ', toString(any(a.playbooks_live)), ' playbooks live',\n                   if(any(a.idle_playbooks) > 0, concat(', ', toString(any(a.idle_playbooks)), ' idle'), ''), ' \u00b7 ',\n                   if(any(a.executions) IS NULL, NULL, if(any(a.executions) >= 1000000, concat(toString(intDiv(any(a.executions), 1000000)), ',', leftPad(toString(intDiv(any(a.executions), 1000) % 1000), 3, '0'), ',', leftPad(toString(any(a.executions) % 1000), 3, '0')), if(any(a.executions) >= 1000, concat(toString(intDiv(any(a.executions), 1000)), ',', leftPad(toString(any(a.executions) % 1000), 3, '0')), toString(any(a.executions))))), ' executions in 31 days')) AS sentence\n        FROM n360.va_adoption AS a\n        LEFT JOIN (SELECT bot_id, countIf(state = 'adopted') AS n FROM n360.v_va_feature_adoption GROUP BY bot_id) AS c ON c.bot_id = a.bot_id\n        WHERE toString(a.bot_id) IN (${va:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Nothing loaded yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "valueSize": 17
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Data",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "The last day of usage in this load, and the day it was loaded. Amber when the data is more than 2 days old (n360.settings stamp_stale_days): the numbers are the last good night's. Click for Pipeline health.\n\n**Source:** n360.v_freshness (n360.runs: loaded runs only)  \n**Filter:** none  \n**Window:** the latest load",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(stamp, if(stale, concat(' \u00b7 ', toString(days_old), ' days old'), '')) AS stamp FROM n360.v_freshness",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": ".* days old$",
+                "result": {
+                  "color": "#F0C25A",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "links": [
+            {
+              "title": "Pipeline health",
+              "url": "/d/n360-pipeline"
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 13
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Playbook executions, 31 days",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Playbook executions in the 31 days to the data-through day. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.va_adoption  \n**Filter:** VA  \n**Window:** the 31 days to the data-through day",
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT any(executions) AS `on this VA` FROM n360.va_adoption WHERE toString(bot_id) IN (${va:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Conversations with a playbook",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Conversations that ran at least one playbook, 31 days. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.va_adoption  \n**Filter:** VA  \n**Window:** the 31 days to the data-through day",
+      "gridPos": {
+        "x": 6,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT any(conversations) AS `ran at least one` FROM n360.va_adoption WHERE toString(bot_id) IN (${va:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Handed off from a playbook",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Handoffs to an agent from within a playbook, as a share of the conversations that ran one. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.va_adoption  \n**Filter:** VA  \n**Window:** the 31 days to the data-through day",
+      "gridPos": {
+        "x": 12,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if(any(conversations) = 0, NULL, round(100 * any(handoffs) / any(conversations), 1)) AS `of those conversations`\n        FROM n360.va_adoption WHERE toString(bot_id) IN (${va:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "unit": "percent",
+          "decimals": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Playbooks that ran",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Production playbooks that ran at least once in 31 days, of those live. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.va_adoption  \n**Filter:** VA  \n**Window:** the 31 days to the data-through day",
+      "gridPos": {
+        "x": 18,
+        "y": 3,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if(count() = 0, NULL, concat(toString(any(playbooks_executed)), ' of ', toString(any(playbooks_live)))) AS `live playbooks`\n        FROM n360.va_adoption WHERE toString(bot_id) IN (${va:singlequote})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 13,
+          "valueSize": 34
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Cortex",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Used to create or edit a production playbook in the last 30 days. Cortex is read for US VAs only and has no user id: whether Netomi or the customer ran a session is not known yet. Green adopted, amber partly, light grey not yet, grey not reported. The evidence is in the table below. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_va_feature_adoption  \n**Filter:** VA  \n**Window:** the newest read",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(state, '|', value) AS v FROM n360.v_va_feature_adoption WHERE toString(bot_id) IN (${va:singlequote}) AND feature = 'Cortex'",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^adopted\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#76C893",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^partly\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#F0C25A",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^none\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#D3D3D3",
+                  "index": 2
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^not reported\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#B4B4B4",
+                  "index": 3
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Not reported yet",
+                  "color": "#B4B4B4",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#B4B4B4"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 18
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Testing",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Run on every playbook version before promotion (Behavior Validation on, with test runs). Runs with validation off = partly. Green adopted, amber partly, light grey not yet, grey not reported. The evidence is in the table below. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_va_feature_adoption  \n**Filter:** VA  \n**Window:** the newest read",
+      "gridPos": {
+        "x": 4,
+        "y": 8,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(state, '|', value) AS v FROM n360.v_va_feature_adoption WHERE toString(bot_id) IN (${va:singlequote}) AND feature = 'Test / playbook validation'",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^adopted\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#76C893",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^partly\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#F0C25A",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^none\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#D3D3D3",
+                  "index": 2
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^not reported\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#B4B4B4",
+                  "index": 3
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Not reported yet",
+                  "color": "#B4B4B4",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#B4B4B4"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 18
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Calibration",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "At least monthly on Tier 1 and Tier 2 use cases: a run in the last 31 days (n360.settings adoption_calibration_days). An older run = partly (lapsed). Green adopted, amber partly, light grey not yet, grey not reported. The evidence is in the table below. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_va_feature_adoption  \n**Filter:** VA  \n**Window:** the newest read",
+      "gridPos": {
+        "x": 8,
+        "y": 8,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(state, '|', value) AS v FROM n360.v_va_feature_adoption WHERE toString(bot_id) IN (${va:singlequote}) AND feature = 'Calibration'",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^adopted\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#76C893",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^partly\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#F0C25A",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^none\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#D3D3D3",
+                  "index": 2
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^not reported\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#B4B4B4",
+                  "index": 3
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Not reported yet",
+                  "color": "#B4B4B4",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#B4B4B4"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 18
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "V8 / V9",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Production VA running on V8 or V9; target 100%. A customer is adopted only when every VA is. Green adopted, amber partly, light grey not yet, grey not reported. The evidence is in the table below. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_va_feature_adoption  \n**Filter:** VA  \n**Window:** the newest read",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(state, '|', value) AS v FROM n360.v_va_feature_adoption WHERE toString(bot_id) IN (${va:singlequote}) AND feature = 'V8 / V9'",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^adopted\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#76C893",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^partly\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#F0C25A",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^none\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#D3D3D3",
+                  "index": 2
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^not reported\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#B4B4B4",
+                  "index": 3
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Not reported yet",
+                  "color": "#B4B4B4",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#B4B4B4"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 18
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Recipes",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "At least one production recipe performs a write against a customer system. Recipes built but none writing in production = partly. Green adopted, amber partly, light grey not yet, grey not reported. The evidence is in the table below. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_va_feature_adoption  \n**Filter:** VA  \n**Window:** the newest read",
+      "gridPos": {
+        "x": 16,
+        "y": 8,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(state, '|', value) AS v FROM n360.v_va_feature_adoption WHERE toString(bot_id) IN (${va:singlequote}) AND feature = 'Action-oriented recipes'",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^adopted\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#76C893",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^partly\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#F0C25A",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^none\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#D3D3D3",
+                  "index": 2
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^not reported\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#B4B4B4",
+                  "index": 3
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Not reported yet",
+                  "color": "#B4B4B4",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#B4B4B4"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 18
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Explorer",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "At least one question by a customer user in the last 30 days, in Production or Staging; Netomi staff not counted. Green adopted, amber partly, light grey not yet, grey not reported. The evidence is in the table below. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_va_feature_adoption  \n**Filter:** VA  \n**Window:** the newest read",
+      "gridPos": {
+        "x": 20,
+        "y": 8,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(state, '|', value) AS v FROM n360.v_va_feature_adoption WHERE toString(bot_id) IN (${va:singlequote}) AND feature = 'Explorer'",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^adopted\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#76C893",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^partly\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#F0C25A",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^none\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#D3D3D3",
+                  "index": 2
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^not reported\\|(.*)$",
+                "result": {
+                  "text": "$1",
+                  "color": "#B4B4B4",
+                  "index": 3
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Not reported yet",
+                  "color": "#B4B4B4",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#B4B4B4"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/"
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": {
+          "valueSize": 18
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "The evidence behind each feature",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "For each feature: the reading, the evidence (counts and dates from the source) and the definition. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_va_feature_adoption  \n**Filter:** VA  \n**Window:** the newest read",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 11
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT feature AS Feature, concat(state, '|', value) AS `This VA`, detail AS Evidence, means AS `What adopted means`\n        FROM n360.v_va_feature_adoption WHERE toString(bot_id) IN (${va:singlequote}) ORDER BY ord",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "This VA"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^adopted\\|(.*)$",
+                      "result": {
+                        "text": "$1",
+                        "color": "#76C893",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^partly\\|(.*)$",
+                      "result": {
+                        "text": "$1",
+                        "color": "#F0C25A",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^none\\|(.*)$",
+                      "result": {
+                        "text": "$1",
+                        "color": "#D3D3D3",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^not reported\\|(.*)$",
+                      "result": {
+                        "text": "$1",
+                        "color": "#B4B4B4",
+                        "index": 3
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              },
+              {
+                "id": "description",
+                "value": "Green adopted, amber partly, light grey not yet, grey not reported."
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "custom.minWidth",
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Feature"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "This VA"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Evidence"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto",
+                  "wrapText": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 14,
+      "title": "Executions by playbook",
+      "type": "barchart",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Every production playbook on this VA by executions over 31 days (an idle one shows 0). Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_playbook  \n**Filter:** VA  \n**Window:** the newest read",
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT playbook AS Playbook, executions AS Executions FROM n360.v_playbook WHERE toString(bot_id) IN (${va:singlequote}) ORDER BY ifNull(executions, 0) DESC",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "fillOpacity": 85,
+            "lineWidth": 0,
+            "axisGridShow": false
+          },
+          "color": {
+            "mode": "shades",
+            "fixedColor": "#7F9CC0"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "xField": "Playbook",
+        "orientation": "horizontal",
+        "showValue": "always",
+        "barWidth": 0.75,
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "n360MayBeEmpty": "no playbook read"
+    },
+    {
+      "id": 15,
+      "title": "Length against traffic",
+      "type": "xychart",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Each playbook on this VA as a point: instruction length across, executions up. Hover a point for the playbook. Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_playbook  \n**Filter:** VA  \n**Window:** the newest read",
+      "gridPos": {
+        "x": 12,
+        "y": 23,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT instruction_chars AS `Instructions (characters)`, executions AS `Executions, 31 days`, playbook AS Playbook\n        FROM n360.v_playbook WHERE toString(bot_id) IN (${va:singlequote}) AND executions IS NOT NULL ORDER BY instruction_chars",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "decimals": 0,
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#C3B0F2"
+          },
+          "custom": {
+            "show": "points",
+            "pointSize": {
+              "fixed": 10
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "mapping": "auto",
+        "series": [
+          {}
+        ],
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "n360MayBeEmpty": "no playbook read"
+    },
+    {
+      "id": 16,
+      "title": "Every playbook on this VA",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Every production playbook on this VA: sizes, length band, executions and their share of the VA, whether it ran, who built it, and its task id (to find it in the product). Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.v_playbook  \n**Filter:** VA  \n**Window:** the newest read",
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT playbook AS Playbook, length_band AS Length, instruction_chars AS `Instructions (characters)`, tools AS Tools,\n               trigger_chars AS `Trigger (characters)`, if(short, 'yes', 'no') AS `Short (<200)`,\n               executions AS `Executions, 31 days`, share_of_va_pct AS `Share of the VA`,\n               multiIf(idle IS NULL, NULL, idle, 'Idle', 'Ran') AS `In use`, ifNull(built_by, '') AS `Built by`, task_id AS Task\n        FROM n360.v_playbook WHERE toString(bot_id) IN (${va:singlequote}) ORDER BY rank_on_va",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Share of the VA"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#7F9CC0"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Instructions (characters)"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#C3B0F2"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Executions, 31 days"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "locale"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "In use"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Idle": {
+                        "text": "Idle",
+                        "color": "#F0C25A",
+                        "index": 0
+                      },
+                      "Ran": {
+                        "text": "Ran",
+                        "color": "text",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Playbook"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Length"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 105
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Instructions (characters)"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Share of the VA"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm"
+      },
+      "n360MayBeEmpty": "no playbook read"
+    },
+    {
+      "id": 17,
+      "title": "Playbooks and legacy intents, week by week",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "At each weekly configuration read: V8 playbooks (solid) and legacy intents still configured (dashed). The migration is done when the dashed line reaches 0.\n\n**Source:** n360.va_config_snapshot  \n**Filter:** VA  \n**Window:** dashboard time range, weekly reads",
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT toDateTime(snapshot_date) AS time, any(v8_playbooks) AS `V8 playbooks`, any(legacy_intents) AS `Legacy intents`\n        FROM n360.va_config_snapshot WHERE toString(bot_id) IN (${va:singlequote}) AND $__dateFilter(snapshot_date) GROUP BY time ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "decimals": 0,
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#7F9CC0"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "showPoints": "always",
+            "pointSize": 6
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Legacy intents"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#6E6E6E"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    6,
+                    4
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "n360MayBeEmpty": "no configuration read"
+    },
+    {
+      "id": 18,
+      "title": "Engine, week by week",
+      "type": "state-timeline",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "The engine version at each weekly read: green V8 or later, amber older. Hover for the version.\n\n**Source:** n360.va_config_snapshot  \n**Filter:** VA  \n**Window:** dashboard time range, weekly reads",
+      "gridPos": {
+        "x": 12,
+        "y": 42,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "timeseries",
+          "format": 0,
+          "rawSql": "SELECT toDateTime(snapshot_date) AS time, engine_version AS Engine\n        FROM n360.va_config_snapshot WHERE toString(bot_id) IN (${va:singlequote}) AND $__dateFilter(snapshot_date) ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^[Vv]?(8|9|[1-9][0-9]).*",
+                "result": {
+                  "color": "#76C893",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^[Vv]?[0-7]\\..*",
+                "result": {
+                  "color": "#F0C25A",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#B4B4B4"
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "always",
+        "mergeValues": true,
+        "rowHeight": 0.8,
+        "alignValue": "center",
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "n360MayBeEmpty": "no configuration read"
+    },
+    {
+      "id": 19,
+      "title": "Configuration, VA by VA",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "description": "Per VA, the v1.1 configuration table: engine and playbooks, legacy intents left, idle playbooks, calibration, Behavior Validation and test runs, recipes live and their write actions, MCP servers (live, set up but not live, names) and supervisory rules (live, default). Newest read of the Adoption detail tables (docs/25): the pipeline replaces them whole each night, so these are the 31-day window to the data-through day, not the dashboard's time range.\n\n**Source:** n360.va_adoption  \n**Filter:** VA  \n**Window:** the newest read",
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 24,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT va AS VA, engine_version AS Engine, playbooks_live AS `Playbooks live`, legacy_intents AS `Legacy intents`,\n               idle_playbooks AS Idle,\n               concat(toString(ifNull(calibration_runs, 0)), if(calibration_runs = 1, ' run, ', ' runs, '),\n                      toString(ifNull(calibration_completed, 0)), ' completed') AS Calibration,\n               concat(toString(toDayOfMonth(calibration_last)), ' ', formatDateTime(calibration_last, '%b %Y')) AS `Last calibrated`, ifNull(behavior_validation, 'not set') AS `Behavior Validation`,\n               test_runs AS `Test runs`, concat(toString(ifNull(recipes_production, 0)), ' of ', toString(ifNull(recipes, 0)), ' live') AS Recipes,\n               recipe_actions AS `Write actions`,\n               concat(toString(ifNull(mcp_live, 0)), ' live', if(ifNull(mcp_not_live, 0) > 0, concat(', ', toString(mcp_not_live), ' set up, not live'), '')) AS `MCP servers`,\n               mcp_names AS `MCP names`,\n               concat(toString(ifNull(supervisory_live, 0)), ' live, ', toString(ifNull(supervisory_default, 0)), ' default') AS `Supervisory rules`,\n               supervisory_names AS `Rule names`, toString(bot_id) AS bot, account\n        FROM n360.va_adoption WHERE toString(bot_id) IN (${va:singlequote}) ORDER BY VA",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bot"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "account"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Idle"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "color": "transparent",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 1,
+                      "to": 1000000000000000.0,
+                      "result": {
+                        "color": "#F0C25A",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Behavior Validation"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "enabled": {
+                        "text": "Enabled",
+                        "color": "#76C893",
+                        "index": 0
+                      },
+                      "off": {
+                        "text": "Off",
+                        "color": "#F0C25A",
+                        "index": 1
+                      },
+                      "not set": {
+                        "text": "Not set",
+                        "color": "#D3D3D3",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null",
+                      "result": {
+                        "text": "Not reported yet",
+                        "color": "#B4B4B4",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VA"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MCP names"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Rule names"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VA"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open this VA's adoption",
+                    "url": "/d/n360-adoption-va?var-account=${__data.fields.account}&var-va=${__data.fields.bot}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "cellHeight": "sm"
+      }
+    }
+  ],
+  "links": [
+    {
+      "type": "link",
+      "title": "Back to Customer adoption",
+      "url": "/d/n360-adoption-customer",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": true,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "type": "link",
+      "title": "Back to VA",
+      "url": "/d/n360-va",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": true,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "type": "link",
+      "title": "Back to Adoption",
+      "url": "/d/n360-adoption",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    }
+  ]
+}

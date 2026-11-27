@@ -30,8 +30,8 @@ FEATURE_SOURCE = {
     'containment_change_pts': '60 days of handoffs per VA (company export: va_day.handoffs)',
     'drop_days_30': 'conversations per VA (company export: va_day) and the anomaly view',
     'legacy_va_share': 'weekly VA configuration reads (Phase 2: va_config_snapshot)',
-    'features_used': 'playbook, authoring and assistant use (Phase 2: playbook_day, cortex_day, explorer_day, va_config_snapshot)',
-    'build_change_pct': 'authoring and assistant use (Phase 2: cortex_day, explorer_day)',
+    'features_used': 'playbook, Cortex and Explorer use (Phase 2: playbook_day, cortex_day, explorer_day, va_config_snapshot)',
+    'build_change_pct': 'Cortex and Explorer use (Phase 2: cortex_day, explorer_day)',
     'weeks_config_unchanged': 'weekly VA configuration reads (Phase 2: va_config_snapshot)',
     'days_since_contact': 'Salesforce tasks and events on the account (sf_pull.py)',
     'days_since_exec': 'Salesforce events whose subject names an executive meeting (salesforce.json executive_keywords)',
@@ -132,7 +132,7 @@ def main():
          '' if h else 'containment needs va_day.handoffs from the export')
 
     for t, col, what in (('va_config_snapshot', 'snapshot_date', 'VA configuration reads'), ('playbook_day', 'day', 'playbook runs'),
-                         ('cortex_day', 'day', 'authoring sessions'), ('explorer_day', 'day', 'assistant questions'),
+                         ('cortex_day', 'day', 'Cortex sessions'), ('explorer_day', 'day', 'Explorer questions'),
                          ('ps_ticket', 'opened', 'support tickets')):
         x = one(ch, f'SELECT count() AS n, uniqExact(account) AS a, toString(max({col})) AS last FROM n360.{t}', {})
         if n(x.get('n')):
