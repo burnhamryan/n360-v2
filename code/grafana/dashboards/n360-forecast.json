@@ -2,7 +2,8 @@
   "uid": "n360-forecast",
   "title": "N360 \u00b7 Forecast and runway",
   "tags": [
-    "n360"
+    "n360",
+    "csm"
   ],
   "editable": false,
   "schemaVersion": 39,

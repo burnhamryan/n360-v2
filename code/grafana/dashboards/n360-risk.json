@@ -2,7 +2,9 @@
   "uid": "n360-risk",
   "title": "N360 \u00b7 Risk",
   "tags": [
-    "n360"
+    "n360",
+    "csm",
+    "leader"
   ],
   "editable": false,
   "schemaVersion": 39,

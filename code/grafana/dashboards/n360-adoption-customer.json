@@ -2,7 +2,9 @@
   "uid": "n360-adoption-customer",
   "title": "N360 \u00b7 Customer adoption",
   "tags": [
-    "n360"
+    "n360",
+    "csm",
+    "customer-architect"
   ],
   "editable": false,
   "schemaVersion": 39,
