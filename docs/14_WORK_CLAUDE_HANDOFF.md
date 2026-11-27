@@ -1,89 +1,143 @@
-# 14 · Handoff: connect the company pipeline to N360
+# 14 · Handoff for the work Claude (27 Nov 2026)
 
-**For Claude (or anyone) working on Ryan's company machine, with access to the company pipeline.**
-The goal is to get tonight's real data into the N360 dashboards on Ryan's Mac.
-
-## Where things stand
-
-- **N360 (this repo, `burnhamryan/n360-v2`) is the receiving end, and it is done:** ClickHouse 25.8 + Grafana 13.3.1
-  OSS in Docker, 11 dashboards, 8 data checks, nightly loader, backups, alert rules (paused), AWS infrastructure.
-  It was built and tested on **synthetic data only**, with no access to company systems.
-- **Ryan's Mac has it running** at `~/Documents/Github/n360`: `docker compose up -d` in `code/`, a Python 3.12 venv in
-  `.venv`, passwords in `code/.env`.
-- **The missing piece is the company side:** the nightly pull from production, `contract_measures.py`, and
-  `export_rows.py`, which writes the files N360 loads. No export folders exist on the Mac yet. N360 never reads
-  company systems itself, by design (`docs/01_ARCHITECTURE.md`).
+**For the Claude working on Ryan's company machine, with the company pipeline.** N360 (this repo,
+`burnhamryan/n360-v2`) is the receiving end: ClickHouse 25.8 + Grafana 13.3.1 OSS on Ryan's Mac, 18 dashboards, all
+built and tested on synthetic data. You own the other end: the nightly pull, `export_rows.py` and the local runner.
+This page is what N360 now needs from you, in order.
 
 ```
-company systems → nightly pull → contract_measures.py → export_rows.py → data/<D>/rows/   ← you are here
-                                                                              │
-                                     N360: code/ops/nightly.sh → load.py → 8 checks → ClickHouse → Grafana
+company systems → nightly pull → export_rows.py → data/<D>/rows/*.ndjson ──► load.py (checks, swap) ──► ClickHouse ──► Grafana
+Salesforce ──────────────────────► sf_pull.py ──► load_salesforce.py ──────────────┘
+                                                   risk_model.py nightly (features, scores) ──┘
 ```
 
-## What to do
+## Start here
 
-1. **Find the company pipeline** (Ryan's other repo or a server) and check whether `export_rows.py` exists and writes
-   the format below. If it exists, run it for the latest night(s). If it doesn't, write it against the format below.
-2. **Put the night folders on the Mac**, e.g. `~/n360-exports/<data_date>/rows/` with one `<table>.ndjson` per table
-   plus `run.json`.
-3. **Load them**, from `~/Documents/Github/n360`:
-   ```bash
-   source .venv/bin/activate && set -a && . code/.env && set +a
-   N360_DROP=~/n360-exports N360_WORK=~/n360-work code/ops/nightly.sh
-   ```
-   It loads every night once, oldest first, and stops at the first error. If synthetic data was loaded earlier,
-   wipe it first: `cd code && docker compose down -v && docker compose up -d`.
-4. **Check** http://localhost:3000 → N360 → Portfolio overview, and Pipeline health for loaded / refused nights.
+On the Mac, in `~/Documents/Github/n360` (`.venv` and `code/.env` as before):
 
-## The export format (the contract)
+```bash
+git pull origin main
+```
+```bash
+source .venv/bin/activate && set -a && . code/.env && set +a
+```
+```bash
+python3 code/load.py --schema-only --user n360 --password "$N360_CH_PASSWORD"
+```
+```bash
+python3 code/readiness.py --user n360 --password "$N360_CH_PASSWORD"
+```
 
-Full spec: **`docs/02_DATA_CONTRACT.md`**. Source of truth for every column and type: **`code/schema.sql`**. A
-working example of the exact format: `python3 sample_data/generate_synthetic.py --out /tmp/x --nights 2`, which you
-can diff against the real output.
+`readiness.py` checks every source N360 reads and ends with a to-do list. It prints **counts, dates and shares
+only** (and the labels Salesforce uses). That output is safe to pass back to Ryan for the repo's Claude; real rows
+never are.
 
-- One folder per night: `<data_date>/rows/`, containing `run.json` and one NDJSON file per table.
-- `run.json`: `{"run_id": "<uuid>", "data_date": "YYYY-MM-DD", "window_end": "<D-1> 23:59:00", "capture_utc": ...,
-  "source_dir": ..., "code_fingerprint": ..., "row_counts": {...}}`. `data_date` is the night the pipeline ran;
-  `window_end` is the last data day. `nightly.sh` loads by `run_id`, so the same run never loads twice.
-- **Required tables:** `account`, `va`, `contract_line`, `line_va`, `pool`, `rule`, `source`, `va_day`, `line_day`,
-  `line_day_billable`, `forecast`, `line_totals_history`.
-- **Optional (Phase 2, proposed design):** `va_config_snapshot`, `playbook_day`, `cortex_day`, `explorer_day`,
-  `ps_ticket`. Leave them out until the company has the data; the load is unchanged without them.
-- **Every row carries `run_id`.**
-- **NULL means not read; 0 means read and zero.** Never write 0 for unknown.
-- **IDs are UUIDs.** Enums are fixed sets, so a new value fails the load on purpose.
-- **Don't loosen a type to make a load pass. Fix the export.** The strict types have caught real bugs (a flag packed
-  into an ID, "500,000" stored as text).
-- **The pipeline decides every number** (contract rules, signed-SOW overrides, forecasts). N360 views only divide
-  and compare.
+If `git pull` stops on local changes (Ryan has edits in `code/checks.sql` and `code/docker-compose.yml`), use
+`git stash && git pull origin main && git stash pop`, and tell Ryan whether those edits should be committed or
+dropped. The `checks.sql` fix (`pct_matches_page`) is already on main.
 
-## When a load fails
+## 1. Cortex per person: `cortex_user_day` (new, the most wanted)
 
-- **Exit 3, `REFUSED`:** one of the 8 checks found offending rows (table in `02`, "The 8 checks"). The previous
-  good night stays live. Usually a real data problem upstream: fix the export, not the check.
-- **Exit 2, error:** usually a format mismatch (missing column, wrong type, bad enum value). `load.py` names the
-  table and column.
-- If the export is right and N360 is wrong, send Ryan **the error text only** for the Claude that maintains this
-  repo. Never paste customer data into a chat that isn't company-approved.
+**Why:** the new **Cortex by Netomians** dashboard (`n360-cortex`: a 3-month leaderboard and a running leaderboard)
+and the Netomi-against-customer splits on the Adoption pages read it. Until it exists they show "Not reported yet".
 
-## Rules
+**First find out whether it is possible.** `cortex_day` is written with `user_type = 'unknown'` because the source
+behind it has no user id. Look for any Cortex log that records who opened a session (user email or id, workspace
+audit log, session table). If none exists, say so to Ryan; nothing else in N360 depends on it.
 
-- **Real data stays on company-approved machines.** Keep the N360 Claude chat (`docs/09_CHAT.md`) off with real
-  data until the company approves sending query results to Anthropic (`docs/08_DECISIONS.md`).
-- **Don't change N360 table names, column names or dashboard uids.** A schema change is Ryan's call, and both the
-  exporter and `sample_data/generate_synthetic.py` must change together.
-- **Never commit `code/.env`, passwords or exports.**
-- **Back up the history tables**, which can't be rebuilt from exports:
-  `N360_BACKUP=~/n360-backups code/ops/backup.sh`.
+**If it exists**, export one row per day, account, VA and person (spec and columns: `docs/25_ADOPTION_DETAIL.md`,
+"Wanted next"; types: `code/schema.sql`):
+- `user_type` = `staff` when the email is on Netomi's domain (`netomi.com`), else `customer`.
+- `user` = **the Netomi user's email only.** For customer users it is always NULL: they are counted, never named.
+- `sessions`, and if the source has them `edits` and `production_edits` (NULL when not read, never 0).
+- From 1 Sep 2026 if the source holds it; the whole table each night.
+- **Keep `cortex_day` as it is.** N360 tests that `cortex_day`, `cortex_user_day` and `va_adoption.cortex_sessions_30d`
+  add up to the same totals; if they cannot (a different source or window), tell Ryan which and why.
 
-## Useful files
+## 2. Check the adoption tables you already export
 
-| File | What |
+You export `va_adoption`, `playbook_window`, `feature_window` and `cortex_day` (docs/25). The three new Adoption
+pages are built on them (docs/04 section 9). Check, on one real night:
+- **One number, one value:** total executions agree in `va_adoption.executions`, `feature_window` (feature
+  `V8 playbooks`) and `playbook_window.executions`. N360's tests require it on synthetic data.
+- **NULL = not read, 0 = read and none,** everywhere. A NULL shows grey "Not reported yet"; a 0 shows "None recorded".
+- **`playbook_window.creator_domain`** is filled: it drives "who builds the playbooks" and the Netomi-built against
+  customer-built executions. `netomi.com` = Netomi.
+- **`va_adoption.behavior_validation`** is exactly `enabled`, `off` or NULL (not set).
+
+## 3. History the risk model and dashboards need
+
+- **`contract_line`: keep ended lines** (past terms), not only current ones. Readiness found only 4 ended lines. Past
+  renewal dates come from them; without them the risk model can only learn from renewals Salesforce knows about.
+- **`va_config_snapshot`: weekly configuration reads, all history kept** and written whole each night. It feeds
+  "VAs on V8" (with its 30-night trend), the engine-week-by-week timelines, the configuration-change list, and two
+  risk features. Spec: `docs/24_ADOPTION_EXPORT.md`.
+- **Still not exported, if the sources allow** (docs/24): `explorer_day` (questions per account per day, customer vs
+  staff, from Nov 2024), `playbook_day` (executions per playbook per day), `ps_ticket` (support tickets, for the
+  Requests page and two risk features). Leave a file out rather than write zeros.
+
+## 4. Salesforce (blocked on access)
+
+`sf_pull.py` reads Accounts, Opportunities, Contracts, Tasks and Events, read-only (docs/18). Ryan's login fails with
+**"API is disabled for this User"**: his Salesforce user lacks the *API Enabled* permission. Any API route (CLI,
+token, MCP) needs it.
+- **Ask the Salesforce admin** for API Enabled on Ryan's user (a permission set), or better a read-only integration
+  user (checklist: `docs/19_SALESFORCE_LIVE.md`).
+- Then: `sf org login web --alias netomi --instance-url https://netomi-production.my.salesforce.com`, export
+  `SF_INSTANCE_URL` and `SF_ACCESS_TOKEN` (docs/13 section 6 has the two lines), run `sf_pull.py` and
+  `load_salesforce.py`, then `readiness.py`.
+- **Read the readiness output and fix the settings to match the org:** unlinked account names → `account_overrides`
+  in `code/salesforce/salesforce.json`; the renewal opportunity type, forecast categories and task subtypes it lists →
+  `salesforce.json` and `n360.settings`. Pull every week or two; leave `N360_SALESFORCE` unset until there is an
+  integration user.
+- If API access is refused, tell Ryan: a CSV import (report exports in the same shape) can be added to the reader.
+
+## 5. Risk model, once Salesforce is in
+
+Ryan has already backfilled features from 4 Nov 2024 (usage goes back to May 2024). After the Salesforce load:
+
+```bash
+python3 code/risk/risk_model.py --user n360 --password "$N360_CH_PASSWORD" features --from 2024-11-04 --every 7 --overwrite
+```
+```bash
+python3 code/risk/risk_model.py --user n360 --password "$N360_CH_PASSWORD" train
+```
+
+`train` prints how past renewals were labelled (lost, kept on record, kept because a contract ran on, unconfirmed)
+and a run id. Before adopting:
+- **Set `prior_mean_rate`** in `code/risk/risk_model.json` to renewals lost ÷ renewals due over the last two or
+  three years (currently 0.15, a guess), bump `version`, and train again.
+- **Record known churns and downsells** that are in neither Salesforce nor the risk register:
+  `risk_model.py ... outcome --customer "<name>" --date YYYY-MM-DD --outcome churned|downsold`.
+- Then `adopt --run <id>` and `score --as-of all`. Docs: `docs/21_RISK_MODEL.md` sections 5 and 7.
+
+## 6. The local runner and the Operations dashboard
+
+`n360.ops_job` and `n360.ops_night` are declared in `code/schema.sql` (the runner creates them the same way). The
+Operations dashboard (`n360-ops`, generated by `code/grafana/build_ops.py`) reads them and links to the runner on
+127.0.0.1:8099. If you change what the runner writes, change both and keep the columns.
+
+## Rules (unchanged)
+
+- **Real data stays on company-approved machines.** Pass back error text, counts (readiness) and labels, never rows,
+  names or amounts. Keep the N360 chat (docs/09) off with real data until the company approves it.
+- **Don't rename N360 tables, columns or dashboard uids.** A contract change is Ryan's call, and the synthetic
+  generator (`sample_data/generate_synthetic.py`) must change with the exporter.
+- **Never commit `code/.env`, tokens, exports or Salesforce pulls.**
+- **Don't loosen a type to make a load pass; fix the export.** A refused night (exit 3) leaves the last good night
+  live; `load.py` names the table and column on a format error (exit 2).
+- **Back up the history tables** weekly: `N360_BACKUP=~/n360-backups code/ops/backup.sh` (risk history, register,
+  forecast history and the risk model's tables cannot be rebuilt from exports).
+
+## Where to read more
+
+| Doc | What |
 |---|---|
-| `docs/13_LAPTOP_POC.md` | Mac setup and nightly run |
-| `docs/02_DATA_CONTRACT.md` | Export format, checks, keys |
-| `code/schema.sql` | Tables, types, views, `n360.settings` thresholds |
-| `code/load.py` | Stage → checks → swap; `--rows <dir>` loads one night by hand |
-| `code/ops/nightly.sh` | Loads every new night folder |
-| `sample_data/generate_synthetic.py` | Reference exporter (synthetic) |
-| `docs/12_AWS.md` | Later: the same stack on AWS, loads still from the laptop |
+| `docs/02_DATA_CONTRACT.md`, `code/schema.sql` | The export format and every column |
+| `docs/24_ADOPTION_EXPORT.md`, `docs/25_ADOPTION_DETAIL.md` | Adoption tables, `cortex_user_day` spec |
+| `docs/13_LAPTOP_POC.md` | Mac setup, nightly run, section 6: getting the risk model running |
+| `docs/18_SALESFORCE.md`, `docs/19_SALESFORCE_LIVE.md` | The Salesforce reader; admin checklist |
+| `docs/21_RISK_MODEL.md` | Running, training and governing the risk model |
+| `docs/04_DASHBOARDS.md` | Every dashboard, panel by panel |
+| `docs/08_DECISIONS.md` | What is decided, proposed and open |
+| `CHANGES.md` | What changed, newest first |
