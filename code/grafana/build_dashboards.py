@@ -3248,6 +3248,16 @@ WELCOME_SECTIONS = [
 ]
 
 
+def chip_text(background):
+    """Dark or white text, whichever contrasts more with the chip's colour (WCAG relative luminance)."""
+    def lum(h):
+        r, g, b = (int(h.lstrip('#')[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        f = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4  # noqa: E731
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+    bg = lum(background)
+    return '#1a1a1a' if (bg + 0.05) / (lum('#1a1a1a') + 0.05) >= 1.05 / (bg + 0.05) else '#ffffff'
+
+
 def html_panel(pid, x, y, w, h, html, title='', transparent=False):
     return {'id': pid, 'title': title, 'type': 'text', 'gridPos': {'x': x, 'y': y, 'w': w, 'h': h}, 'transparent': transparent,
             'options': {'mode': 'html', 'content': ' '.join(html.split())}}
@@ -3318,7 +3328,8 @@ def welcome():
     p.append(html_panel(5, 0, 12, 24, 5, f'<div style="display:flex;gap:12px">{tour}</div>',
                         title='A five-minute tour'))
     chip = lambda word, c: (f'<span style="display:inline-block;padding:2px 8px;margin:2px 4px 2px 0;border-radius:3px;'
-                            f'background:{COLOUR[c]};color:#1a1a1a;font-size:12px">{word}</span>')
+                            f'background:{COLOUR[c]};color:{chip_text(COLOUR[c])};font-size:12px;'
+                            f'font-weight:{600 if chip_text(COLOUR[c]) == "#ffffff" else 400}">{word}</span>')
     contract = ''.join(chip(w, c) for k, (w, c) in STATUS.items() if k not in ('not read',)) + chip(NOT_READ, 'grey')
     levels = ''.join(chip(w, c) for w, c in LEVEL.values())
     adopt = ''.join(chip(w, c) for w, c in ADOPT.values())
