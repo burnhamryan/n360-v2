@@ -590,7 +590,7 @@ CREATE TABLE IF NOT EXISTS n360.cortex_day                 -- authoring sessions
 (
     day                 Date,
     account             LowCardinality(String),
-    user_type           Enum8('customer' = 1, 'staff' = 2),
+    user_type           Enum8('customer' = 1, 'staff' = 2, 'unknown' = 3),   -- unknown: Cortex has no user id (27 Nov 2026)
     authoring_sessions  Nullable(UInt32),
     run_id              UUID
 )
@@ -605,6 +605,93 @@ CREATE TABLE IF NOT EXISTS n360.explorer_day               -- analytics-assistan
     run_id       UUID
 )
 ENGINE = MergeTree PARTITION BY toYYYYMM(day) ORDER BY (account, user_type, day);
+
+ALTER TABLE n360.cortex_day MODIFY COLUMN user_type Enum8('customer' = 1, 'staff' = 2, 'unknown' = 3);
+
+CREATE TABLE IF NOT EXISTS n360.feature_window             -- feature use per VA over the window the source reads (27 Nov 2026)
+(                                                          -- executions and Explorer are read as window totals, not per day
+    as_of         Date,
+    account       LowCardinality(String),
+    bot_id        UUID,
+    feature       LowCardinality(String),                  -- 'V8 playbooks' | 'Analytics assistant' | 'Authoring tool'
+    user_type     Enum8('customer' = 1, 'staff' = 2, 'unknown' = 3),
+    window_start  Date,
+    window_end    Date,
+    amount        Nullable(UInt32),                        -- NULL = not read (Not reported yet); 0 = read and none
+    unit          LowCardinality(String),                  -- executions | questions | sessions
+    last_day      Nullable(Date),
+    run_id        UUID
+)
+ENGINE = MergeTree ORDER BY (account, feature, bot_id);
+
+CREATE TABLE IF NOT EXISTS n360.va_adoption                -- the v1.1 Adoption view per VA, newest read (27 Nov 2026)
+(                                                          -- every count: NULL = not read (Not reported yet), 0 = read and none
+    as_of                  Date,
+    account                LowCardinality(String),
+    bot_id                 UUID,
+    va                     String,
+    region                 LowCardinality(String),
+    engine_version         LowCardinality(Nullable(String)),
+    engine_major           Nullable(UInt8),
+    playbooks_live         Nullable(UInt16),               -- every production playbook
+    v8_playbooks           Nullable(UInt16),               -- the ones that count as V8 (VA engine V8 or later)
+    legacy_intents         Nullable(UInt16),
+    window_start           Date,                           -- the executions window (31 days)
+    window_end             Date,
+    executions             Nullable(UInt32),
+    conversations          Nullable(UInt32),               -- conversations that ran at least one playbook
+    handoffs               Nullable(UInt32),               -- handoffs to an agent from within a playbook
+    playbooks_executed     Nullable(UInt16),
+    last_execution         Nullable(Date),
+    idle_playbooks         Nullable(UInt16),               -- V8 playbooks live with no execution in the per-playbook window
+    calibration_runs       Nullable(UInt16),
+    calibration_completed  Nullable(UInt16),
+    calibration_last       Nullable(Date),
+    behavior_validation    LowCardinality(Nullable(String)),  -- enabled | off | not set
+    test_conversations     Nullable(UInt32),
+    test_days              Nullable(UInt16),
+    test_suites            Nullable(UInt16),
+    test_runs              Nullable(UInt32),
+    test_last              Nullable(Date),
+    recipes                Nullable(UInt16),
+    recipes_production     Nullable(UInt16),
+    recipe_actions         Nullable(UInt16),
+    mcp_live               Nullable(UInt8),
+    mcp_not_live           Nullable(UInt8),
+    mcp_names              String,
+    supervisory_live       Nullable(UInt8),
+    supervisory_default    Nullable(UInt8),
+    supervisory_names      String,
+    cortex_sessions_30d    Nullable(UInt32),               -- US VAs only; Netomi or customer not known
+    cortex_last            Nullable(Date),
+    explorer_questions_30d Nullable(UInt32),               -- customer users only, Netomi staff never count
+    explorer_users_30d     Nullable(UInt16),
+    explorer_last          Nullable(Date),
+    run_id                 UUID
+)
+ENGINE = MergeTree ORDER BY (account, bot_id);
+
+CREATE TABLE IF NOT EXISTS n360.playbook_window            -- each production playbook, newest read (27 Nov 2026)
+(
+    as_of              Date,
+    account            LowCardinality(String),
+    bot_id             UUID,
+    va                 String,
+    task_id            String,
+    playbook           String,
+    instruction_chars  UInt32,
+    tools              UInt16,
+    trigger_chars      UInt32,
+    length_band        LowCardinality(String),             -- <200 (short) | 200-999 | 1000-2999 | 3000-5999 | 6000-9999 | 10000+
+    counts_as_v8       Bool,
+    executions         Nullable(UInt32),                   -- in the per-playbook window; NULL = not read
+    idle               Nullable(Bool),                     -- V8 and no execution in the window
+    window_start       Date,
+    window_end         Date,
+    creator_domain     Nullable(String),
+    run_id             UUID
+)
+ENGINE = MergeTree ORDER BY (account, bot_id, playbook);
 
 CREATE TABLE IF NOT EXISTS n360.ps_ticket                  -- support tickets; area and ask tagged by hand
 (
@@ -951,11 +1038,10 @@ CREATE OR REPLACE VIEW n360.v_feature_use AS
 -- (no rows for that customer in the source table).
 WITH (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') AS dt,
      src AS (
-        SELECT account, 'V8 playbooks' AS feature, sum(executions) > 0 AS u FROM n360.playbook_day WHERE day > dt - 30 GROUP BY account
-        UNION ALL SELECT account, 'Authoring tool', sum(authoring_sessions) > 0 FROM n360.cortex_day
-            WHERE user_type = 'customer' AND day > dt - 30 GROUP BY account
-        UNION ALL SELECT account, 'Analytics assistant', sum(questions) > 0 FROM n360.explorer_day
-            WHERE user_type = 'customer' AND day > dt - 30 GROUP BY account
+        -- V8 playbooks, Authoring tool, Analytics assistant: the window totals the pipeline reads (feature_window, 27 Nov
+        -- 2026), the same figures as the v1.1 Adoption view; rows with amount NULL (not read) are left out
+        SELECT account, feature, assumeNotNull(max(amount)) > 0 AS u FROM n360.feature_window
+            WHERE amount IS NOT NULL GROUP BY account, feature
         UNION ALL SELECT account, 'MCP servers', sum(mcp_servers_live) > 0 FROM n360.v_va_config_latest GROUP BY account
         UNION ALL SELECT account, 'Supervisory rules', sum(supervisory_rules_on) > 0 FROM n360.v_va_config_latest GROUP BY account),
      feats AS (SELECT arrayJoin(['V8 playbooks', 'Authoring tool', 'Analytics assistant', 'MCP servers', 'Supervisory rules']) AS feature)
