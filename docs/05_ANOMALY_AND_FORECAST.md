@@ -23,6 +23,11 @@ first guesses; they are tuned monthly from review outcomes.
   Group same-day flags across ≥ 3 accounts into one item. Built: `v_anomaly_events` (settled days only;
   spikes grouped apart from drops and silences).
 - The newest 0–2 days produce most false drops (data still settling). Provisional days never alert.
+- **A VA that stays at 0** (found 27 Nov 2026, synthetic VA *Cedar Kiosk*): it reads "went silent" and alerts on
+  every settled day for about 4½ weeks, then its same-weekday baseline falls under 20, it reads "Not scored" and
+  the alert clears, though the VA is still at 0. **Open (docs/08):** alert only on the first silent day, keep a
+  long silence flagged until someone reviews it, or both. Until decided, the VA page and Customer health still
+  show it (0 conversations in 30 days); a VA whose rows stop altogether (*Cedar Legacy*) reads "not reported".
 
 ## Anomaly detection v2 (built 24 Nov 2026, B20: `v_anomaly_v2`; thresholds in `n360.settings`; tested on planted synthetic cases)
 

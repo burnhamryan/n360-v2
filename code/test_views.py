@@ -12,6 +12,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from load import CH  # noqa: E402
 
 failed = 0
+# VAs with no conversations in the last 30 days (27 Nov 2026: real data had one): read at 0, and rows that stop
+QUIET = {'Cedar Kiosk', 'Cedar Legacy'}
 
 
 def check(name, ok, got):
@@ -142,9 +144,12 @@ def main():
                 'INNER JOIN n360.va AS v ON v.bot_id = c.bot_id ORDER BY va_name')
         check('Phase 2: the two planted configuration changes, nothing else',
               [r['va_name'] for r in ch_] == ['Harbor Chat', 'Pinecrest Chat'], ch_)
-        idle = q("SELECT playbook FROM n360.playbook_day WHERE day > (SELECT toDate(max(window_end)) FROM n360.runs "
-                 "WHERE status = 'loaded') - 31 GROUP BY bot_id, playbook HAVING sum(executions) = 0")
-        check('Phase 2: one built-but-idle playbook (Gift cards)', [r['playbook'] for r in idle] == ['[SYNTHETIC] Gift cards'], idle)
+        idle = q("SELECT v.va_name AS va, p.playbook AS playbook FROM n360.playbook_day AS p "
+                 "INNER JOIN n360.va AS v ON v.bot_id = p.bot_id WHERE p.day > (SELECT toDate(max(window_end)) FROM n360.runs "
+                 "WHERE status = 'loaded') - 31 GROUP BY va, playbook HAVING sum(p.executions) = 0")
+        check('Phase 2: one built-but-idle playbook (Gift cards) on a VA with traffic; the quiet VAs run nothing',
+              [r['playbook'] for r in idle if r['va'] not in QUIET] == ['[SYNTHETIC] Gift cards']
+              and {r['va'] for r in idle if r['va'] in QUIET} == QUIET, idle)
         asks = {r['ask']: int(r['customers']) for r in q('SELECT ask, customers FROM n360.v_top_asks')}
         check('Phase 2: top asks = the ask from 3 customers and the one from 2',
               asks == {'Export conversations to CSV': 3, 'SMS opt-out keywords': 2}, asks)
@@ -349,6 +354,60 @@ def main():
                "(SELECT min(as_of) FROM n360.risk_features)")
         check('risk model: before the risk register was first used, "open churn risks" is not reported, never zero',
               fl and all(r['value'] is None for r in fl), fl[:3])
+
+    # A VA with no conversations in the last 30 days: every view still answers for it, without NaN or infinity
+    # (a 0 / 0 or x / 0 that slips past nullIf), and the 30-day numbers say "none" or "not reported", never a guess.
+    bots = {r['va_name']: str(r['bot_id']) for r in q("SELECT va_name, bot_id FROM n360.va WHERE va_name IN ('Cedar Kiosk', 'Cedar Legacy')")}
+    check('quiet VAs: both are in n360.va', set(bots) == QUIET, bots)
+    if set(bots) == QUIET:
+        cols = q("SELECT table, name, type FROM system.columns WHERE database = 'n360' AND table IN "
+                 "(SELECT name FROM system.tables WHERE database = 'n360' AND engine = 'View') ORDER BY table, position")
+        views = {}
+        for c in cols:
+            views.setdefault(c['table'], []).append((c['name'], c['type']))
+        bad, broken, seen = {}, {}, 0
+        in_bots = ', '.join(f"toUUID('{b}')" for b in bots.values())
+        for view, vc in sorted(views.items()):
+            names = {n for n, _ in vc}
+            where = (f'bot_id IN ({in_bots})' if 'bot_id' in names and 'UUID' in dict(vc)['bot_id']
+                     else "account = 'Cedar Logistics'" if 'account' in names else None)
+            if where is None:
+                continue
+            floats = [n for n, t in vc if 'Float' in t and 'Array' not in t]
+            sel = ', '.join(f'countIf(isNaN(`{n}`) OR isInfinite(`{n}`)) AS `{n}`' for n in floats) or 'count() AS n'
+            try:
+                r = q(f'SELECT count() AS rows_, {sel} FROM n360.`{view}` WHERE {where}')[0]
+            except Exception as e:  # noqa: BLE001
+                broken[view] = str(e)[:160]
+                continue
+            seen += int(r['rows_']) > 0
+            nan = {n: int(r[n]) for n in floats if int(r[n])}
+            if nan:
+                bad[view] = nan
+        check(f'quiet VAs: every view with a VA or customer key answers for them ({seen} return rows), no query errors',
+              not broken, broken)
+        check('quiet VAs: no NaN or infinity in any view, for the quiet VAs or their customer', not bad, bad)
+        # ...and none hidden under a NULL either: ClickHouse computes both branches of if(x > 0, y / x, NULL), and a
+        # later toInt32 of the column throws on the hidden NaN (the bug a VA at 0 for 60 days found on Customer health)
+        hidden = {}
+        for view in ('v_va_change', 'v_customer_adoption', 'v_playbook'):
+            fl = [n for n, t in views.get(view, []) if t.startswith('Nullable(Float')]
+            r = q(f"SELECT {', '.join(f'countIf(isNaN(assumeNotNull(`{n}`)) OR isInfinite(assumeNotNull(`{n}`))) AS `{n}`' for n in fl)} "
+                  f"FROM n360.`{view}`")[0]
+            hidden.update({f'{view}.{n}': int(r[n]) for n in fl if int(r[n])})
+        check('quiet VAs: no NaN or infinity hidden under a NULL in v_va_change, v_customer_adoption, v_playbook', not hidden, hidden)
+        ch_ = {r['va']: (r['convs_30'], r['convs_change_pct']) for r in q(
+            "SELECT v.va_name AS va, c.convs_30 AS convs_30, c.convs_change_pct AS convs_change_pct FROM n360.v_va_change AS c "
+            "INNER JOIN n360.va AS v ON v.bot_id = c.bot_id WHERE v.va_name IN ('Cedar Kiosk', 'Cedar Legacy')")}
+        k = ch_.get('Cedar Kiosk', (None, None))
+        check('quiet VAs: Cedar Kiosk (read every day at 0) has 0 conversations in 30 days and no change (0 on the 30 '
+              'before too, never a % of 0); Cedar Legacy (no rows) is not reported, never 0',
+              k[0] is not None and int(k[0]) == 0 and k[1] is None and ch_.get('Cedar Legacy', (None,))[0] is None, ch_)
+        an = q("SELECT v.va_name AS va, count() AS n FROM n360.v_va_day_anomaly AS a INNER JOIN n360.va AS v ON v.bot_id = a.bot_id "
+               "WHERE v.va_name IN ('Cedar Kiosk', 'Cedar Legacy') AND a.day > (SELECT toDate(max(window_end)) FROM n360.runs "
+               "WHERE status = 'loaded') - 14 GROUP BY va")
+        check('quiet VAs: neither is scored for anomalies in the last 14 days: about 5 weeks at 0 takes the same-weekday '
+              'baseline under 20, so the VA reads "Not scored" and the silence alert stops (docs/05)', not an, an)
 
     print('VIEW TESTS PASSED' if not failed else f'{failed} VIEW TESTS FAILED')
     return 1 if failed else 0

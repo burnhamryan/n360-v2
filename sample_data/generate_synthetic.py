@@ -21,7 +21,9 @@ Edge cases deliberately present (and what each one tests):
   Summit Games        a VA read by the conversation-records reader: no handoff data (handoffs NULL)
   Lakeside Insurance  an Email VA that goes silent for the last 9 days (anomaly: went silent)
   Northwind Outfitters a normal account; joins a cross-account spike with Bluebird and Harbor
-  Cedar Logistics     an unbilled VA (no contract line)
+  Cedar Logistics     an unbilled VA (no contract line); and two more with no conversations in the last 30 days
+                      (27 Nov 2026: real data had one and something broke): Cedar Kiosk read every day at 0 for
+                      60 days, Cedar Legacy whose rows stop 40 days before the last day (see QUIET_VAS)
   Kestrel Travel      a line running ahead of its term but under billed (pace amber: gap > 10 points)
   Orchid Health       anomaly v2 cases on one VA and line: containment drop and measure gap over the last 2 weeks,
                       and a one-day surge 2 days before the last day that pulls the crossing date > 14 days earlier
@@ -219,6 +221,18 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
     va_daily['Cedar Ops Chat'] = ('Cedar Logistics', 'Chat', {}, {d: (c, int(c * .85), int(c * .4)) for d, c in cedar.items()})
     T['account'].append(dict(account='Cedar Logistics', display_name='Cedar Logistics', rocketlane_account_id=100099,
                              csm_rocketlane='csm9@example.com', run_id=run_id))
+    # VAs with no conversations in the last 30 days (27 Nov 2026: real data had one and something broke; the tests
+    # must see both shapes): read every day at 0, and rows that stop altogether
+    for vname, acct, base, since, shape in QUIET_VAS:
+        q = daily_series(base, since, last, rng=random.Random(f'{SEED}/noise/{vname}') if multi else R)
+        rows = {}
+        for d, c in q.items():
+            if d > anchor - dt.timedelta(60 if shape == 'zeros' else 40):
+                if shape == 'stopped':
+                    continue                                  # no row at all: the reader stopped seeing the VA
+                c = 0                                         # read, and zero
+            rows[d] = (c, int(c * .85), int(c * .4))
+        va_daily[vname] = (acct, 'Chat', {}, rows)
 
     pool_members, pool_used, pool_last30 = [], 0, 0
     pool_meas, fc_series = {}, []          # daily measure per forecast series, for the forecast-history backfill
@@ -315,6 +329,12 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
     for d, (c, e, h) in sorted(va_daily['Cedar Ops Chat'][3].items()):
         if d >= dt.date(2026, 5, 29):
             T['line_day'].append(dict(day=d.isoformat(), account='Cedar Logistics', series_key=f'Cedar Logistics|unbilled|{bot}',
+                                      kind='unbilled', bot_id=bot, conversations=c, engaged=e, measured=e, run_id=run_id))
+
+    for vname, acct, base, since, shape in QUIET_VAS:
+        bot, live, src = va_row(vname, acct, 'Chat', {}, on_contract=False)
+        for d, (c, e, h) in sorted(va_daily[vname][3].items()):
+            T['line_day'].append(dict(day=d.isoformat(), account=acct, series_key=f'{acct}|unbilled|{bot}',
                                       kind='unbilled', bot_id=bot, conversations=c, engaged=e, measured=e, run_id=run_id))
 
     for rid, r in rules.items():
@@ -414,6 +434,10 @@ def phase2(T, va_daily, last, anchor, run_id):
                                        run_id=run_id))
 
 
+# unbilled VAs with no conversations in the last 30 days: (name, customer, conversations a day before, from, shape)
+# At Cedar Logistics (unbilled only, already at risk, no Cortex) so no other planted case moves.
+QUIET_VAS = [('Cedar Kiosk', 'Cedar Logistics', 70, dt.date(2026, 3, 1), 'zeros'),
+             ('Cedar Legacy', 'Cedar Logistics', 120, dt.date(2026, 2, 1), 'stopped')]
 CORTEX_FROM = dt.date(2026, 10, 5)          # the Cortex source starts here (docs/25)
 CORTEX_QUIET = {'Willow Energy', 'Lakeside Insurance', 'Cedar Logistics', 'Summit Games'}
 PLAYBOOKS = ['Order status', 'Refund request', 'Store hours', 'Password reset', 'Change address', 'Track a parcel',
