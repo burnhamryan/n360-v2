@@ -2,7 +2,8 @@
   "uid": "n360-pipeline",
   "title": "N360 \u00b7 Pipeline health",
   "tags": [
-    "n360"
+    "n360",
+    "admin"
   ],
   "editable": false,
   "schemaVersion": 39,

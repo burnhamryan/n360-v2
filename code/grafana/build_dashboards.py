@@ -337,9 +337,42 @@ def last_load(pid, x, y, w, h):
                  'colorMode': 'background'})
 
 
+# ───────────────────────── Roles and tags (27 Nov 2026, Ryan: "adjust the tags ... based on this setup") ──────────
+# ROLES is the Welcome page's "Find your way" box AND the source of every dashboard's role tags, so the two cannot
+# drift: a dashboard linked under a role carries that role's tag. ROLE_EXTRA tags the dashboards the box does not
+# link (the drill-down pages and the deeper ones), by who the Welcome card says each is for. Operations and Pipeline
+# health are for whoever runs N360 (tag admin). Grafana's dashboard list filters by tag: csm, customer-architect,
+# leader, admin. Every N360 dashboard also keeps the tag n360.
+ROLES = [('CSM', [('Overview', 'n360-overview'), ('Customer', 'n360-customer'), ('Risk', 'n360-risk'), ('Contracts', 'n360-contracts')],
+          'Before a QBR: Customer, then Customer adoption.'),
+         ('Customer architect', [('Customer health', 'n360-health'), ('VA', 'n360-va'), ('Adoption', 'n360-adoption'),
+                                 ('Containment', 'n360-containment')], 'For an upgrade plan: Adoption\'s next step queue.'),
+         ('Leader', [('Overview', 'n360-overview'), ('Risk', 'n360-risk'), ('Risk model', 'n360-risk-model'),
+                     ('Cortex by Netomians', 'n360-cortex')], 'For the week: the Overview sentence and Risk.')]
+ROLE_TAG = {'CSM': 'csm', 'Customer architect': 'customer-architect', 'Leader': 'leader'}
+ROLE_EXTRA = {
+    'n360-welcome': ['csm', 'customer-architect', 'leader'],     # the home page, for everyone
+    'n360-adoption-customer': ['csm', 'customer-architect'],     # the QBR tip: Customer, then Customer adoption
+    'n360-adoption-va': ['customer-architect'],
+    'n360-line': ['csm'],                                        # drill-down from Customer and Contracts
+    'n360-forecast': ['csm'],
+    'n360-requests': ['csm'],
+    'n360-anomalies': ['customer-architect'],
+    'n360-pipeline': ['admin'],
+    'n360-ops': ['admin'],
+}
+
+
+def tags_for(uid):
+    """['n360', role tags...] in a fixed order: the roles that link the dashboard in ROLES, plus ROLE_EXTRA"""
+    t = {ROLE_TAG[r] for r, links, _ in ROLES if any(u == uid for _, u in links)} | set(ROLE_EXTRA.get(uid, []))
+    return ['n360'] + [x for x in ('csm', 'customer-architect', 'leader', 'admin') if x in t]
+
+
+
 def dashboard(uid, title, panels, variables=(), links=(), time=None):
     return {
-        'uid': uid, 'title': title, 'tags': ['n360'], 'editable': False,
+        'uid': uid, 'title': title, 'tags': tags_for(uid), 'editable': False,
         'schemaVersion': 39, 'version': 1, 'timezone': 'utc',
         'time': dict(time or DEFAULT_RANGE),
         'templating': {'list': list(variables)},
@@ -3302,12 +3335,7 @@ def welcome():
         Hover the ⓘ on any panel for what it shows and where it comes from. Click a customer, line, VA or playbook to drill
         in; <b>Back</b> links at the top take you up again. The pictures below are examples on invented data.</p>""",
         title='What N360 is'))
-    roles = [('CSM', [('Overview', 'n360-overview'), ('Customer', 'n360-customer'), ('Risk', 'n360-risk'), ('Contracts', 'n360-contracts')],
-              'Before a QBR: Customer, then Customer adoption.'),
-             ('Customer architect', [('Customer health', 'n360-health'), ('VA', 'n360-va'), ('Adoption', 'n360-adoption'),
-                                     ('Containment', 'n360-containment')], 'For an upgrade plan: Adoption\'s next step queue.'),
-             ('Leader', [('Overview', 'n360-overview'), ('Risk', 'n360-risk'), ('Risk model', 'n360-risk-model'),
-                         ('Cortex by Netomians', 'n360-cortex')], 'For the week: the Overview sentence and Risk.')]
+    roles = ROLES
     rows = ''.join(
         f"""<div style="margin:0 0 12px"><div style="font-weight:600;font-size:14px;margin-bottom:3px">{r}</div>
             <div style="font-size:13px">{' · '.join(f'<a href="/d/{u}">{t}</a>' for t, u in links)}</div>

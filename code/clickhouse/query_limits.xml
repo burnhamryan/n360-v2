@@ -7,6 +7,10 @@
             <max_memory_usage>2000000000</max_memory_usage>
             <max_bytes_before_external_group_by>1000000000</max_bytes_before_external_group_by>
             <max_bytes_before_external_sort>1000000000</max_bytes_before_external_sort>
+            <!-- 27 Nov 2026: plain hash joins. 25.8's default (parallel_hash) builds one hash table per thread, so the
+                 risk view's ~20 joins took 0.8-3 GB per panel on real data, and the Risk page's panels together hit
+                 the server cap (code 241). With hash: 50-100 MB per panel, the same rows (all 224 panels checked). -->
+            <join_algorithm>hash</join_algorithm>
         </default>
     </profiles>
 </clickhouse>

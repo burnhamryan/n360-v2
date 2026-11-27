@@ -14,7 +14,7 @@ import json, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from build_dashboards import COLOUR  # noqa: E402  the one N360 palette: done green, stopped warm, in progress amber
+from build_dashboards import COLOUR, tags_for  # noqa: E402  the one N360 palette: done green, stopped warm, in progress amber
 DS = {'type': 'grafana-clickhouse-datasource', 'uid': 'n360-clickhouse'}
 RUNNER = 'http://127.0.0.1:8099'
 NOT_READ = 'Not reported yet'
@@ -130,7 +130,7 @@ def dashboard():
                arrayStringConcat(checks_failed, ', ') AS `Checks failed`, toString(run_id) AS `Run id`
         FROM n360.runs ORDER BY loaded_at DESC LIMIT 20""", 0, 33, 24, 8,
         'Every load.py attempt (stage, 8 checks, swap). Source: n360.runs.', colored=('Status',)))
-    return {'uid': 'n360-ops', 'title': 'N360 · Operations', 'tags': ['n360'], 'editable': False, 'schemaVersion': 39,
+    return {'uid': 'n360-ops', 'title': 'N360 · Operations', 'tags': tags_for('n360-ops'), 'editable': False, 'schemaVersion': 39,
             'version': 1, 'timezone': 'utc', 'refresh': '30s', 'time': {'from': 'now-30d', 'to': 'now'},
             'links': [{'type': 'link', 'title': 'Back to Overview', 'url': '/d/n360-overview', 'icon': 'dashboard', 'keepTime': True,
                        'includeVars': False, 'targetBlank': False, 'asDropdown': False, 'tags': []},
