@@ -15,3 +15,9 @@ ratings are the ones `code/ci.sh` records.
 `07-adoption.png`, `19-adoption-customer.png` (Harbor Telecom) and `20-adoption-va.png` (Pinecrest Chat): the three
 Adoption pages rebuilt on 27 Nov 2026 (docs/04 section 9), on the same synthetic data. Pinecrest Chat shows a
 lapsed calibration (amber); Harbor Telecom has every feature adopted.
+
+**27 Nov 2026: every dashboard re-shot** in Grafana 13.3.1 at 1440 px (dark), loaded by `code/ci.sh server` (14
+synthetic nights, the fake Salesforce, the register and ratings CI records, the risk model, the synthetic runner
+rows). New: `21-cortex-by-netomians.png` (the leaderboard over the last 3 months: Jordan Patel, rising, has just
+overtaken Avery Kim) and `22-operations.png`. The light-theme shots (14, 15, 17) are from 25 Nov. Every person and
+customer is invented.

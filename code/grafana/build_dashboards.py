@@ -2301,7 +2301,7 @@ def cortex_split_by_customer(pid, x, y, w, h, where=ACCT):
                  'playbooks. ' + WHO_NOTE, 'n360.v_cortex_user', 'Customer', 'dashboard time range'),
         field=field_config(who_colours(Netomi='series', **{'The customer': 'green'}), decimals=0, min=0,
                            custom={'fillOpacity': 90, 'lineWidth': 0, 'axisGridShow': False}),
-        options={'xField': 'Customer', 'orientation': 'horizontal', 'stacking': 'normal', 'showValue': 'auto', 'barWidth': 0.8,
+        options={'xField': 'Customer', 'orientation': 'horizontal', 'stacking': 'normal', 'showValue': 'never', 'barWidth': 0.8,
                  'legend': {'displayMode': 'list', 'placement': 'bottom', 'showLegend': True},
                  'tooltip': {'mode': 'multi', 'sort': 'none'}}, may_be_empty='no per-person Cortex data')
 
@@ -2391,12 +2391,14 @@ def cortex_netomi():
                  'customers and VAs worked on. Last 30 days: their sessions in the newest 30 days, ▲ more than the 30 before, '
                  '▼ fewer. Click a name to see only them. ' + WHO_NOTE, 'n360.v_cortex_user', 'Netomian, Customer',
                  'dashboard time range; last 30 days to the newest day read'),
-        field=field_config([gauge_cell('Sessions', None, 'lavender'), width('#', 45), width('Netomian', 150), width('Sessions', 190),
+        field=field_config([gauge_cell('Sessions', None, 'lavender'), width('#', 36), width('Netomian', 115), width('Sessions', 140),
                             override('Last 30 days', ('mappings', [
                                 {'type': 'regex', 'options': {'pattern': '^▲.*', 'result': {'color': COLOUR['green'], 'index': 0}}},
                                 {'type': 'regex', 'options': {'pattern': '^▼.*', 'result': {'color': COLOUR['down'], 'index': 1}}}]),
                                      ('custom.cellOptions', {'type': 'color-text'})),
-                            with_links('Netomian', {'title': 'Only this Netomian', 'url': '/d/n360-cortex?var-netomian=${__value.raw}&${__url_time_range}'})]),
+                            width('Production edits', 80), width('Customers', 75), width('VAs', 45), width('Last 30 days', 90),
+                            with_links('Netomian', {'title': 'Only this Netomian', 'url': '/d/n360-cortex?var-netomian=${__value.raw}&${__url_time_range}'})],
+                           custom={'minWidth': 50}),
         options={'cellHeight': 'md'}, may_be_empty='no per-person Cortex data'))
     p.append(panel(8, 'Running leaderboard', 'timeseries', f"""
         SELECT toDateTime(day) AS time, name AS Netomian,
@@ -2408,7 +2410,7 @@ def cortex_netomi():
         fmt='timeseries', field=field_config(decimals=0, min=0, displayName='${__field.labels.Netomian}',
                                              color={'mode': 'palette-classic-by-name'},
                                              custom={'drawStyle': 'line', 'lineWidth': 2, 'lineInterpolation': 'stepAfter',
-                                                     'fillOpacity': 0, 'showPoints': 'never'}),
+                                                     'fillOpacity': 0, 'showPoints': 'never', 'spanNulls': True}),
         options={'legend': {'displayMode': 'table', 'placement': 'right', 'showLegend': True, 'calcs': ['lastNotNull'],
                             'sortBy': 'Last *', 'sortDesc': True},
                  'tooltip': {'mode': 'multi', 'sort': 'desc'}}, may_be_empty='no per-person Cortex data'))
@@ -2434,9 +2436,11 @@ def cortex_netomi():
         GROUP BY name, a.display_name, c.account ORDER BY Netomian, Sessions DESC""", 0, 29, 12, 10,
         describe('Each Netomian\'s Cortex work per customer in the range. Click a customer for its adoption page. ' + WHO_NOTE,
                  'n360.v_cortex_user', 'Netomian, Customer', 'dashboard time range'),
-        field=field_config([hidden('account'), gauge_cell('Sessions', None, 'lavender'), width('Netomian', 140), width('Sessions', 170),
+        field=field_config([hidden('account'), gauge_cell('Sessions', None, 'lavender'), width('Netomian', 120), width('Sessions', 150),
+                            width('Production edits', 110),
                             with_links('Customer', drill(ADOPT_CUSTOMER[0], 'account', 'account', 'Open this customer\'s adoption')),
-                            with_links('Netomian', {'title': 'Only this Netomian', 'url': '/d/n360-cortex?var-netomian=${__value.raw}&${__url_time_range}'})]),
+                            with_links('Netomian', {'title': 'Only this Netomian', 'url': '/d/n360-cortex?var-netomian=${__value.raw}&${__url_time_range}'})],
+                           custom={'minWidth': 60}),
         options={'cellHeight': 'sm'}, may_be_empty='no per-person Cortex data'))
     p.append(cortex_split_by_customer(12, 12, 29, 12, 10))
     return dashboard('n360-cortex', 'N360 · Cortex by Netomians', p, [var_netomian(), var_account()],

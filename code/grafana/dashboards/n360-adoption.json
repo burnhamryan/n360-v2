@@ -2981,7 +2981,7 @@
         "xField": "Customer",
         "orientation": "horizontal",
         "stacking": "normal",
-        "showValue": "auto",
+        "showValue": "never",
         "barWidth": 0.8,
         "legend": {
           "displayMode": "list",

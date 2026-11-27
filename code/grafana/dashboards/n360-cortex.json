@@ -437,7 +437,10 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet"
+          "noValue": "Not reported yet",
+          "custom": {
+            "minWidth": 50
+          }
         },
         "overrides": [
           {
@@ -475,7 +478,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 45
+                "value": 36
               }
             ]
           },
@@ -487,7 +490,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 150
+                "value": 115
               }
             ]
           },
@@ -499,7 +502,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 190
+                "value": 140
               }
             ]
           },
@@ -539,6 +542,54 @@
                 "value": {
                   "type": "color-text"
                 }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Production edits"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Customers"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 75
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VAs"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 45
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last 30 days"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
               }
             ]
           },
@@ -608,7 +659,8 @@
             "lineWidth": 2,
             "lineInterpolation": "stepAfter",
             "fillOpacity": 0,
-            "showPoints": "never"
+            "showPoints": "never",
+            "spanNulls": true
           }
         },
         "overrides": []
@@ -826,7 +878,10 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "Not reported yet"
+          "noValue": "Not reported yet",
+          "custom": {
+            "minWidth": 60
+          }
         },
         "overrides": [
           {
@@ -876,7 +931,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 140
+                "value": 120
               }
             ]
           },
@@ -888,7 +943,19 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 170
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Production edits"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
               }
             ]
           },
@@ -1009,7 +1076,7 @@
         "xField": "Customer",
         "orientation": "horizontal",
         "stacking": "normal",
-        "showValue": "auto",
+        "showValue": "never",
         "barWidth": 0.8,
         "legend": {
           "displayMode": "list",
