@@ -58,6 +58,7 @@
 | Some contract rules are pending or blocked | Rule table already carries status; dashboards show "not live" |
 | Billable unit for lines with no contract rule is unconfirmed | Label engaged as the measure, never as "billable" |
 | When the existing page retires | Not your concern |
+| A VA that stays at 0 (27 Nov 2026): it alerts "went silent" daily for about 4½ weeks, then reads "Not scored" and the alert clears while it is still at 0. Alert on the first silent day only, keep it flagged until reviewed, or both? | Ryan's call; unchanged until decided (docs/05) |
 | Whether real N360 data may be sent to Claude (chat via `mcp-grafana`; query results leave the machine) | Chat built and tested on synthetic only (`09_CHAT.md`) |
 | Who may chat with the data, and whether per-customer restriction is needed | Grafana OSS cannot limit rows per person; would need ClickHouse row policies + one data source per group |
 | Does the pipeline count usage after a line's end date? (synthetic does: Atlas 282.6% all days vs 268.4% within term) | Views follow `reported_measured` as given |

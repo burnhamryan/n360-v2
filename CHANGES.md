@@ -1,3 +1,20 @@
+# CHANGES · 27 Nov 2026 · VAs with no conversations in the last 30 days
+
+Real data had a VA with no conversations in 30 days and the synthetic data had none, so the tests could not catch
+what it broke. The generator now plants two at Cedar Logistics (unbilled, so no contract or planted case moves):
+**Cedar Kiosk**, read every day at 0 for 60 days, and **Cedar Legacy**, whose rows stop 40 days before the last day.
+
+- **Fixed: Customer health → Customers failed** ("Unexpected inf or nan to integer conversion"). `v_va_change`
+  guarded its division with `if(prev > 0, x / prev, NULL)`, but ClickHouse computes the hidden branch too: 0 / 0
+  under the NULL is NaN, and the panel's `toInt32(round(...))` throws on it. The guarded divisions in `v_va_change`,
+  `v_customer_adoption` (handoff %) and `v_playbook` (share of the VA) now divide by `greatest(x, 1)`.
+- **New view tests:** every view with a VA or customer key answers for the quiet VAs with no error, NaN or infinity,
+  and none hidden under a NULL in the three views above; Cedar Kiosk reads 0 conversations with no % change (0 the
+  30 days before too), Cedar Legacy reads "not reported", never 0. The idle-playbook test counts VAs with traffic
+  (a VA with none runs no playbook).
+- **Found, not changed (open, docs/05 and 08):** a VA at 0 alerts "went silent" every settled day for about 4½
+  weeks, then reads "Not scored" and the alert clears though it is still at 0.
+
 # CHANGES · 27 Nov 2026 · Welcome page
 
 **`n360-welcome`, the new home page** (Grafana opens it first): what N360 is and how every page reads, where to go by
