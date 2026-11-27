@@ -1,0 +1,963 @@
+{
+  "uid": "n360-ops",
+  "title": "N360 \u00b7 Operations",
+  "tags": [
+    "n360"
+  ],
+  "editable": false,
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "utc",
+  "refresh": "30s",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "links": [
+    {
+      "type": "link",
+      "title": "Back to Overview",
+      "url": "/d/n360-overview",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    },
+    {
+      "type": "link",
+      "title": "Pipeline health",
+      "url": "/d/n360-pipeline",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": false,
+      "targetBlank": false,
+      "asDropdown": false,
+      "tags": []
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "In one sentence",
+      "description": "Newest night the sources were pulled (by the Claude nightly or by code), the newest ClickHouse load, and the runner's latest job. Sources: n360.ops_night and n360.ops_job (written by the local runner), n360.runs (load.py).",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 18,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(\n          'Last night pulled: ', ifNull((SELECT any(night) FROM (SELECT night FROM n360.ops_night FINAL\n                                  WHERE claude_result LIKE 'published%' OR code_result = 'complete' ORDER BY night DESC LIMIT 1)), 'none on record'),\n          ' \u00b7 last load: ', ifNull((SELECT concat(toString(argMax(data_date, loaded_at)), ' ', toString(argMax(status, loaded_at))) FROM n360.runs), 'none'),\n          ' \u00b7 runner: ', ifNull((SELECT concat(argMax(action, started), ' ', argMax(state, started)) FROM n360.ops_job FINAL), 'no job yet')) AS sentence",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Data through",
+      "description": "Last data day in the live ClickHouse tables (the export window ends 23:59 UTC that day). Source: n360.runs.",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT formatDateTime(window_end, '%e %b %Y') AS d FROM n360.runs WHERE status = 'loaded'\n        ORDER BY loaded_at DESC, data_date DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [],
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "text",
+      "title": "Actions",
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 24,
+        "h": 6
+      },
+      "description": "Buttons for the local runner on this Mac (127.0.0.1:8099). It runs only these three jobs, one at a time.",
+      "options": {
+        "mode": "html",
+        "content": "<div style=\"display:flex;flex-wrap:wrap;gap:12px;align-items:stretch\">\n  <a href=\"http://127.0.0.1:8099/confirm?action=pull\" target=\"_blank\" rel=\"noopener\" style=\"flex:1 1 220px;padding:14px 16px;border-radius:4px;background:#3d71d9;color:#fff;text-decoration:none;font-weight:600\">\n    &#9654; Run the full nightly<br><span style=\"font-weight:400;font-size:12px\">Pull from every source (VPN needed, about an hour), export, load into ClickHouse</span></a>\n  <a href=\"http://127.0.0.1:8099/confirm?action=export\" target=\"_blank\" rel=\"noopener\" style=\"flex:1 1 220px;padding:14px 16px;border-radius:4px;background:#22252b;border:1px solid #2f333b;color:#ccccdc;text-decoration:none;font-weight:600\">\n    &#8635; Export and load<br><span style=\"font-weight:400;font-size:12px\">Rebuild the export for the newest pulled night, then load it</span></a>\n  <a href=\"http://127.0.0.1:8099/confirm?action=load\" target=\"_blank\" rel=\"noopener\" style=\"flex:1 1 220px;padding:14px 16px;border-radius:4px;background:#22252b;border:1px solid #2f333b;color:#ccccdc;text-decoration:none;font-weight:600\">\n    &#8681; Load new exports<br><span style=\"font-weight:400;font-size:12px\">Load any export not yet in ClickHouse (no VPN needed)</span></a>\n  <a href=\"http://127.0.0.1:8099/\" target=\"_blank\" rel=\"noopener\" style=\"flex:0 1 160px;padding:14px 16px;border-radius:4px;background:#22252b;border:1px solid #2f333b;color:#ccccdc;text-decoration:none;font-weight:600\">\n    Open runner<br><span style=\"font-weight:400;font-size:12px\">Live log of the current job</span></a>\n</div>\n<p style=\"font-size:12px;color:#9fa3ad;margin-top:10px\">Each button opens a confirm page in a new tab; nothing starts until you press Start there.\nIf a button shows \"can't connect\", the runner isn't running: in Terminal, from the pipeline folder,\n<code>~/Documents/Github/n360/.venv/bin/python ops_runner.py</code></p>"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Runner: latest job",
+      "description": "State and kind of the newest runner job. Source: n360.ops_job.",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if(count() = 0, NULL, concat(argMax(state, started), ' \u00b7 ', argMax(action, started))) AS s FROM n360.ops_job FINAL",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^(published|loaded|done|complete).*",
+                "result": {
+                  "color": "green",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^(stopped|failed|refused).*",
+                "result": {
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^(running|not loaded yet|export only|ran).*",
+                "result": {
+                  "color": "orange",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Claude nightly, last result",
+      "description": "Result of the newest Claude nightly run, read from that night's RUN_REPORT.md and PUBLISHED.json.",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 9,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if(count() = 0, NULL, concat(argMax(claude_result, night), ' (', toString(max(night)), ')')) AS s FROM n360.ops_night FINAL\n        WHERE claude_result != 'no run'",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^(published|loaded|done|complete).*",
+                "result": {
+                  "color": "green",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^(stopped|failed|refused).*",
+                "result": {
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^(running|not loaded yet|export only|ran).*",
+                "result": {
+                  "color": "orange",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Code pull, last result",
+      "description": "Result of the newest run of run_nightly.py (the nightly as code), from ORCH_REPORT.md / ORCH_DONE.json.",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 9,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT if(count() = 0, NULL, concat(argMax(code_result, night), ' (', toString(max(night)), ')')) AS s FROM n360.ops_night FINAL\n        WHERE code_result NOT IN ('not run', 'export only')",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^(published|loaded|done|complete).*",
+                "result": {
+                  "color": "green",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^(stopped|failed|refused).*",
+                "result": {
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^(running|not loaded yet|export only|ran).*",
+                "result": {
+                  "color": "orange",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Last load",
+      "description": "The newest load.py attempt: loaded, or refused by a data check. Source: n360.runs.",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 9,
+        "w": 6,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT concat(toString(argMax(status, loaded_at)), ' \u00b7 ', toString(argMax(data_date, loaded_at))) AS s FROM n360.runs",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/.*/",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "mappings": [
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^(published|loaded|done|complete).*",
+                "result": {
+                  "color": "green",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^(stopped|failed|refused).*",
+                "result": {
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            },
+            {
+              "type": "regex",
+              "options": {
+                "pattern": "^(running|not loaded yet|export only|ran).*",
+                "result": {
+                  "color": "orange",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Nights: what ran",
+      "description": "One row per pipeline night, newest first. Claude nightly: published (version) or why it stopped. Code pull: run_nightly.py. Export: row counts written. In ClickHouse: whether that export loaded. A missing night = no run that day.",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 12
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT n.night AS Night, n.claude_result AS `Claude nightly`, n.code_result AS `Code pull`,\n               if(n.export_run_id = '', '', n.export_counts) AS `Export`,\n               multiIf(n.export_run_id = '', '', r.status = 'loaded', 'loaded', r.status = 'failed_checks',\n                       concat('refused by a check: ', arrayStringConcat(r.checks_failed, ', ')), 'not loaded yet') AS `In ClickHouse`\n        FROM (SELECT * FROM n360.ops_night FINAL) AS n\n        LEFT JOIN (SELECT toString(run_id) AS rid, toString(argMax(status, loaded_at)) AS status, argMax(checks_failed, loaded_at) AS checks_failed\n                   FROM n360.runs GROUP BY rid) AS r ON r.rid = n.export_run_id\n        ORDER BY n.night DESC LIMIT 30",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Claude nightly"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(published|loaded|done|complete).*",
+                      "result": {
+                        "color": "green",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(stopped|failed|refused).*",
+                      "result": {
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(running|not loaded yet|export only|ran).*",
+                      "result": {
+                        "color": "orange",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Code pull"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(published|loaded|done|complete).*",
+                      "result": {
+                        "color": "green",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(stopped|failed|refused).*",
+                      "result": {
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(running|not loaded yet|export only|ran).*",
+                      "result": {
+                        "color": "orange",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "In ClickHouse"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(published|loaded|done|complete).*",
+                      "result": {
+                        "color": "green",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(stopped|failed|refused).*",
+                      "result": {
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(running|not loaded yet|export only|ran).*",
+                      "result": {
+                        "color": "orange",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Runner jobs",
+      "description": "Every job the runner started. Click a job id for its full log (runner page, new tab).",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT job_id, started AS `Started (UTC)`, action AS Action, state AS State,\n               if(finished IS NULL, '', concat(toString(dateDiff('minute', started, finished)), ' min')) AS Took,\n               exit_code AS `Exit`, last_line AS `Last line`\n        FROM n360.ops_job FINAL ORDER BY started DESC LIMIT 20",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "State"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(published|loaded|done|complete).*",
+                      "result": {
+                        "color": "green",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(stopped|failed|refused).*",
+                      "result": {
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(running|not loaded yet|export only|ran).*",
+                      "result": {
+                        "color": "orange",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "job_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open the log",
+                    "url": "http://127.0.0.1:8099/job/${__value.raw}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "ClickHouse loads",
+      "description": "Every load.py attempt (stage, 8 checks, swap). Source: n360.runs.",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "n360-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "n360-clickhouse"
+          },
+          "editorType": "sql",
+          "queryType": "table",
+          "format": 1,
+          "rawSql": "SELECT loaded_at AS `Loaded (UTC)`, data_date AS Night, toString(status) AS Status,\n               arrayStringConcat(checks_failed, ', ') AS `Checks failed`, toString(run_id) AS `Run id`\n        FROM n360.runs ORDER BY loaded_at DESC LIMIT 20",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Not reported yet",
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(published|loaded|done|complete).*",
+                      "result": {
+                        "color": "green",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(stopped|failed|refused).*",
+                      "result": {
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "^(running|not loaded yet|export only|ran).*",
+                      "result": {
+                        "color": "orange",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
