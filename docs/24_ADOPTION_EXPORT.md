@@ -76,7 +76,7 @@ If the source keeps no history of configurations, start reading now; the history
 | day | Date | UTC day |
 | account | String | |
 | user_type | `customer` or `staff` | Who asked. Only `customer` counts as adoption |
-| questions | UInt32, nullable | Questions asked of the analytics assistant that day |
+| questions | UInt32, nullable | Questions asked in Explorer (the analytics assistant) that day |
 | run_id | UUID | |
 
 ### `ps_ticket.ndjson`: one row per support ticket
@@ -108,9 +108,9 @@ Then, in N360: `risk_model.py features --from 2024-11-04 --every 7 --overwrite`,
 
 ## Questions for whoever builds it (don't guess; leave the column NULL)
 
-1. Where each table comes from: the configuration store, playbook execution logs, the authoring tool's and the
-   assistant's usage logs, the support system. Each may need its own access.
-2. How to tell a **customer** user from **staff** in the authoring and assistant logs (email domain, role).
+1. Where each table comes from: the configuration store, playbook execution logs, the usage logs of Cortex
+   (the authoring tool) and Explorer (the analytics assistant), the support system. Each may need its own access.
+2. How to tell a **customer** user from **staff** in the Cortex and Explorer logs (email domain, role).
 3. Whether the support system holds `product_area` and `ask`, or whether they are tagged by hand later.
 4. Whether `engine_version` is the same string on every VA (`V8.2`, `8.2`, `v8`): `engine_major` must be the
    number.

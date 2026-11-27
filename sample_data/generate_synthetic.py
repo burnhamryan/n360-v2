@@ -351,7 +351,7 @@ def generate(last, anchor, out, multi, bad=False, backfill_days=0, backfill_unti
 
 def phase2(T, va_daily, last, anchor, run_id):
     """Phase 2 tables (proposed design, 02/08): weekly configuration reads, playbook executions, authoring
-    sessions, analytics-assistant questions and support tickets. Own random streams keyed by name and day, so the
+    sessions (Cortex), Explorer questions and support tickets. Own random streams keyed by name and day, so the
     core tables above are unchanged and a day reads the same on every night.
     Planted: Lakeside Email and Cedar Ops Chat on V7 (not current); Harbor Chat upgraded V8.1 -> V8.2 and Pinecrest
     Chat +2 V8 playbooks in the newest read; one built-but-idle playbook (Northwind 'Gift cards'); an ask shared by

@@ -2589,7 +2589,7 @@
           "editorType": "sql",
           "queryType": "table",
           "format": 1,
-          "rawSql": "SELECT a.display_name AS Customer, anyIf(if(f.used IS NULL, NULL, if(f.used, 'Used', 'Not used')), f.feature = 'V8 playbooks') AS `V8 playbooks`,\n               anyIf(if(f.used IS NULL, NULL, if(f.used, 'Used', 'Not used')), f.feature = 'Authoring tool') AS `Authoring tool`,\n               anyIf(if(f.used IS NULL, NULL, if(f.used, 'Used', 'Not used')), f.feature = 'Analytics assistant') AS `Analytics assistant`,\n               anyIf(if(f.used IS NULL, NULL, if(f.used, 'Used', 'Not used')), f.feature = 'MCP servers') AS `MCP servers`,\n               anyIf(if(f.used IS NULL, NULL, if(f.used, 'Used', 'Not used')), f.feature = 'Supervisory rules') AS `Supervisory rules`, a.account AS account\n        FROM n360.account AS a INNER JOIN n360.v_feature_use AS f ON f.account = a.account\n        WHERE a.account IN (${account:singlequote}) GROUP BY a.display_name, a.account ORDER BY Customer",
+          "rawSql": "SELECT a.display_name AS Customer, anyIf(if(f.used IS NULL, NULL, if(f.used, 'Used', 'Not used')), f.feature = 'V8 playbooks') AS `V8 playbooks`,\n               anyIf(if(f.used IS NULL, NULL, if(f.used, 'Used', 'Not used')), f.feature = 'Cortex') AS `Cortex`,\n               anyIf(if(f.used IS NULL, NULL, if(f.used, 'Used', 'Not used')), f.feature = 'Explorer') AS `Explorer`,\n               anyIf(if(f.used IS NULL, NULL, if(f.used, 'Used', 'Not used')), f.feature = 'MCP servers') AS `MCP servers`,\n               anyIf(if(f.used IS NULL, NULL, if(f.used, 'Used', 'Not used')), f.feature = 'Supervisory rules') AS `Supervisory rules`, a.account AS account\n        FROM n360.account AS a INNER JOIN n360.v_feature_use AS f ON f.account = a.account\n        WHERE a.account IN (${account:singlequote}) GROUP BY a.display_name, a.account ORDER BY Customer",
           "refId": "A"
         }
       ],
@@ -2665,7 +2665,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Authoring tool"
+              "options": "Cortex"
             },
             "properties": [
               {
@@ -2717,7 +2717,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Analytics assistant"
+              "options": "Explorer"
             },
             "properties": [
               {

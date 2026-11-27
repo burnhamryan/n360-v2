@@ -31,7 +31,7 @@ later for past dates are close to it, with the limits listed in section 8.
 | Commercial and contract (25%) | Points behind the term (worst line); forecast at term end (lowest line); renewal forecast category (Salesforce, current only) |
 | Usage (20%) | Conversations, the last 4 and 12 weeks against the same span before; week-to-week volatility; days the worst VA was silent (the 30 settled days) |
 | Product quality (15%) | Containment (busiest VA); containment change; days the worst VA was flagged as a drop (the 30 settled days) |
-| Adoption and depth (15%) | Share of conversations on VAs below V8; target features used; customer authoring and assistant trend; weeks since any configuration changed |
+| Adoption and depth (15%) | Share of conversations on VAs below V8; target features used; Cortex and Explorer trend; weeks since any configuration changed |
 | Relationship (15%) | Days since the last customer contact; days since the last executive meeting (Salesforce) |
 | Support (5%) | Open tickets; oldest open ticket (current only) |
 | CSM view (5%) | The CSM's rating; open churn risks in the register |

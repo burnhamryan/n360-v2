@@ -593,7 +593,7 @@ CREATE TABLE IF NOT EXISTS n360.playbook_day               -- executions per pla
 )
 ENGINE = MergeTree PARTITION BY toYYYYMM(day) ORDER BY (account, bot_id, playbook, day);
 
-CREATE TABLE IF NOT EXISTS n360.cortex_day                 -- authoring sessions per account per day
+CREATE TABLE IF NOT EXISTS n360.cortex_day                 -- Cortex (the playbook authoring tool) sessions per account per day
 (
     day                 Date,
     account             LowCardinality(String),
@@ -603,7 +603,7 @@ CREATE TABLE IF NOT EXISTS n360.cortex_day                 -- authoring sessions
 )
 ENGINE = MergeTree PARTITION BY toYYYYMM(day) ORDER BY (account, user_type, day);
 
-CREATE TABLE IF NOT EXISTS n360.explorer_day               -- analytics-assistant questions per account per day
+CREATE TABLE IF NOT EXISTS n360.explorer_day               -- Explorer (the analytics assistant) questions per account per day
 (
     day          Date,
     account      LowCardinality(String),
@@ -1186,13 +1186,15 @@ CREATE OR REPLACE VIEW n360.v_feature_use AS
 -- (no rows for that customer in the source table).
 WITH (SELECT toDate(max(window_end)) FROM n360.runs WHERE status = 'loaded') AS dt,
      src AS (
-        -- V8 playbooks, Authoring tool, Analytics assistant: the window totals the pipeline reads (feature_window, 27 Nov
+        -- V8 playbooks, Cortex, Explorer: the window totals the pipeline reads (feature_window, 27 Nov. The export
+        -- names them 'Authoring tool' and 'Analytics assistant'; shown by their product names, Cortex and Explorer.
         -- 2026), the same figures as the v1.1 Adoption view; rows with amount NULL (not read) are left out
-        SELECT account, feature, assumeNotNull(max(amount)) > 0 AS u FROM n360.feature_window
+        SELECT account, transform(feature, ['Authoring tool', 'Analytics assistant'], ['Cortex', 'Explorer'], feature) AS feature,
+               assumeNotNull(max(amount)) > 0 AS u FROM n360.feature_window
             WHERE amount IS NOT NULL GROUP BY account, feature
         UNION ALL SELECT account, 'MCP servers', sum(mcp_servers_live) > 0 FROM n360.v_va_config_latest GROUP BY account
         UNION ALL SELECT account, 'Supervisory rules', sum(supervisory_rules_on) > 0 FROM n360.v_va_config_latest GROUP BY account),
-     feats AS (SELECT arrayJoin(['V8 playbooks', 'Authoring tool', 'Analytics assistant', 'MCP servers', 'Supervisory rules']) AS feature)
+     feats AS (SELECT arrayJoin(['V8 playbooks', 'Cortex', 'Explorer', 'MCP servers', 'Supervisory rules']) AS feature)
 SELECT a.account AS account, f.feature AS feature,
        if(s.found = 1, toNullable(s.u), NULL) AS used
 FROM n360.account AS a CROSS JOIN feats AS f

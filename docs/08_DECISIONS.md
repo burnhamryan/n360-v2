@@ -17,7 +17,7 @@
 | 11 dashboards with drill-downs; Portfolio → Customer → Contract line → VA | 22 Nov 2026 |
 | Straight-line last-30-day forecast stays the forecast of record until a challenger proves better | 22 Nov 2026 |
 | Pace colour is decided in a view (`v_line_pace`), not in the dashboard builder; dashboards only map its label to a colour | 24 Nov 2026 |
-| Phase 2 tables as built: `cortex_day` = authoring sessions, `explorer_day` = analytics-assistant questions, `playbook_day` added for executions | 24 Nov 2026 |
+| Phase 2 tables as built: `cortex_day` = Cortex sessions (the authoring tool), `explorer_day` = Explorer questions (the analytics assistant), `playbook_day` added for executions | 24 Nov 2026 |
 | Top asks: "several customers" = 2 or more | 24 Nov 2026 |
 | Anomaly heatmap watch band z ±2; source freshness amber at 2 days behind, red at 3 | 24 Nov 2026 |
 | Pooled-entitlement panel shows for every customer ("No pooled entitlement") | 24 Nov 2026 |
@@ -42,7 +42,7 @@
 | Contract statuses (`v_contract_status`, values in `n360.settings`) | Below / ahead of pace ±10 points of term; too early < 30 days in; renewal risk < 50% used with ≤ 120 days left (docs/16, D2) |
 | Needs attention (`v_needs_attention`) | Over billed, will exceed, renewal risk, term ended within 90 days, or a VA with 1,000+ conversations down 25%+ (D3) |
 | Customer health flags | VA conversations down 10%+; containment down 3+ points (last 30 days against the 30 before) (D4) |
-| Target features | V8 playbooks, authoring tool, analytics assistant, MCP servers, supervisory rules; "3+" customers (D5) |
+| Target features | V8 playbooks, Cortex, Explorer, MCP servers, supervisory rules; "3+" customers (D5) |
 | Alert routing and timing | As in `05_ANOMALY_AND_FORECAST.md`; alerts paused until needed (`11_ALERTS.md`) |
 | Challenger adoption bar | Better 30-day MAPE on most lines for 8 straight weeks, plus Ryan's approval |
 

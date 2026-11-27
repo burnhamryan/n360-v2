@@ -563,7 +563,7 @@ def overview():
               GROUP BY account) AS f
         CROSS JOIN (SELECT target_features_min AS m FROM n360.settings) AS s""", 18, 3, 6, 5,
         describe('Customers using at least 3 of the 5 target features in the last 30 days: V8 playbooks run, the '
-                 'authoring tool, the analytics assistant, MCP servers live, supervisory rules on (proposed list; the '
+                 'Cortex, Explorer, MCP servers live, supervisory rules on (proposed list; the '
                  'v1.1 page also counts Testing, Calibration and Recipes, not exported yet). ' + PHASE2_NOTE,
                  'n360.v_feature_use', 'none (every customer)', 'the 30 days to the data-through day'),
         fmt='timeseries', field=plain(field_config(unit='locale', decimals=0, displayName='${__field.labels.change}')),
@@ -680,8 +680,8 @@ def customer():
     p.append(text_tile(5, 'Target features used', f"""
         SELECT if(countIf(used IS NOT NULL) = 0, NULL, concat(toString(countIf(used)), ' of ', toString(count()))) AS f
         FROM n360.v_feature_use WHERE {A}""", 12, 3, 6, 5,
-        describe('Target features this customer used in the last 30 days (proposed list: V8 playbooks, authoring tool, '
-                 'analytics assistant, MCP servers, supervisory rules). Which ones: Adoption, below. ' + PHASE2_NOTE,
+        describe('Target features this customer used in the last 30 days (proposed list: V8 playbooks, Cortex, '
+                 'Explorer, MCP servers, supervisory rules). Which ones: Adoption, below. ' + PHASE2_NOTE,
                  'n360.v_feature_use', 'Customer', 'the 30 days to the data-through day')))
     p.append(text_tile(6, 'Open tickets', f"""
         SELECT if((SELECT count() FROM n360.ps_ticket) = 0, NULL,
@@ -1961,7 +1961,7 @@ def adoption():
                             width('Channel', 70), width('VA', 160), width('Customer', 130), width('Last 30 days', 95),
                             width('30 before', 85), with_links('VA', path_link('drill', 'Open VA'))]),
         options={'cellHeight': 'sm'}))
-    feats = ['V8 playbooks', 'Authoring tool', 'Analytics assistant', 'MCP servers', 'Supervisory rules']
+    feats = ['V8 playbooks', 'Cortex', 'Explorer', 'MCP servers', 'Supervisory rules']
     cols5 = ',\n               '.join(f"anyIf(if(f.used IS NULL, NULL, if(f.used, 'Used', 'Not used')), f.feature = '{x}') AS `{x}`"
                                      for x in feats)
     p.append(panel(20, 'Target features used (the risk model\'s list)', 'table', f"""
